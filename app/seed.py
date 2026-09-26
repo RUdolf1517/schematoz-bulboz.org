@@ -1,0 +1,91 @@
+"""Стартовые данные: права, роли, юр. страницы, комнаты. Идемпотентно."""
+from __future__ import annotations
+
+from sqlalchemy import select
+
+from .db import session_scope
+from .models import Category, LegalPage, LegalPageVersion, Permission, Role, Room
+from .permissions import ALL_PERMS, ROLES
+
+LEGAL = {
+    "rules": ("Правила сообщества", True, """
+## Коротко
+Задавай вопросы, отвечай по делу, спорь красиво. Не будь тем самым человеком.
+
+## Нельзя
+- травля, оскорбления, угрозы;
+- деанон и публикация чужих персональных данных;
+- NSFW, пропаганда наркотиков, призывы к самоповреждению;
+- спам, накрутка репутации, реклама без пометки.
+
+## Система банов
+Предупреждение → 24 часа → 7 дней → 30 дней → перманент.
+Модератор может заблокировать максимум на 30 дней, перманент — только администратор.
+
+## Апелляции
+Не согласен с баном — нажми «Обжаловать» в уведомлении. Апелляцию рассматривает
+другой модератор или администратор, а не тот, кто выдал бан.
+"""),
+    "terms": ("Пользовательское соглашение", True, """
+Настоящее соглашение регулирует использование сайта schematoz-bulboz.org.
+Оператор сервиса — ООО «СукИнЭндСын». Регистрация доступна с 14 лет.
+
+*Черновик. Финальную редакцию готовит юрист и публикует администратор.*
+"""),
+    "privacy": ("Политика конфиденциальности", True, """
+Обработка персональных данных осуществляется в соответствии с 152-ФЗ.
+Данные хранятся на серверах на территории РФ.
+
+*Черновик. Финальную редакцию готовит юрист и публикует администратор.*
+"""),
+    "requisites": ("Реквизиты", False, """
+**Оператор сервиса:** ООО «СукИнЭндСын»
+
+| | |
+|---|---|
+| ИНН | — |
+| ОГРН | — |
+| Юридический адрес | — |
+| E-mail | — |
+"""),
+}
+
+ROOMS = [
+    ("ege-math", "ЕГЭ Математика", "study"), ("ege-physics", "ЕГЭ Физика", "study"),
+    ("ege-russian", "ЕГЭ Русский", "study"), ("first-year", "Первый курс", "study"),
+    ("genshin", "Genshin Impact", "games"), ("dota", "Dota 2", "games"),
+    ("relationships", "Отношения", "life"), ("golden-fund", "Золотой фонд", "fun"),
+]
+CATEGORIES = [("study", "Учёба"), ("games", "Игры"), ("life", "Жизнь"), ("fun", "Угар")]
+
+
+async def seed() -> None:
+    async with session_scope() as s:
+        perms = {p.code: p for p in (await s.scalars(select(Permission))).all()}
+        for code in sorted(ALL_PERMS - perms.keys()):
+            perms[code] = Permission(code=code)
+            s.add(perms[code])
+        await s.flush()
+        for code, (title, role_perms) in ROLES.items():
+            role = await s.scalar(select(Role).where(Role.code == code))
+            if role is None:
+                role = Role(code=code, title=title)
+                s.add(role)
+            role.permissions = [perms[p] for p in sorted(role_perms)]
+        for slug, (title, consent, body) in LEGAL.items():
+            if await s.scalar(select(LegalPage.id).where(LegalPage.slug == slug)) is None:
+                page = LegalPage(slug=slug, title=title, current_version=1, requires_consent=consent)
+                s.add(page)
+                await s.flush()
+                s.add(LegalPageVersion(page_id=page.id, version=1, body_md=body.strip()))
+        cats = {}
+        for slug, title in CATEGORIES:
+            c = await s.scalar(select(Category).where(Category.slug == slug))
+            if c is None:
+                c = Category(slug=slug, title=title)
+                s.add(c)
+                await s.flush()
+            cats[slug] = c
+        for slug, title, cat in ROOMS:
+            if await s.scalar(select(Room.id).where(Room.slug == slug)) is None:
+                s.add(Room(slug=slug, title=title, category_id=cats[cat].id, is_official=True))

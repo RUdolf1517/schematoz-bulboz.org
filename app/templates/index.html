@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="feed" id="feed"><p class="empty">Грузим ленту…</p></section>
+<script>
+(async () => {
+  const el = document.getElementById('feed');
+  const res = await fetch('/api/feed');
+  const { items } = await res.json();
+  if (!items.length) { el.innerHTML = '<p class="empty">Пока пусто. Задай первый вопрос!</p>'; return; }
+  el.innerHTML = '';
+  for (const q of items) {
+    const card = document.createElement('article');
+    card.className = 'card';
+    const a = q.top_answer;
+    card.innerHTML = `
+      <div class="kind">${q.kind}</div>
+      <h2></h2>
+      <div class="answer">${a ? '' : '<em>Ответов пока нет — будь первым</em>'}</div>
+      <div class="meta">${q.answers_count} ответ(ов)</div>`;
+    card.querySelector('h2').textContent = q.title;
+    if (a) {
+      const p = document.createElement('p');
+      p.textContent = (a.is_best ? '🔥 Схема: ' : '') + (a.content.body || '');
+      card.querySelector('.answer').appendChild(p);
+    }
+    el.appendChild(card);
+  }
+})();
+</script>
+{% endblock %}

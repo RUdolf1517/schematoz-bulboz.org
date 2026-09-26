@@ -1,0 +1,163 @@
+"""Модераторская панель (JSON API): /mod/*"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+from flask import Blueprint, g, request
+from sqlalchemy import select
+
+from ..auth.rbac import require_perm
+from ..auth.sessions import revoke_all_sessions
+from ..db import session_scope
+from ..errors import ApiError
+from ..models import (
+    Answer, Ban, BanScope, ContentStatus, ModAction, Question, Report, ReportStatus, User,
+)
+from ..services.modlog import log_action
+from ..api.utils import json_body
+
+bp = Blueprint("mod", __name__, url_prefix="/mod")
+
+CONTENT = {"question": Question, "answer": Answer}
+MAX_MOD_BAN_DAYS = 30
+
+
+def _report_out(r: Report) -> dict:
+    return {"id": r.id, "target_type": r.target_type.value, "target_id": r.target_id,
+            "reason": r.reason.value, "comment": r.comment, "status": r.status.value,
+            "priority": r.priority, "reporter_id": r.reporter_id,
+            "created_at": r.created_at.isoformat()}
+
+
+@bp.get("/reports")
+@require_perm("report.review")
+async def queue():
+    status = request.args.get("status", "open")
+    async with session_scope() as s:
+        rows = (await s.scalars(
+            select(Report).where(Report.status == ReportStatus(status))
+            .order_by(Report.priority.desc(), Report.created_at).limit(50)
+        )).all()
+    return {"items": [_report_out(r) for r in rows]}
+
+
+@bp.post("/reports/<int:rid>/resolve")
+@require_perm("report.review")
+async def resolve(rid: int):
+    """decision: 'reject' (нарушений нет) | 'hide' (скрыть контент, на который жалоба)."""
+    decision = json_body().get("decision")
+    if decision not in {"reject", "hide"}:
+        raise ApiError("decision: reject | hide", 400, "validation_error")
+    async with session_scope() as s:
+        r = await s.get(Report, rid, with_for_update=True)
+        if r is None:
+            raise ApiError("Жалоба не найдена", 404, "not_found")
+        if r.status in (ReportStatus.RESOLVED, ReportStatus.REJECTED):
+            raise ApiError("Жалоба уже закрыта", 409, "already_closed")
+        if decision == "hide":
+            if "content.hide" not in g.perms:
+                raise ApiError("Недостаточно прав", 403, "forbidden")
+            model = CONTENT.get(r.target_type.value)
+            if model is None:
+                raise ApiError("На пользователя — используй бан", 400, "use_ban")
+            obj = await s.get(model, r.target_id)
+            if obj is not None:
+                obj.status = ContentStatus.HIDDEN
+                log_action(s, g.user.id, "content.hide", r.target_type.value, r.target_id, report_id=rid)
+        # все открытые жалобы на ту же цель закрываем одним решением
+        same = (await s.scalars(select(Report).where(
+            Report.target_type == r.target_type, Report.target_id == r.target_id,
+            Report.status.in_([ReportStatus.OPEN, ReportStatus.IN_REVIEW])))).all()
+        now = datetime.now(timezone.utc)
+        for rep in same:
+            rep.status = ReportStatus.RESOLVED if decision == "hide" else ReportStatus.REJECTED
+            rep.resolved_by, rep.resolved_at = g.user.id, now
+        log_action(s, g.user.id, f"report.{decision}", "report", rid, closed=[x.id for x in same])
+    return {"ok": True, "closed": len(same)}
+
+
+async def _set_status(kind: str, cid: int, status: ContentStatus, action: str):
+    model = CONTENT.get(kind)
+    if model is None:
+        raise ApiError("kind: question | answer", 400, "validation_error")
+    async with session_scope() as s:
+        obj = await s.get(model, cid, with_for_update=True)
+        if obj is None:
+            raise ApiError("Не найдено", 404, "not_found")
+        obj.status = status
+        log_action(s, g.user.id, action, kind, cid,
+                   reason=(request.get_json(silent=True) or {}).get("reason"))
+    return {"ok": True, "status": status.value}
+
+
+@bp.post("/content/<kind>/<int:cid>/hide")
+@require_perm("content.hide")
+async def hide(kind: str, cid: int):
+    return await _set_status(kind, cid, ContentStatus.HIDDEN, "content.hide")
+
+
+@bp.post("/content/<kind>/<int:cid>/restore")
+@require_perm("content.restore")
+async def restore(kind: str, cid: int):
+    return await _set_status(kind, cid, ContentStatus.ACTIVE, "content.restore")
+
+
+@bp.post("/bans")
+@require_perm("ban.temporary")
+async def ban():
+    """{user_id, reason, days (1..30 | null = перманент, только admin), report_id?}"""
+    data = json_body()
+    user_id, reason, days = data.get("user_id"), (data.get("reason") or "").strip(), data.get("days")
+    if not isinstance(user_id, int) or not reason:
+        raise ApiError("user_id и reason обязательны", 400, "validation_error")
+    if days is None:
+        if "ban.permanent" not in g.perms:
+            raise ApiError("Перманентный бан — только администратор", 403, "forbidden")
+        ends_at = None
+    else:
+        if not isinstance(days, int) or days < 1:
+            raise ApiError("days — целое ≥ 1", 400, "validation_error")
+        if days > MAX_MOD_BAN_DAYS and "ban.permanent" not in g.perms:
+            raise ApiError(f"Модератор может банить максимум на {MAX_MOD_BAN_DAYS} дней", 403, "forbidden")
+        ends_at = datetime.now(timezone.utc) + timedelta(days=days)
+    if user_id == g.user.id:
+        raise ApiError("Себя банить нельзя", 400, "self_ban")
+    async with session_scope() as s:
+        if await s.get(User, user_id) is None:
+            raise ApiError("Пользователь не найден", 404, "not_found")
+        b = Ban(user_id=user_id, issued_by=g.user.id, reason=reason, scope=BanScope.GLOBAL,
+                ends_at=ends_at, report_id=data.get("report_id"))
+        s.add(b)
+        await s.flush()
+        log_action(s, g.user.id, "ban.issue", "user", user_id, ban_id=b.id, days=days, reason=reason)
+        ban_id = b.id
+    revoke_all_sessions(user_id)
+    return {"ban_id": ban_id, "ends_at": ends_at.isoformat() if ends_at else None}, 201
+
+
+@bp.post("/bans/<int:ban_id>/lift")
+@require_perm("ban.temporary")
+async def lift(ban_id: int):
+    async with session_scope() as s:
+        b = await s.get(Ban, ban_id, with_for_update=True)
+        if b is None or b.lifted_at is not None:
+            raise ApiError("Бан не найден или уже снят", 404, "not_found")
+        if b.issued_by != g.user.id and "ban.lift_any" not in g.perms:
+            raise ApiError("Снять чужой бан может только администратор", 403, "forbidden")
+        b.lifted_by, b.lifted_at = g.user.id, datetime.now(timezone.utc)
+        log_action(s, g.user.id, "ban.lift", "user", b.user_id, ban_id=ban_id)
+    return {"ok": True}
+
+
+def modlog_out(a: ModAction) -> dict:
+    return {"id": a.id, "actor_id": a.actor_id, "action": a.action, "target_type": a.target_type,
+            "target_id": a.target_id, "payload": a.payload, "created_at": a.created_at.isoformat()}
+
+
+@bp.get("/log")
+@require_perm("modlog.read_own")
+async def own_log():
+    async with session_scope() as s:
+        rows = (await s.scalars(select(ModAction).where(ModAction.actor_id == g.user.id)
+                                .order_by(ModAction.id.desc()).limit(100))).all()
+    return {"items": [modlog_out(a) for a in rows]}
