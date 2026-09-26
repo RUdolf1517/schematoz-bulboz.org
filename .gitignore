@@ -5,3 +5,4 @@ __pycache__/
 .pytest_cache/
 .pgdata/
 *.egg-info/
+var/

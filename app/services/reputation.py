@@ -19,7 +19,6 @@ from ..errors import ApiError
 from ..models import Answer, ContentStatus, Question, RepReason, ReputationEvent, User, Vote
 from .gamification import on_scheme
 from .notifications import notify
-from .ranking import hot_score
 
 AUTHOR_VALUES = frozenset({5, -1})
 USER_VALUES = frozenset({1, -1})
@@ -70,12 +69,12 @@ async def _load(s: AsyncSession, answer_id: int) -> tuple[Answer, Question]:
     return answer, question
 
 
-async def _refresh_question(s: AsyncSession, question: Question) -> None:
-    rows = (await s.execute(
-        select(Answer.score).where(Answer.question_id == question.id,
-                                   Answer.status == ContentStatus.ACTIVE)
-    )).scalars().all()
-    question.score_hot = hot_score(sum(rows), len(rows), question.created_at)
+async def _refresh_question(s: AsyncSession, question: Question, answer: Answer | None = None) -> None:
+    from .rating import recompute_user, refresh_question
+    await s.flush()
+    if answer is not None:
+        await recompute_user(s, answer.author_id)
+    await refresh_question(s, question)
 
 
 async def cast_vote(s: AsyncSession, voter: User, answer_id: int, value: int) -> dict:
@@ -131,7 +130,7 @@ async def cast_vote(s: AsyncSession, voter: User, answer_id: int, value: int) ->
         elif question.best_answer_id == answer.id:
             question.best_answer_id = None
 
-    await _refresh_question(s, question)
+    await _refresh_question(s, question, answer)
     return {**_vote_result(answer, question, value), "author_new_badges": new_badges}
 
 
@@ -148,7 +147,7 @@ async def remove_vote(s: AsyncSession, voter: User, answer_id: int) -> dict:
     if existing.is_author_vote and question.best_answer_id == answer.id:
         question.best_answer_id = None
     await s.delete(existing)
-    await _refresh_question(s, question)
+    await _refresh_question(s, question, answer)
     return _vote_result(answer, question, None)
 
 

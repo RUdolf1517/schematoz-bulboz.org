@@ -13,6 +13,8 @@ const answersWord = (n) => `${n} ${plural(n, "ответ", "ответа", "от
 const fmtDate = (iso) => new Date(iso).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 const signed = (n) => (n > 0 ? `+${n}` : `${n}`);
 const initial = (name) => esc((name || "?")[0].toUpperCase());
+// markdown → простой текст для превью в ленте
+const mdPlain = (t) => String(t || "").replace(/!\[[^\]]*\]\([^)]*\)/g, "🖼").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`#>~]+/g, "").trim();
 const here = () => location.pathname + location.search;
 
 let toastTimer;
@@ -108,9 +110,66 @@ const perm = (p) => !!ME && ME.permissions.includes(p);
 const requireLogin = () => { if (!ME) { location.href = `/login?next=${encodeURIComponent(here())}`; return false; } return true; };
 
 // ---------------------------------------------------------------- shared UI pieces
+function ratingChip(u) {
+  if (!u || u.rating_display == null) return "";
+  const cls = u.rating_tier === 2 ? "tier-admin" : u.rating_tier === 1 ? "tier-mod" : "";
+  const title = u.rating_tier === 2 ? "Админ: рейтинг бесконечный" : u.rating_tier === 1 ? "Модератор: рейтинг бесконечный (ниже админа)" : "Рейтинг пользователя";
+  return `<span class="urating ${cls}" title="${title}">★${esc(u.rating_display)}</span>`;
+}
+
 function userLink(u) {
   if (!u) return "";
-  return `<a href="/u/${encodeURIComponent(u.username)}"><span class="avatar">${initial(u.username)}</span>@${esc(u.username)}</a>`;
+  return `<a href="/u/${encodeURIComponent(u.username)}"><span class="avatar">${initial(u.username)}</span>@${esc(u.username)}</a>${ratingChip(u)}`;
+}
+
+// ---------------------------------------------------------------- картинки и markdown
+async function uploadImage(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch("/api/uploads", { method: "POST", body: fd, credentials: "same-origin" });
+  let data = {};
+  try { data = await res.json(); } catch (_) {}
+  if (!res.ok) { toast(data.message || "Не удалось загрузить картинку", true); throw new ApiError(res.status, data); }
+  return data;
+}
+
+function insertAtCursor(ta, text) {
+  const start = ta.selectionStart ?? ta.value.length, end = ta.selectionEnd ?? ta.value.length;
+  ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
+  ta.selectionStart = ta.selectionEnd = start + text.length;
+  ta.dispatchEvent(new Event("input"));
+  ta.focus();
+}
+
+function wrapSelection(ta, before, after = before) {
+  const s0 = ta.selectionStart ?? 0, e0 = ta.selectionEnd ?? 0;
+  const sel = ta.value.slice(s0, e0) || "текст";
+  insertAtCursor(ta, before + sel + after);
+}
+
+// Панель над textarea: жирный, курсив, код, ссылка, картинка. Вставка картинки из буфера — тоже.
+function mdToolbar(ta) {
+  if (!ta || ta.dataset.mdReady) return;
+  ta.dataset.mdReady = "1";
+  const bar = document.createElement("div");
+  bar.className = "md-toolbar";
+  bar.innerHTML = `<button type="button" data-md="b" title="Жирный"><b>B</b></button><button type="button" data-md="i" title="Курсив"><i>I</i></button><button type="button" data-md="code" title="Код">&lt;/&gt;</button><button type="button" data-md="link" title="Ссылка">🔗</button><label class="md-img" title="Картинка">📷<input type="file" accept="image/*" hidden></label><span class="md-hint">markdown</span>`;
+  ta.parentNode.insertBefore(bar, ta);
+  bar.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-md]");
+    if (!b) return;
+    ({ b: () => wrapSelection(ta, "**"), i: () => wrapSelection(ta, "_"), code: () => wrapSelection(ta, "`"),
+       link: () => wrapSelection(ta, "[", "](https://)") })[b.dataset.md]();
+  });
+  const put = async (file) => {
+    try { const r = await uploadImage(file); insertAtCursor(ta, (ta.value && !ta.value.endsWith("\n") ? "\n" : "") + r.markdown + "\n"); } catch (_) {}
+  };
+  const fileIn = $("input[type=file]", bar);
+  fileIn.onchange = () => { if (fileIn.files[0]) put(fileIn.files[0]); fileIn.value = ""; };
+  ta.addEventListener("paste", (e) => {
+    const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith("image/"));
+    if (f) { e.preventDefault(); put(f); }
+  });
 }
 
 function newBadgesToast(codes) {
@@ -156,10 +215,12 @@ function feedCard(q) {
   if (a) {
     const tag = a.is_best ? `<span class="scheme-badge">🔥 Схема</span>` : `<span class="muted">Лучший ответ</span>`;
     const side = a.debate_side && q.debate ? ` <span class="side-badge side-${a.debate_side}">${esc(q.debate[a.debate_side])}</span>` : "";
-    preview = `<div class="answer-preview">${tag}${side} <span class="muted">· @${esc(a.author?.username)} · ${signed(a.score)}</span><p>${esc(a.content.body)}</p></div>`;
+    preview = `<div class="answer-preview">${tag}${side} <span class="muted">· @${esc(a.author?.username)} · ${signed(a.score)}</span><p>${esc(mdPlain(a.content.body))}</p></div>`;
   }
-  return `<article class="card" data-href="/q/${q.id}" tabindex="-1">
-    <div><span class="kind">${KIND[q.kind] || esc(q.kind)}</span>${room}</div>
+  const cover = q.cover_url ? `<img class="card-cover" src="${esc(q.cover_url)}" alt="" loading="lazy">` : "";
+  return `<article class="card ${q.cover_url ? "has-cover" : ""}" data-href="/q/${q.id}" tabindex="-1">
+    <div><span class="kind">${KIND[q.kind] || esc(q.kind)}</span>${room}<span class="q-rating" title="Рейтинг вопроса: голоса + ответы + комментарии">★ ${esc(q.rating)}</span></div>
+    ${cover}
     <h2>${esc(q.title)}</h2>
     ${preview}
     <div class="meta-row"><span>${answersWord(q.answers_count)}</span><span>@${esc(q.author?.username)}</span><span class="open-hint">Открыть →</span></div>
@@ -168,7 +229,8 @@ function feedCard(q) {
 
 function initFeed(extraParams = {}) {
   const feed = $("#feed");
-  let tab = "hot", offset = 0, loading = false, done = false;
+  let tab = $("#feed-tabs")?.dataset.preset || "hot", offset = 0, loading = false, done = false;
+  $$("#feed-tabs button").forEach((x) => x.classList.toggle("active", x.dataset.tab === tab));
 
   async function load(reset = false) {
     if (loading || (done && !reset)) return;
@@ -243,17 +305,39 @@ async function pageQuestion() {
             <button class="btn btn-sm vote ${a.my_vote === -1 ? "on-down" : ""}" data-vote="-1" aria-label="Минус">▼ −1</button>`;
   }
 
+  function commentsHtml(a) {
+    const items = a.comments.map((c) => {
+      const mine = ME && ME.user.id === c.author_id;
+      return `<li class="comment" data-cid="${c.id}"><div class="md">${c.body_html}</div>
+        <div class="c-meta">${userLink(c.author)} · ${esc(fmtDate(c.created_at))}${c.edited_at ? " · изменено" : ""}
+          ${mine ? `<button class="link-btn" data-c-edit="${c.id}">изменить</button><button class="link-btn" data-c-del="${c.id}">удалить</button>` : ""}
+          ${ME && !mine ? `<button class="link-btn" data-c-report="${c.id}">пожаловаться</button>` : ""}
+          ${perm("content.hide") ? `<button class="link-btn" data-c-hide="${c.id}">скрыть</button>` : ""}</div></li>`;
+    }).join("");
+    const form = ME && !ME.ban ? `<form class="comment-form" data-aid="${a.id}"><textarea name="body" maxlength="200" rows="1" required placeholder="Комментарий (до 200 символов, markdown)"></textarea><span class="c-count">0/200</span><button class="btn btn-sm">➤</button></form>` : "";
+    return `<div class="comments">${items ? `<ul>${items}</ul>` : ""}${form}</div>`;
+  }
+
+  function qVoteHtml(q) {
+    const can = ME && ME.user.id !== q.author_id;
+    if (!can) return `<div class="q-vote"><span class="score" title="Рейтинг вопроса">★ ${esc(q.rating)}</span><small>${signed(q.votes_score)} голосов</small></div>`;
+    return `<div class="q-vote"><button class="btn btn-sm ${q.my_vote === 1 ? "on-up" : ""}" data-qvote="1" aria-label="Поднять вопрос">▲</button>
+      <span class="score" title="Рейтинг вопроса: голоса + 2×ответы + 0.5×комментарии">★ ${esc(q.rating)}</span>
+      <button class="btn btn-sm ${q.my_vote === -1 ? "on-down" : ""}" data-qvote="-1" aria-label="Опустить вопрос">▼</button></div>`;
+  }
+
   function answerHtml(a) {
     const q = data.question;
     const side = a.debate_side && q.debate ? `<span class="side-badge side-${a.debate_side}">${esc(q.debate[a.debate_side])}</span>` : "";
     const modBtn = perm("content.hide") ? `<button class="link-btn" data-hide="${a.id}">Скрыть</button>` : "";
     return `<div class="answer ${a.is_best ? "best" : ""}" id="a${a.id}" data-aid="${a.id}">
       <div class="byline">${userLink(a.author)} ${a.is_best ? `<span class="scheme-badge">🔥 Схема</span>` : ""} ${side} <span>· ${esc(fmtDate(a.created_at))}</span></div>
-      <div class="text">${esc(a.content.body)}</div>${a.edited_at ? `<div class="edited">изменено ${esc(fmtDate(a.edited_at))}</div>` : ""}
+      <div class="text md">${a.body_html}</div>${a.edited_at ? `<div class="edited">изменено ${esc(fmtDate(a.edited_at))}</div>` : ""}
       <div class="actions">${voteButtons(a)}<span class="spacer"></span>
         ${ME && ME.user.id === a.author_id ? `<button class="link-btn" data-edit-a="${a.id}">Изменить</button><button class="link-btn" data-del-a="${a.id}">Удалить</button>` : ""}
         <button class="link-btn" data-share="${a.id}">📤 В сторис</button>
         <button class="link-btn" data-report="${a.id}">Пожаловаться</button>${modBtn}</div>
+      ${commentsHtml(a)}
     </div>`;
   }
 
@@ -289,9 +373,10 @@ async function pageQuestion() {
     const qMod = perm("content.hide") ? `<button class="link-btn" data-hide-q="${q.id}">Скрыть вопрос</button>` : "";
     root.innerHTML = `
       <div class="panel q-head">
-        <span class="kind">${KIND[q.kind] || esc(q.kind)}</span>
+        ${q.cover_url ? `<img class="q-cover" src="${esc(q.cover_url)}" alt="">` : ""}
+        <div class="q-top"><span class="kind">${KIND[q.kind] || esc(q.kind)}</span>${qVoteHtml(q)}</div>
         <h1>${esc(q.title)}</h1>
-        ${q.body ? `<div class="body">${esc(q.body)}</div>` : ""}${q.edited_at ? `<div class="edited">изменено ${esc(fmtDate(q.edited_at))}</div>` : ""}
+        ${q.body ? `<div class="body md">${q.body_html}</div>` : ""}${q.edited_at ? `<div class="edited">изменено ${esc(fmtDate(q.edited_at))}</div>` : ""}
         <div class="byline">${userLink(q.author)} <span>· ${esc(fmtDate(q.created_at))}</span>${room}<span class="spacer" style="flex:1"></span>
           ${data.you_are_author ? `<button class="link-btn" data-edit-q>Изменить</button><button class="link-btn" data-del-q>Удалить</button>` : ""}
           <button class="link-btn" data-report-q="${q.id}">Пожаловаться</button>${qMod}</div>
@@ -324,10 +409,51 @@ async function pageQuestion() {
       if (!requireLogin()) return;
       try { await api("PUT", `/api/questions/${qid}/debate-vote`, { side: btn.dataset.side }); await reload(); } catch (_) {}
     }));
+    $$("[data-qvote]", root).forEach((b) => (b.onclick = async () => {
+      if (!requireLogin()) return;
+      const v = Number(b.dataset.qvote);
+      try {
+        if (data.question.my_vote === v) await api("DELETE", `/api/questions/${qid}/vote`);
+        else await api("PUT", `/api/questions/${qid}/vote`, { value: v });
+        await reload();
+      } catch (_) {}
+    }));
+    $$(".comment-form", root).forEach((f) => {
+      const ta = f.elements.body;
+      mdToolbar(ta);
+      ta.oninput = () => { $(".c-count", f).textContent = `${ta.value.length}/200`; ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
+      ta.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); f.requestSubmit ? f.requestSubmit() : f.dispatchEvent(new Event("submit", { cancelable: true })); } };
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        if (!ta.value.trim()) return;
+        try { await api("POST", `/api/answers/${f.dataset.aid}/comments`, { body: ta.value }); await reload(); } catch (_) {}
+      };
+    });
+    const findComment = (cid) => data.answers.flatMap((a) => a.comments).find((c) => c.id === cid);
+    $$("[data-c-edit]", root).forEach((b) => (b.onclick = () => {
+      const c = findComment(Number(b.dataset.cEdit));
+      const m = modal(`<h2>Изменить комментарий</h2><form class="form edit-box" id="edit-form"><textarea class="input" name="body" rows="3" maxlength="200" required>${esc(c.body)}</textarea>
+        <div class="row"><button type="button" class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-accent">Сохранить</button></div></form>`);
+      mdToolbar($("textarea", m.el));
+      $("#edit-form", m.el).onsubmit = async (e) => {
+        e.preventDefault();
+        try { await api("PATCH", `/api/comments/${c.id}`, { body: e.target.elements.body.value }); m.close(); await reload(); } catch (_) {}
+      };
+    }));
+    $$("[data-c-del]", root).forEach((b) => (b.onclick = async () => {
+      if (!confirm("Удалить комментарий?")) return;
+      try { await api("DELETE", `/api/comments/${b.dataset.cDel}`); await reload(); } catch (_) {}
+    }));
+    $$("[data-c-report]", root).forEach((b) => (b.onclick = () => reportDialog("comment", Number(b.dataset.cReport))));
+    $$("[data-c-hide]", root).forEach((b) => (b.onclick = async () => {
+      if (!confirm("Скрыть комментарий?")) return;
+      try { await api("POST", `/mod/content/comment/${b.dataset.cHide}/hide`, {}); toast("Комментарий скрыт"); await reload(); } catch (_) {}
+    }));
     $$("[data-edit-a]", root).forEach((b) => (b.onclick = () => {
       const aid = Number(b.dataset.editA), a = data.answers.find((x) => x.id === aid);
       const m = modal(`<h2>Изменить ответ</h2><form class="form edit-box" id="edit-form"><textarea class="input" name="body" rows="6" maxlength="5000" required>${esc(a.content.body)}</textarea>
         <div class="row"><button type="button" class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-accent">Сохранить</button></div></form>`);
+      mdToolbar($("textarea", m.el));
       $("#edit-form", m.el).onsubmit = async (e) => {
         e.preventDefault();
         try { await api("PATCH", `/api/answers/${aid}`, { body: e.target.elements.body.value }); m.close(); toast("Сохранено"); await reload(); } catch (_) {}
@@ -344,6 +470,7 @@ async function pageQuestion() {
         ${locked ? `<p class="muted" style="font-size:13px">На вопрос уже ответили — заголовок менять нельзя, но можно дополнить подробности.</p>` : ""}
         <label>Подробности<textarea class="input" name="body" rows="5" maxlength="5000">${esc(q.body || "")}</textarea></label>
         <div class="row"><button type="button" class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-accent">Сохранить</button></div></form>`);
+      mdToolbar($("textarea[name=body]", m.el));
       $("#edit-form", m.el).onsubmit = async (e) => {
         e.preventDefault();
         const el = e.target.elements, body = { body: el.body.value };
@@ -369,6 +496,7 @@ async function pageQuestion() {
     const form = $("#answer-form", root);
     if (form) {
       const ta = $("textarea", form);
+      mdToolbar(ta);
       ta.oninput = () => ($("#ans-count").textContent = `${ta.value.length}/5000`);
       form.onsubmit = async (e) => {
         e.preventDefault();
@@ -396,6 +524,19 @@ async function pageAsk() {
   const kind = form.elements.kind, title = form.elements.title, roomSel = form.elements.room_id;
   const params = new URLSearchParams(location.search);
   kind.onchange = () => ($(".debate-fields", form).hidden = kind.value !== "debate");
+  if (perm("debate.create")) { const o = $("#debate-opt"); o.hidden = false; o.disabled = false; }
+  mdToolbar(form.elements.body);
+  let coverUrl = null;
+  const coverIn = $("#cover-input"), prev = $("#cover-preview");
+  coverIn.onchange = async () => {
+    const file = coverIn.files[0]; coverIn.value = "";
+    if (!file) return;
+    try {
+      const r = await uploadImage(file);
+      coverUrl = r.url; $("img", prev).src = r.url; prev.hidden = false; $("#cover-pick").hidden = true;
+    } catch (_) {}
+  };
+  $("#cover-remove").onclick = () => { coverUrl = null; prev.hidden = true; $("#cover-pick").hidden = false; };
   title.oninput = () => ($('.counter[data-for="title"]').textContent = `${title.value.length}/300`);
   const { items } = await api("GET", "/api/rooms");
   roomSel.insertAdjacentHTML("beforeend", items.map((r) => `<option value="${r.id}">${esc(r.title)}</option>`).join(""));
@@ -403,7 +544,7 @@ async function pageAsk() {
   form.onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(form);
-    const body = { kind: f.get("kind"), title: f.get("title"), body: f.get("body") || null, room_id: f.get("room_id") ? Number(f.get("room_id")) : null };
+    const body = { kind: f.get("kind"), title: f.get("title"), body: f.get("body") || null, room_id: f.get("room_id") ? Number(f.get("room_id")) : null, cover_url: coverUrl };
     if (body.kind === "debate") { body.side_a = f.get("side_a") || null; body.side_b = f.get("side_b") || null; }
     try {
       const r = await api("POST", "/api/questions", body);
@@ -475,6 +616,7 @@ async function pageProfile() {
         <div><h1>@${esc(u.username)}</h1><div class="level">Уровень ${u.level} · ${esc(u.level_name)}</div>${u.bio ? `<div class="muted">${esc(u.bio)}</div>` : ""}</div></div>
       <div class="stats">
         <div class="stat"><b>🔥 ${u.streak_days}</b><span>дней стрик</span></div>
+        <div class="stat" title="${u.rating_tier ? "У админов и модераторов рейтинг бесконечный" : "Бульбоз-индекс: активность, ответы, их оценки, «Схемы», вопросы и комментарии"}"><b>★ ${esc(u.rating_display)}</b><span>рейтинг${u.rating_tier === 2 ? " · админ" : u.rating_tier === 1 ? " · модер" : ""}</span></div>
         <div class="stat"><b>${u.reputation}</b><span>репутация</span></div>
         <div class="stat"><b>${d.stats.schemes}</b><span>схем</span></div>
         <div class="stat"><b>${d.stats.answers}</b><span>ответов</span></div>
@@ -832,6 +974,7 @@ const NOTIF = {
   answer: (p) => ["💬", `@${esc(p.username)} ответил(а) на твой вопрос «${esc(p.question_title)}»`, `/q/${p.question_id}#a${p.answer_id}`],
   scheme: (p) => ["🔥", `Твой ответ стал «Схемой» в вопросе «${esc(p.question_title)}» (+5)`, `/q/${p.question_id}#a${p.answer_id}`],
   badge: (p) => [esc(p.emoji || "🏅"), `Новый бейдж: ${esc(p.title)}`, ME ? `/u/${encodeURIComponent(ME.user.username)}` : "#"],
+  comment: (p) => ["💭", `@${esc(p.username)} прокомментировал(а) твой ответ в «${esc(p.question_title)}»`, `/q/${p.question_id}#a${p.answer_id}`],
   follow: (p) => ["👋", `@${esc(p.username)} подписался(ась) на тебя`, `/u/${encodeURIComponent(p.username)}`],
   ban: (p) => ["⛔", `Аккаунт заблокирован. Причина: ${esc(p.reason || "—")}`, "/banned"],
   appeal: (p) => ["⚖️", p.decision === "accept" || p.decision === "approve" ? "Апелляцию приняли — блокировка снята" : `Апелляцию отклонили${p.comment ? ": " + esc(p.comment) : ""}`, "/banned"],

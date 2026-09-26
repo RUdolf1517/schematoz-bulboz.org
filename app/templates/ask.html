@@ -7,7 +7,7 @@
       <option value="opinion">💬 Мнение — что думаете?</option>
       <option value="knowledge">📚 Знания — нужен точный ответ</option>
       <option value="story">📖 История — поделитесь опытом</option>
-      <option value="debate">⚔️ Холивар — две стороны</option>
+      <option value="debate" id="debate-opt" hidden disabled>⚔️ Холивар — две стороны (модеры и админы)</option>
     </select>
   </label>
   <label>Вопрос <span class="counter" data-for="title">0/300</span>
@@ -17,8 +17,13 @@
     <label>Сторона A <input name="side_a" maxlength="80" placeholder="За"></label>
     <label>Сторона B <input name="side_b" maxlength="80" placeholder="Против"></label>
   </div>
-  <label>Подробности (необязательно)
-    <textarea name="body" rows="4" maxlength="5000"></textarea>
+  <div class="cover-field">
+    <span>Обложка (необязательно)</span>
+    <div class="cover-preview" id="cover-preview" hidden><img alt="Обложка"><button type="button" class="btn btn-sm btn-ghost" id="cover-remove">Убрать</button></div>
+    <label class="btn btn-sm btn-ghost" id="cover-pick">🖼 Выбрать обложку<input type="file" accept="image/*" hidden id="cover-input"></label>
+  </div>
+  <label>Подробности (необязательно, поддерживается markdown и картинки)
+    <textarea name="body" rows="6" maxlength="5000" data-md></textarea>
   </label>
   <label>Комната
     <select name="room_id"><option value="">Общая лента</option></select>

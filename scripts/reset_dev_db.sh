@@ -11,3 +11,4 @@ PYEOF
 $PY -m alembic upgrade head
 $PY -m flask --app app seed
 $PY scripts/demo_data.py
+$PY -m flask --app app recompute-ratings

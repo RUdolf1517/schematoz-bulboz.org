@@ -1,6 +1,6 @@
 from .base import Base
 from .content import (
-    Answer, AnswerMedia, Category, DebateVote, Follow, Question, ReputationEvent, Room,
+    Answer, AnswerMedia, Category, Comment, DebateVote, QuestionVote, Upload, Follow, Question, ReputationEvent, Room,
     RoomMember, Vote,
 )
 from . import enums as _enums
@@ -11,7 +11,7 @@ from .site import LegalPage, LegalPageVersion, Setting, UserConsent
 from .user import LoginKey, Permission, Role, User, UserRole, role_permissions
 
 __all__ = [
-    "Base", "User", "LoginKey", "Role", "Permission", "UserRole", "role_permissions",
+    "Base", "Comment", "QuestionVote", "Upload", "User", "LoginKey", "Role", "Permission", "UserRole", "role_permissions",
     "Category", "Room", "RoomMember", "Question", "Answer", "AnswerMedia", "Vote",
     "ReputationEvent", "DebateVote", "Follow", "Report", "Ban", "ModAction",
     "UserBadge", "Notification", "LegalPage", "LegalPageVersion", "UserConsent", "Setting",

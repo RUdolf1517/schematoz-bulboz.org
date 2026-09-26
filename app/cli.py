@@ -20,6 +20,16 @@ def register_cli(app: Flask) -> None:
         asyncio.run(seed())
         click.echo("seeded")
 
+    @app.cli.command("recompute-ratings")
+    def recompute_ratings():
+        """Пересчитать рейтинги всех юзеров и вопросов (раз в сутки по cron — для «свежести»)."""
+        from .services.rating import recompute_all
+
+        async def _run():
+            async with session_scope() as s:
+                return await recompute_all(s)
+        click.echo(f"recomputed {asyncio.run(_run())} users")
+
     @app.cli.command("create-db-dev")
     def create_db_dev():
         """ТОЛЬКО для локальной разработки: create_all без Alembic."""

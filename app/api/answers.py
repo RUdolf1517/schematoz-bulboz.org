@@ -14,6 +14,7 @@ from ..services.gamification import on_answer_created
 from ..services.notifications import notify
 from ..services.reputation import cast_vote, remove_vote
 from . import bp
+from ..services.rating import recompute_user, refresh_question
 from .utils import account_age_hours, answer_out, json_body
 
 
@@ -60,6 +61,9 @@ async def create_answer(qid: int):
         await s.execute(update(Question).where(Question.id == qid)
                         .values(answers_count=Question.answers_count + 1))
         await s.refresh(answer)
+        await s.refresh(q)
+        await recompute_user(s, g.user.id)
+        await refresh_question(s, q)
     return {"answer": answer_out(answer, g.user), "new_badges": new_badges}, 201
 
 

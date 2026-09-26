@@ -77,6 +77,11 @@ class Question(TimestampMixin, Base):
         ForeignKey("answers.id", use_alter=True, ondelete="SET NULL")
     )
     score_hot: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    # Рейтинг вопроса: апвоуты/даунвоуты + ответы + комментарии к ответам (services/rating.py)
+    votes_score: Mapped[int] = mapped_column(default=0, server_default="0")
+    comments_count: Mapped[int] = mapped_column(default=0, server_default="0")
+    rating: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    cover_url: Mapped[str | None] = mapped_column(String(128))
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     answers_count: Mapped[int] = mapped_column(default=0, server_default="0")
     views_count: Mapped[int] = mapped_column(default=0, server_default="0")
@@ -107,6 +112,7 @@ class Answer(TimestampMixin, Base):
         server_default=ContentStatus.ACTIVE.value,
     )
     score: Mapped[int] = mapped_column(default=0, server_default="0")
+    comments_count: Mapped[int] = mapped_column(default=0, server_default="0")
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     media: Mapped["AnswerMedia | None"] = relationship(
@@ -183,4 +189,42 @@ class Follow(Base):
     __table_args__ = (CheckConstraint("follower_id <> followee_id", name="no_self_follow"),)
     follower_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     followee_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class QuestionVote(TimestampMixin, Base):
+    """Апвоут/даунвоут вопроса: только ±1, за свой вопрос голосовать нельзя."""
+    __tablename__ = "question_votes"
+    __table_args__ = (CheckConstraint("value IN (1, -1)", name="value_pm1"),)
+    question_id: Mapped[int] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), primary_key=True)
+    voter_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    value: Mapped[int] = mapped_column(SmallInteger)
+
+
+class Comment(TimestampMixin, Base):
+    """Комментарий к ответу: markdown, до 200 символов."""
+    __tablename__ = "comments"
+    __table_args__ = (CheckConstraint("length(body) BETWEEN 1 AND 200", name="body_len"),
+                      Index("ix_comments_answer", "answer_id", "id"))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    answer_id: Mapped[int] = mapped_column(ForeignKey("answers.id", ondelete="CASCADE"))
+    question_id: Mapped[int] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), index=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    body: Mapped[str] = mapped_column(String(200))
+    status: Mapped[ContentStatus] = mapped_column(
+        pg_enum(ContentStatus, "content_status"), default=ContentStatus.ACTIVE,
+        server_default=ContentStatus.ACTIVE.value,
+    )
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Upload(Base):
+    """Загруженная картинка. Файл пережат в WebP без EXIF, лежит в UPLOAD_DIR/<name>."""
+    __tablename__ = "uploads"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    size_bytes: Mapped[int]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

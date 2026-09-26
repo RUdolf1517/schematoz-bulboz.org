@@ -38,6 +38,9 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   check("лента: карточки есть", cards.length >= 5, cards.length + " шт.");
   check("хедер: кнопка «Войти»", txt(d, "#login-btn") === "Войти");
   check("карточка ведёт на вопрос", cards[0]?.dataset.href?.startsWith("/q/"), cards[0]?.dataset.href);
+  check("лента: у карточек рейтинг", txt(d, ".card .q-rating").startsWith("★"));
+  check("лента: обложка у вопроса", !!d.window.document.querySelector(".card-cover"));
+  check("футер: ссылка на холивары после ленты", d.window.document.querySelector(".site-footer .footer-debates")?.getAttribute("href") === "/debates");
   check("футер", txt(d, ".credit").includes("разработано RUdolf1517 на основе технологий rudolfzinovev.xyz"));
 
   // 2. Страница вопроса анонимно
@@ -45,6 +48,8 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   check("вопрос: заголовок", txt(d, ".q-head h1").startsWith("Почему шарик"));
   check("вопрос: «Схема» первой", d.window.document.querySelector(".answer")?.classList.contains("best"));
   check("вопрос: призыв войти", txt(d, "#question").includes("Войди, чтобы ответить"));
+  check("вопрос: markdown в ответе", !!d.window.document.querySelector(".answer .md strong"));
+  check("вопрос: комментарии, модер первым", txt(d, ".answer .comment .c-meta").includes("@moder") && txt(d, ".urating.tier-mod") === "★∞");
 
   // 3. Вход сразу формой, без капчи
   d = await open("/login?next=/q/1");
@@ -67,6 +72,22 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   d = await open("/q/1");
   second = d.window.document.querySelectorAll(".answer")[1];
   check("повторный клик снимает голос", !second.querySelector(".on-down"), txt(d, ".answer:nth-of-type(2) .score"));
+
+  // 4б. Комментарий к ответу и апвоут вопроса
+  const cf = d.window.document.querySelector(".comment-form");
+  cf.elements.body.value = "**огонь**, спасибо";
+  cf.dispatchEvent(new d.window.Event("submit", { cancelable: true })); await sleep(1000);
+  check("комментарий опубликован с markdown", [...d.window.document.querySelectorAll(".comment .md strong")].some((x) => x.textContent === "огонь"));
+  check("свой вопрос — голосовать нельзя", !d.window.document.querySelector("[data-qvote]"));
+  d = await open("/q/4");
+  const before = txt(d, ".q-vote .score");
+  d.window.document.querySelector('[data-qvote="1"]').click(); await sleep(1000);
+  check("апвоут вопроса поднимает рейтинг", txt(d, ".q-vote .score") !== before && !!d.window.document.querySelector('[data-qvote="1"].on-up'), before + " → " + txt(d, ".q-vote .score"));
+  d = await open("/ask");
+  check("юзер не может создать холивар", d.window.document.querySelector("#debate-opt").disabled);
+  check("форма вопроса: обложка и markdown-панель", !!d.window.document.querySelector("#cover-input") && !!d.window.document.querySelector(".md-toolbar"));
+  d = await open("/debates");
+  check("страница холиваров", d.window.document.querySelector('[data-tab="debates"]').classList.contains("active") && txt(d, "#feed").includes("Шаверма"));
 
   // 5. Даша отвечает на чужой вопрос (q4) — у неё там ±1
   d = await open("/q/4");
@@ -129,6 +150,8 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   f2.dispatchEvent(new d.window.Event("submit", { cancelable: true }));
   await sleep(900);
   d = await open("/");
+  d = await open("/ask");
+  check("админ может создать холивар", !d.window.document.querySelector("#debate-opt").disabled);
   check("админ: пункты меню", !d.window.document.querySelector("#me-admin").hidden && !d.window.document.querySelector("#me-mod").hidden);
   d = await open("/mod", 1300);
   check("мод-панель: жалоба на спам в очереди", txt(d, "#panel").includes("free-genshin-gems"));

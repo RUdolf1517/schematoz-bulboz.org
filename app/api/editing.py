@@ -20,6 +20,8 @@ from ..db import session_scope
 from ..errors import ApiError
 from ..models import Answer, ContentStatus, Question
 from . import bp
+from ..services.rating import recompute_user, refresh_question
+from .uploads import check_cover
 from .utils import answer_out, json_body, question_out, req_str
 
 
@@ -46,6 +48,8 @@ async def edit_question(qid: int):
             q.title = title
         if "body" in data:
             q.body = req_str(data, "body", max_len=5000, optional=True)
+        if "cover_url" in data:
+            q.cover_url = await check_cover(s, data["cover_url"], g.user.id)
         q.edited_at = datetime.now(timezone.utc)
     return {"question": question_out(q, g.user)}
 
@@ -85,4 +89,8 @@ async def delete_answer(aid: int):
         await s.execute(update(Question).where(Question.id == a.question_id,
                                                Question.best_answer_id == aid)
                         .values(best_answer_id=None))
+        q = await s.get(Question, a.question_id)
+        await s.refresh(q)
+        await refresh_question(s, q)
+        await recompute_user(s, g.user.id)
     return {"ok": True}

@@ -21,11 +21,11 @@ from app import create_app  # noqa: E402
 from app.auth.passwords import hash_password  # noqa: E402
 from app.db import session_scope  # noqa: E402
 from app.models import (  # noqa: E402
+    Comment, QuestionVote, Upload,
     AppealStatus, Answer, Ban, DebateSide, DebateVote, Question, QuestionKind, RepReason,
     Report, ReportReason, ReportTarget, ReputationEvent, Role, Room, User, UserBadge, UserRole,
     Vote,
 )
-from app.services.ranking import hot_score  # noqa: E402
 
 ACCOUNTS = [
     # username, password, roles, birth_year
@@ -66,6 +66,22 @@ def rep(s, user, delta, reason, actor, answer, q):
     user.reputation += delta
 
 
+def make_cover(s, user_id: int) -> str:
+    import io
+    from PIL import Image, ImageDraw
+    from app.services.uploads import process_image
+    img = Image.new("RGB", (1200, 630))
+    d = ImageDraw.Draw(img)
+    for y in range(630):  # градиент «закат в Мондштадте»
+        d.line([(0, y), (1200, y)], fill=(40 + y // 5, 60 + y // 8, 160 - y // 6))
+    d.ellipse((820, 120, 1020, 320), fill=(255, 214, 120))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    name, w, h, size = process_image(buf.getvalue())
+    s.add(Upload(user_id=user_id, name=name, width=w, height=h, size_bytes=size))
+    return f"/media/{name}"
+
+
 async def demo():
     async with session_scope() as s:
         u = await ensure_accounts(s)
@@ -101,9 +117,9 @@ async def demo():
             qq.answers_count += 1
             return obj
 
-        a1 = ans(q1, "kotik_na_fizmate", "На шарик всё время действует сила тяжести. По второму закону Ньютона "
-                 "F = ma, значит есть ускорение g ≈ 9,8 м/с² — скорость растёт каждую секунду. "
-                 "Постоянная скорость была бы, если бы силы уравновешивались (например, парашют).")
+        a1 = ans(q1, "kotik_na_fizmate", "На шарик всё время действует **сила тяжести**. По второму закону Ньютона "
+                 "`F = ma`, значит есть ускорение *g ≈ 9,8 м/с²* — скорость растёт каждую секунду.\n\n"
+                 "> Постоянная скорость была бы, если бы силы уравновешивались (например, парашют).")
         a1b = ans(q1, "artem", "ну это гравитация лол", ago_h=0.2)
         a2 = ans(q2, "dasha", "Шаверма. Питер не обсуждается.", DebateSide.A)
         a2b = ans(q2, "lena_2007", "Шаурма — так говорит вся остальная страна 🤷‍♀️", DebateSide.B)
@@ -112,6 +128,8 @@ async def demo():
         a4 = ans(q4, "kotik_na_fizmate", "Делай ленту времени на стене и повторяй по 15 минут каждый день. "
                  "Интервальные повторения (Anki) реально работают.")
         a5 = ans(q5, "lena_2007", "Спала по 4 часа, жила на энергетиках, сдала всё. Не повторяйте 🙃")
+        # обложка у вопроса про Genshin — картинка генерится на лету (без внешних файлов)
+        q6.cover_url = make_cover(s, u["dasha"].id)
         a_spam = ans(q6, "spamer777", "Бесплатные крутки тут >>> free-genshin-gems точка ру")
         await s.flush()
 
@@ -136,8 +154,28 @@ async def demo():
                             ("lena_2007", DebateSide.B), ("moder", DebateSide.A)]:
             s.add(DebateVote(question_id=q2.id, user_id=u[voter].id, side=side))
 
-        for qq, scores in [(q1, [6, -1]), (q2, [1, 0]), (q3, [5]), (q4, [0]), (q5, [0]), (q6, [0]), (q7, [])]:
-            qq.score_hot = hot_score(sum(scores), len(scores), qq.created_at)
+        # комментарии к ответам (до 200 символов, markdown)
+        for answer, author, body in [
+            (a1, "dasha", "Спасибо!! Наконец-то **дошло** 🙏"),
+            (a1, "artem", "ок, беру свои слова про «гравитация лол» обратно"),
+            (a1, "moder", "Отличное объяснение, закрепляю в памяти _навсегда_"),
+            (a2, "lena_2007", "Питер, конечно, аргумент…"),
+            (a3, "dasha", "пожарить лёд 😂😂"),
+            (a4, "lena_2007", "Anki топ, подтверждаю"),
+        ]:
+            s.add(Comment(answer_id=answer.id, question_id=answer.question_id, author_id=u[author].id,
+                          body=body, created_at=answer.created_at + timedelta(minutes=20)))
+            answer.comments_count += 1
+            (q1 if answer is a1 else q2 if answer is a2 else q3 if answer is a3 else q4).comments_count += 1
+        # апвоуты вопросов
+        for qq, voters in [(q1, ["artem", "lena_2007", "kotik_na_fizmate"]), (q3, ["dasha", "lena_2007"]),
+                           (q2, ["dasha", "kotik_na_fizmate", "lena_2007", "moder"]), (q7, ["dasha"])]:
+            for v in voters:
+                s.add(QuestionVote(question_id=qq.id, voter_id=u[v].id, value=1))
+            qq.votes_score = len(voters)
+        s.add(QuestionVote(question_id=q5.id, voter_id=u["artem"].id, value=-1))
+        q5.votes_score = -1
+        # рейтинги пересчитает `flask recompute-ratings` в reset_dev_db.sh
 
         # бейджи и стрики
         today = datetime.now(timezone.utc).date()

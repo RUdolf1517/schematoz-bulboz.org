@@ -7,13 +7,13 @@ from sqlalchemy.exc import IntegrityError
 from ..auth.rbac import require_perm
 from ..db import session_scope
 from ..errors import ApiError
-from ..models import Answer, Question, Report, ReportReason, ReportTarget, User
+from ..models import Answer, Comment, Question, Report, ReportReason, ReportTarget, User
 from . import bp
 from .utils import json_body
 
 PRIORITY = {ReportReason.SELF_HARM: 100, ReportReason.DOXXING: 90, ReportReason.ILLEGAL: 50,
             ReportReason.BULLYING: 30}
-TARGET_MODEL = {ReportTarget.QUESTION: Question, ReportTarget.ANSWER: Answer, ReportTarget.USER: User}
+TARGET_MODEL = {ReportTarget.QUESTION: Question, ReportTarget.ANSWER: Answer, ReportTarget.COMMENT: Comment, ReportTarget.USER: User}
 
 
 @bp.post("/reports")

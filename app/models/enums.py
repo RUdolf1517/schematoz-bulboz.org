@@ -50,6 +50,7 @@ class RepReason(str, enum.Enum):
 class ReportTarget(str, enum.Enum):
     QUESTION = "question"
     ANSWER = "answer"
+    COMMENT = "comment"
     USER = "user"
 
 

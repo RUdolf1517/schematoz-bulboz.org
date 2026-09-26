@@ -52,7 +52,7 @@ def test_badges_for_first_question_answer_and_scheme(qa):
 
 
 def test_debater_badge_and_debate_votes(make_user):
-    c, _ = make_user()
+    c, _ = make_user("moderator")
     q = c.post("/api/questions", json={"kind": "debate", "title": "Дота или Лига?",
                                        "side_a": "Дота", "side_b": "Лига"}).json["question"]
     c2, u2 = make_user()

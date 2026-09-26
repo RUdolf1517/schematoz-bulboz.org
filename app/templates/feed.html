@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% block main_class %}main-feed{% endblock %}
 {% block content %}
-<div class="tabs" id="feed-tabs" role="tablist">
+<div class="tabs" id="feed-tabs" role="tablist" data-preset="{{ preset_tab|default('hot') }}">
   <button data-tab="hot" class="active">🔥 Горячее</button>
   <button data-tab="new">Новое</button>
+  <button data-tab="top">⭐ Топ</button>
+  <button data-tab="debates">⚔️ Холивары</button>
   <button data-tab="unanswered">Без ответа</button>
   {% if logged_in %}<button data-tab="my_rooms">Мои комнаты</button><button data-tab="following">Подписки</button>{% endif %}
 </div>

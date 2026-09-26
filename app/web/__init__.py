@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-from flask import Blueprint, current_app, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, send_from_directory, current_app, redirect, render_template, request, session, url_for
 from kremle_detect.integrations.flask_ext import NEXT_KEY
 
 from ..auth.sessions import current_user_id
@@ -51,6 +51,21 @@ def rooms():
 @bp.get("/r/<slug>")
 def room(slug: str):
     return page("room.html", "room", slug=slug)
+
+
+@bp.get("/media/<name>")
+def media(name: str):
+    from ..services.markdown import MEDIA_RE
+    if not MEDIA_RE.match(f"/media/{name}"):
+        abort(404)
+    resp = send_from_directory(current_app.config["UPLOAD_DIR"], name, mimetype="image/webp", max_age=31536000)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+
+@bp.get("/debates")
+def debates():
+    return page("feed.html", "feed", preset_tab="debates")
 
 
 @bp.get("/notifications")

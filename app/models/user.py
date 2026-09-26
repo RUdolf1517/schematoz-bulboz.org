@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, SmallInteger, String, Table, Text, func
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, SmallInteger, String, Table, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin
@@ -39,6 +39,7 @@ class UserRole(Base):
 
 class User(TimestampMixin, Base):
     __tablename__ = "users"
+    __table_args__ = (Index("ix_users_rating_rank", text("rating_tier DESC"), text("rating DESC")),)
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(32), unique=True)  # хранится в lower-case
     email: Mapped[str] = mapped_column(String(254), unique=True)    # хранится в lower-case
@@ -54,6 +55,9 @@ class User(TimestampMixin, Base):
     # ISO-неделя последней использованной заморозки стрика, например "2026-W39"
     streak_freeze_week: Mapped[str | None] = mapped_column(String(8))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Рейтинг юзера (формула в services/rating.py). rating_tier: 2 — админ (∞), 1 — модер (∞, но ниже админа), 0 — все
+    rating: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    rating_tier: Mapped[int] = mapped_column(SmallInteger, default=0, server_default="0")
 
     roles: Mapped[list[Role]] = relationship(
         secondary="user_roles",

@@ -43,6 +43,9 @@ async def set_roles(uid: int):
         for r in roles:
             s.add(UserRole(user_id=uid, role_id=r.id, granted_by=g.user.id))
         log_action(s, g.user.id, "role.set", "user", uid, roles=sorted(codes))
+        await s.flush()
+        from ..services.rating import recompute_user
+        await recompute_user(s, uid)  # tier: админ/модер — ∞
     invalidate_perms(uid)
     return {"ok": True, "roles": sorted(codes)}
 

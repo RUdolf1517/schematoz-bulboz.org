@@ -6,16 +6,17 @@ from sqlalchemy import select
 from ..auth.sessions import current_user_id
 from ..db import session_scope
 from ..errors import ApiError
-from ..models import Answer, ContentStatus, Follow, Question, Room, RoomMember, User
+from ..models import Answer, ContentStatus, Follow, Question, QuestionKind, Room, RoomMember, User
+from ..services.rating import answer_order
 from . import bp
 from .utils import answer_out, question_out
 
 PAGE = 20
-TABS = {"hot", "new", "unanswered", "my_rooms", "following"}
+TABS = {"hot", "new", "top", "unanswered", "my_rooms", "following", "debates"}
 
 
 def best_answer_order(q_best_id):
-    return ((Answer.id == q_best_id).desc(), Answer.score.desc(), Answer.id)
+    return answer_order(q_best_id)
 
 
 @bp.get("/feed")
@@ -36,6 +37,8 @@ async def feed():
             if room_id is None:
                 raise ApiError("Комната не найдена", 404, "not_found")
             stmt = stmt.where(Question.room_id == room_id)
+        if tab == "debates":
+            stmt = stmt.where(Question.kind == QuestionKind.DEBATE)
         if tab == "unanswered":
             stmt = stmt.where(Question.answers_count == 0)
         if tab == "my_rooms":
@@ -48,8 +51,12 @@ async def feed():
                 raise ApiError("Нужно войти", 401, "unauthorized")
             stmt = stmt.where(Question.author_id.in_(
                 select(Follow.followee_id).where(Follow.follower_id == uid)))
-        order = ((Question.id.desc(),) if tab in {"new", "unanswered", "following"}
-                 else (Question.score_hot.desc(), Question.id.desc()))
+        if tab in {"new", "unanswered", "following"}:
+            order = (Question.id.desc(),)
+        elif tab == "top":  # чистый рейтинг вопроса, без поправки на свежесть
+            order = (Question.rating.desc(), Question.id.desc())
+        else:
+            order = (Question.score_hot.desc(), Question.id.desc())
         rows = (await s.execute(stmt.order_by(*order).offset(offset).limit(PAGE))).all()
 
         room_ids = {q.room_id for q, _ in rows if q.room_id}

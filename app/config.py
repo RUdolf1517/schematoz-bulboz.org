@@ -49,4 +49,7 @@ class Config:
         "ANSWER_VIDEO_ENABLED": False,
     }
     ANSWER_TEXT_MAX_LEN = 5000
+    COMMENT_MAX_LEN = 200
+    UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "var", "uploads"))
+    MAX_CONTENT_LENGTH = 9 * 1024 * 1024
     ANSWER_MEDIA_MAX_DURATION_MS = 60_000

@@ -11,7 +11,7 @@ from ..auth.sessions import revoke_all_sessions
 from ..db import session_scope
 from ..errors import ApiError
 from ..models import (
-    Answer, AppealStatus, Ban, BanScope, ContentStatus, ModAction, Question, Report,
+    Answer, AppealStatus, Ban, BanScope, Comment, ContentStatus, ModAction, Question, Report,
     ReportStatus, ReportTarget, User,
 )
 from ..services.modlog import log_action
@@ -20,7 +20,7 @@ from ..api.utils import json_body
 
 bp = Blueprint("mod", __name__, url_prefix="/mod")
 
-CONTENT = {"question": Question, "answer": Answer}
+CONTENT = {"question": Question, "answer": Answer, "comment": Comment}
 MAX_MOD_BAN_DAYS = 30
 
 
@@ -89,7 +89,9 @@ async def resolve(rid: int):
                 raise ApiError("На пользователя — используй бан", 400, "use_ban")
             obj = await s.get(model, r.target_id)
             if obj is not None:
+                was_active = obj.status == ContentStatus.ACTIVE
                 obj.status = ContentStatus.HIDDEN
+                await _after_status_change(s, r.target_type.value, obj, was_active)
                 log_action(s, g.user.id, "content.hide", r.target_type.value, r.target_id, report_id=rid)
         # все открытые жалобы на ту же цель закрываем одним решением
         same = (await s.scalars(select(Report).where(
@@ -103,15 +105,36 @@ async def resolve(rid: int):
     return {"ok": True, "closed": len(same)}
 
 
+async def _after_status_change(s, kind: str, obj, was_active: bool) -> None:
+    """Скрытие/восстановление влияет на счётчики и рейтинги (скрытое режет рейтинг автора)."""
+    from sqlalchemy import update
+    from ..services.rating import recompute_user, refresh_question
+    now_active = obj.status == ContentStatus.ACTIVE
+    if kind == "comment" and was_active != now_active:
+        delta = 1 if now_active else -1
+        await s.execute(update(Answer).where(Answer.id == obj.answer_id)
+                        .values(comments_count=Answer.comments_count + delta))
+        await s.execute(update(Question).where(Question.id == obj.question_id)
+                        .values(comments_count=Question.comments_count + delta))
+    await s.flush()
+    qid = obj.id if kind == "question" else obj.question_id
+    q = await s.get(Question, qid)
+    await s.refresh(q)
+    await refresh_question(s, q)
+    await recompute_user(s, obj.author_id)
+
+
 async def _set_status(kind: str, cid: int, status: ContentStatus, action: str):
     model = CONTENT.get(kind)
     if model is None:
-        raise ApiError("kind: question | answer", 400, "validation_error")
+        raise ApiError("kind: question | answer | comment", 400, "validation_error")
     async with session_scope() as s:
         obj = await s.get(model, cid, with_for_update=True)
         if obj is None:
             raise ApiError("Не найдено", 404, "not_found")
+        was_active = obj.status == ContentStatus.ACTIVE
         obj.status = status
+        await _after_status_change(s, kind, obj, was_active)
         log_action(s, g.user.id, action, kind, cid,
                    reason=(request.get_json(silent=True) or {}).get("reason"))
     return {"ok": True, "status": status.value}
@@ -156,6 +179,9 @@ async def ban():
                 ends_at=ends_at, report_id=data.get("report_id"))
         s.add(b)
         await s.flush()
+        await s.flush()
+        from ..services.rating import recompute_user
+        await recompute_user(s, user_id)
         log_action(s, g.user.id, "ban.issue", "user", user_id, ban_id=b.id, days=days, reason=reason)
         notify(s, user_id, "ban", ban_id=b.id, reason=reason,
                until=ends_at.isoformat() if ends_at else None)

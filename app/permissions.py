@@ -2,6 +2,7 @@
 
 USER_PERMS = {"question.create", "answer.create", "vote.cast", "report.create"}
 MODERATOR_PERMS = USER_PERMS | {
+    "debate.create",  # холивары запускают только модеры и админы
     "report.review", "content.hide", "content.restore", "ban.temporary", "modlog.read_own",
 }
 ADMIN_PERMS = MODERATOR_PERMS | {

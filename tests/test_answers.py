@@ -43,7 +43,7 @@ def test_enabling_voice_flag_reaches_stub(qa, make_user):
 
 
 def test_debate_requires_side(make_user):
-    c, _ = make_user()
+    c, _ = make_user("moderator")
     q = c.post("/api/questions", json={"kind": "debate", "title": "Шаверма или шаурма?"}).json["question"]
     assert q["debate"] == {"a": "За", "b": "Против"}
     c2, _ = make_user()

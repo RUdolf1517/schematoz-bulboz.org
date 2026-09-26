@@ -86,6 +86,9 @@ def make_user(app):
                 async with session_scope() as s:
                     for rid in await s.scalars(select(Role.id).where(Role.code.in_(codes))):
                         s.add(UserRole(user_id=user["id"], role_id=rid))
+                    await s.flush()
+                    from app.services.rating import recompute_user
+                    await recompute_user(s, user["id"])
             with app.app_context():
                 asyncio.run(grant())
                 invalidate_perms(user["id"])
