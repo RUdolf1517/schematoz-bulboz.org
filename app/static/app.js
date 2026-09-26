@@ -266,9 +266,11 @@ function initFeed(extraParams = {}) {
     if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
     const cards = $$(".card", feed);
     if (!cards.length) return;
-    const idx = Math.round(feed.scrollTop / (cards[0].offsetHeight + 12));
-    if (e.key === "ArrowDown" || e.key === "j") { e.preventDefault(); cards[Math.min(idx + 1, cards.length - 1)].scrollIntoView({ behavior: "smooth" }); }
-    if (e.key === "ArrowUp" || e.key === "k") { e.preventDefault(); cards[Math.max(idx - 1, 0)].scrollIntoView({ behavior: "smooth" }); }
+    // карточки разной высоты: текущая — та, чей верх ближе всего к верху ленты
+    let idx = 0, best = Infinity;
+    cards.forEach((c, i) => { const dist = Math.abs(c.offsetTop - feed.scrollTop); if (dist < best) { best = dist; idx = i; } });
+    if (e.key === "ArrowDown" || e.key === "j") { e.preventDefault(); cards[Math.min(idx + 1, cards.length - 1)].scrollIntoView({ behavior: "smooth", block: "start" }); }
+    if (e.key === "ArrowUp" || e.key === "k") { e.preventDefault(); cards[Math.max(idx - 1, 0)].scrollIntoView({ behavior: "smooth", block: "start" }); }
     if (e.key === "Enter" && cards[idx]?.dataset.href) location.href = cards[idx].dataset.href;
   });
   $$("#feed-tabs button").forEach((b) => (b.onclick = () => {

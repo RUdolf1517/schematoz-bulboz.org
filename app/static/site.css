@@ -88,12 +88,12 @@ main { max-width: 680px; margin: 0 auto; padding: 16px; min-height: calc(100vh -
 .main-feed { padding-top: 10px; padding-bottom: 0; }
 .feed {
   height: calc(100vh - var(--header-h) - 120px); height: calc(100dvh - var(--header-h) - 120px);
-  overflow-y: auto; scroll-snap-type: y mandatory; overscroll-behavior: contain;
+  position: relative; overflow-y: auto; scroll-snap-type: y proximity; overscroll-behavior: contain;
   scrollbar-width: none; border-radius: var(--radius); outline: none;
 }
 .feed::-webkit-scrollbar { display: none; }
 .card {
-  position: relative; height: 100%; scroll-snap-align: start; scroll-snap-stop: always;
+  position: relative; height: auto; max-height: 100%; scroll-snap-align: start;
   display: flex; flex-direction: column; padding: 24px; margin-bottom: 12px; border-radius: var(--radius);
   background: radial-gradient(120% 80% at 0% 0%, #2a1c3a 0%, var(--card) 55%); cursor: pointer;
   border: 1px solid var(--line); transition: border-color .15s;
@@ -101,9 +101,9 @@ main { max-width: 680px; margin: 0 auto; padding: 16px; min-height: calc(100vh -
 .card:hover { border-color: #ff5a3666; }
 .card .kind { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
 .card .room-link { color: var(--muted); font-size: 13px; margin-left: 8px; font-weight: 600; }
-.card h2 { font-size: clamp(22px, 4.2vw, 30px); line-height: 1.25; margin: 12px 0 16px; }
+.card h2 { font-size: clamp(22px, 4.2vw, 30px); line-height: 1.25; margin: 14px 0 16px; }
 /* заголовок + описание + ответ — один блок по центру карточки, без дыры посередине */
-.card .card-main { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
+.card .card-main { min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .card .card-desc { margin: -6px 0 16px; color: #cfcfd8; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .card .answer-preview {
   flex: none; background: #00000030; border-radius: 14px; padding: 16px; overflow: hidden; position: relative;
@@ -474,4 +474,7 @@ main.main-wide { max-width: 1180px; }
 .st-preview .stat b { font-size: 16px; }
 .profile-skin.theme-candy .stat span, .profile-skin.theme-candy .badge span { color: #7b5f80; }
 .profile-skin .ph-main h1 { overflow-wrap: anywhere; }
-.card .card-main .card-cover { flex: 0 1 auto; min-height: 80px; max-height: 40%; }
+.card .card-main .card-cover { flex: 0 1 auto; min-height: 80px; max-height: 320px; }
+
+.card .meta-row { margin-top: 18px; }
+.empty-card { min-height: 60vh; }
