@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<form class="panel form" id="ask-form">
+  <h1>Задать вопрос</h1>
+  <label>Тип
+    <select name="kind">
+      <option value="opinion">💬 Мнение — что думаете?</option>
+      <option value="knowledge">📚 Знания — нужен точный ответ</option>
+      <option value="story">📖 История — поделитесь опытом</option>
+      <option value="debate">⚔️ Холивар — две стороны</option>
+    </select>
+  </label>
+  <label>Вопрос <span class="counter" data-for="title">0/300</span>
+    <input name="title" maxlength="300" required minlength="5" placeholder="Коротко, как твит">
+  </label>
+  <div class="debate-fields" hidden>
+    <label>Сторона A <input name="side_a" maxlength="80" placeholder="За"></label>
+    <label>Сторона B <input name="side_b" maxlength="80" placeholder="Против"></label>
+  </div>
+  <label>Подробности (необязательно)
+    <textarea name="body" rows="4" maxlength="5000"></textarea>
+  </label>
+  <label>Комната
+    <select name="room_id"><option value="">Общая лента</option></select>
+  </label>
+  <button class="btn btn-accent" type="submit">Опубликовать</button>
+</form>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block main_class %}main-feed{% endblock %}
+{% block content %}
+<div class="tabs" id="feed-tabs" role="tablist">
+  <button data-tab="hot" class="active">🔥 Горячее</button>
+  <button data-tab="new">Новое</button>
+  <button data-tab="unanswered">Без ответа</button>
+  {% if logged_in %}<button data-tab="my_rooms">Мои комнаты</button>{% endif %}
+</div>
+<section class="feed" id="feed" tabindex="0" aria-label="Лента вопросов. Листай вверх-вниз или стрелками"></section>
+<p class="hint">Листай ↑↓ или свайпом · жми на карточку, чтобы открыть вопрос</p>
+{% endblock %}

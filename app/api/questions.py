@@ -6,9 +6,13 @@ from sqlalchemy import select
 from ..auth.rbac import require_perm
 from ..db import session_scope
 from ..errors import ApiError
-from ..models import Answer, ContentStatus, Question, QuestionKind, Room, User, Vote
+from ..models import (
+    Answer, ContentStatus, DebateVote, Question, QuestionKind, Room, User, Vote,
+)
+from .debates import debate_counts
 from ..services import antispam
 from ..services.captcha import captcha_required
+from ..services.gamification import on_question_created
 from ..services.ranking import hot_score
 from ..auth.sessions import current_user_id
 from . import bp
@@ -46,7 +50,8 @@ async def create_question():
         await s.flush()
         await s.refresh(q)
         q.score_hot = hot_score(0, 0, q.created_at)
-    return {"question": question_out(q, g.user)}, 201
+        new_badges = await on_question_created(s, g.user.id)
+    return {"question": question_out(q, g.user), "new_badges": new_badges}, 201
 
 
 @bp.get("/questions/<int:qid>")
@@ -57,6 +62,12 @@ async def get_question(qid: int):
         if q is None or q.status != ContentStatus.ACTIVE:
             raise ApiError("Вопрос не найден", 404, "not_found")
         author = await s.get(User, q.author_id)
+        room = await s.get(Room, q.room_id) if q.room_id else None
+        debate = None
+        if q.kind is QuestionKind.DEBATE:
+            my_side = await s.scalar(select(DebateVote.side).where(
+                DebateVote.question_id == qid, DebateVote.user_id == uid)) if uid else None
+            debate = {**await debate_counts(s, qid), "my_side": my_side.value if my_side else None}
         rows = (await s.execute(
             select(Answer, User).join(User, User.id == Answer.author_id)
             .where(Answer.question_id == qid, Answer.status == ContentStatus.ACTIVE)
@@ -70,6 +81,7 @@ async def get_question(qid: int):
             )).all())
     answers = [answer_out(a, u, is_best=a.id == q.best_answer_id, my_vote=my_votes.get(a.id))
                for a, u in rows]
-    return {"question": question_out(q, author), "answers": answers,
+    return {"question": question_out(q, author, room=room), "answers": answers,
+            "debate_votes": debate,
             "you_are_author": uid == q.author_id,
             "vote_values": ([5, -1] if uid == q.author_id else [1, -1]) if uid else []}

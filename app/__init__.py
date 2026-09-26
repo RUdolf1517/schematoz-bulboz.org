@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import Flask, render_template
+from flask import Flask
 
 from .config import Config
 from .db import init_engine
@@ -28,7 +28,8 @@ def create_app(config: dict | None = None) -> Flask:
     from .api import bp as api_bp
     from .legal import bp as legal_bp
     from .moderation import bp as mod_bp
-    for bp in (api_bp, mod_bp, admin_bp, legal_bp):
+    from .web import bp as web_bp
+    for bp in (api_bp, mod_bp, admin_bp, legal_bp, web_bp):
         app.register_blueprint(bp)
 
     register_error_handlers(app)
@@ -38,11 +39,8 @@ def create_app(config: dict | None = None) -> Flask:
 
     @app.context_processor
     def _ctx():
-        return {"now_year": date.today().year}
-
-    @app.get("/")
-    def index():
-        return render_template("index.html")
+        from .auth.sessions import current_user_id
+        return {"now_year": date.today().year, "logged_in": current_user_id() is not None}
 
     @app.get("/healthz", endpoint="health")
     def health():

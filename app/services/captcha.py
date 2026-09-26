@@ -28,7 +28,59 @@ def init_captcha(app) -> None:
     kremle.auto_guard = app.config["KREMLE_AUTO_GUARD"]
     kremle.skip_endpoints = {"legal.page", "health"}
     kremle._storage = RedisStorage(redis_client=app.extensions["redis"])
+    # свой шаблон (на основе библиотечного) — ради обязательного футера на всех страницах
+    import os
+    kremle.custom_template = os.path.join(app.root_path, "templates", "kremle_captcha.html")
     kremle.init_app(app)
+
+    @app.before_request
+    async def _apply_captcha_settings():
+        from flask import request as rq
+        if rq.endpoint in ("kremle.challenge", "kremle.verify"):
+            await apply_admin_settings()
+
+
+CAPTCHA_CATEGORIES = ("math", "physics", "russian", "literature")
+CACHE_KEY = "settings:captcha"
+
+
+def validate_captcha_settings(value: dict) -> dict:
+    """Настройки капчи из админки: предметы, число вопросов, допустимые ошибки."""
+    cats = value.get("categories", list(CAPTCHA_CATEGORIES))
+    if not isinstance(cats, list) or not cats or not set(cats) <= set(CAPTCHA_CATEGORIES):
+        raise ApiError(f"categories — непустой список из {', '.join(CAPTCHA_CATEGORIES)}",
+                       400, "validation_error")
+    count = value.get("question_count", 5)
+    errors = value.get("max_errors", 1)
+    if not isinstance(count, int) or not 1 <= count <= 15:
+        raise ApiError("question_count: 1..15", 400, "validation_error")
+    if not isinstance(errors, int) or not 0 <= errors < count:
+        raise ApiError("max_errors: 0..question_count-1", 400, "validation_error")
+    return {"categories": cats, "question_count": count, "max_errors": errors}
+
+
+async def apply_admin_settings() -> None:
+    import json
+    from sqlalchemy import select
+    from ..db import session_scope
+    from ..models import Setting
+    r = get_redis()
+    raw = r.get(CACHE_KEY)
+    if raw is None:
+        async with session_scope() as s:
+            row = await s.scalar(select(Setting).where(Setting.key == "captcha"))
+        raw = json.dumps(row.value if row else {})
+        r.setex(CACHE_KEY, 60, raw)
+    conf = json.loads(raw)
+    engine = kremle.engine
+    cfg = current_app.config
+    engine.categories = conf.get("categories", cfg["KREMLE_CATEGORIES"])
+    engine.question_count = conf.get("question_count", cfg["KREMLE_QUESTION_COUNT"])
+    engine.max_errors = conf.get("max_errors", cfg["KREMLE_MAX_ERRORS"])
+
+
+def invalidate_captcha_settings() -> None:
+    get_redis().delete(CACHE_KEY)
 
 
 def captcha_passed() -> bool:

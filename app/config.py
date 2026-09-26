@@ -19,6 +19,12 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = _bool("SESSION_COOKIE_SECURE", False)
+    # Превью/встраивание в iframe на другом домене: cookie должна быть SameSite=None; Secure.
+    if _bool("COOKIE_CROSS_SITE", False):
+        SESSION_COOKIE_SAMESITE = "None"
+        SESSION_COOKIE_SECURE = True
+    # Показывать тестовые аккаунты на странице входа (НИКОГДА не включать в проде)
+    DEMO_MODE = _bool("DEMO_MODE", False)
     SESSION_TTL_SECONDS = 30 * 24 * 3600
 
     # kremle-detect

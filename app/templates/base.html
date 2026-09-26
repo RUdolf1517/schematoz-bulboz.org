@@ -2,15 +2,41 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}schematoz-bulboz.org{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}schematoz-bulboz.org — вопросы, на которые отвечают люди{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
 </head>
-<body>
+<body data-page="{{ page_name|default('static') }}" data-logged-in="{{ 1 if logged_in else 0 }}">
   <header class="top">
     <a class="logo" href="/">schematoz<span>·</span>bulboz</a>
+    <nav class="main-nav">
+      <a href="/" class="{{ 'active' if page_name == 'feed' }}">Лента</a>
+      <a href="/rooms" class="{{ 'active' if page_name in ('rooms', 'room') }}">Комнаты</a>
+    </nav>
+    <div class="top-actions">
+      <a class="btn btn-accent btn-sm" href="/ask">+ Спросить</a>
+      {% if logged_in %}
+        <div class="user-menu" id="user-menu">
+          <button class="btn btn-ghost btn-sm" id="user-menu-btn" aria-haspopup="true" aria-expanded="false">
+            <span class="avatar" id="me-avatar">·</span><span id="me-name">…</span>
+          </button>
+          <div class="dropdown" id="user-dropdown" hidden>
+            <a id="me-profile" href="#">Мой профиль</a>
+            <a id="me-mod" href="/mod" hidden>Модерация</a>
+            <a id="me-admin" href="/admin" hidden>Админка</a>
+            <button id="logout-btn" type="button">Выйти</button>
+          </div>
+        </div>
+      {% else %}
+        <a class="btn btn-ghost btn-sm" id="login-btn" href="/login?next={{ request.path|urlencode if request.path not in ('/login', '/register') else '/' }}">Войти</a>
+      {% endif %}
+    </div>
   </header>
-  <main>{% block content %}{% endblock %}</main>
+  <div id="ban-banner" class="ban-banner" hidden></div>
+  <main class="{% block main_class %}{% endblock %}">{% block content %}{% endblock %}</main>
+  <div id="toast" class="toast" hidden></div>
+  <div id="modal" class="modal" hidden></div>
   {% include "_footer.html" %}
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

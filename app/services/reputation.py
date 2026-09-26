@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..errors import ApiError
 from ..models import Answer, ContentStatus, Question, RepReason, ReputationEvent, User, Vote
+from .gamification import on_scheme
 from .ranking import hot_score
 
 AUTHOR_VALUES = frozenset({5, -1})
@@ -114,9 +115,12 @@ async def cast_vote(s: AsyncSession, voter: User, answer_id: int, value: int) ->
     if old_counted:
         await _apply_rep(s, user_id=answer.author_id, delta=-old_value, reason=RepReason.VOTE_REVOKED,
                          actor_id=voter.id, answer=answer, question=question)
+    new_badges: list[str] = []
     if counted:
         await _apply_rep(s, user_id=answer.author_id, delta=value, reason=_reason(value, is_author),
                          actor_id=voter.id, answer=answer, question=question)
+        if is_author and value == BEST_ANSWER_VALUE:
+            new_badges = await on_scheme(s, answer.author_id)  # бейджи получает автор ответа
 
     if is_author:
         if value == BEST_ANSWER_VALUE:
@@ -125,7 +129,7 @@ async def cast_vote(s: AsyncSession, voter: User, answer_id: int, value: int) ->
             question.best_answer_id = None
 
     await _refresh_question(s, question)
-    return _vote_result(answer, question, value)
+    return {**_vote_result(answer, question, value), "author_new_badges": new_badges}
 
 
 async def remove_vote(s: AsyncSession, voter: User, answer_id: int) -> dict:

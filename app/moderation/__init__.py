@@ -4,14 +4,15 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, g, request
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..auth.rbac import require_perm
 from ..auth.sessions import revoke_all_sessions
 from ..db import session_scope
 from ..errors import ApiError
 from ..models import (
-    Answer, Ban, BanScope, ContentStatus, ModAction, Question, Report, ReportStatus, User,
+    Answer, AppealStatus, Ban, BanScope, ContentStatus, ModAction, Question, Report,
+    ReportStatus, ReportTarget, User,
 )
 from ..services.modlog import log_action
 from ..api.utils import json_body
@@ -29,16 +30,41 @@ def _report_out(r: Report) -> dict:
             "created_at": r.created_at.isoformat()}
 
 
+async def _target_preview(s, r: Report) -> dict | None:
+    """Контекст для модератора: что именно обжаловали и кто автор."""
+    if r.target_type is ReportTarget.USER:
+        u = await s.get(User, r.target_id)
+        return u and {"author_id": u.id, "author": u.username, "text": u.bio or "", "status": None}
+    model = CONTENT[r.target_type.value]
+    obj = await s.get(model, r.target_id)
+    if obj is None:
+        return None
+    author = await s.get(User, obj.author_id)
+    text = obj.title if isinstance(obj, Question) else (obj.body or "")
+    qid = obj.id if isinstance(obj, Question) else obj.question_id
+    return {"author_id": author.id, "author": author.username, "text": text[:500],
+            "status": obj.status.value, "question_id": qid}
+
+
 @bp.get("/reports")
 @require_perm("report.review")
 async def queue():
-    status = request.args.get("status", "open")
+    try:
+        status = ReportStatus(request.args.get("status", "open"))
+    except ValueError:
+        raise ApiError("Неизвестный статус", 400, "validation_error")
     async with session_scope() as s:
         rows = (await s.scalars(
-            select(Report).where(Report.status == ReportStatus(status))
+            select(Report).where(Report.status == status)
             .order_by(Report.priority.desc(), Report.created_at).limit(50)
         )).all()
-    return {"items": [_report_out(r) for r in rows]}
+        items = []
+        for r in rows:
+            same = await s.scalar(select(func.count(Report.id)).where(
+                Report.target_type == r.target_type, Report.target_id == r.target_id,
+                Report.status == status))
+            items.append({**_report_out(r), "target": await _target_preview(s, r), "same_target_count": same})
+    return {"items": items}
 
 
 @bp.post("/reports/<int:rid>/resolve")
@@ -161,3 +187,51 @@ async def own_log():
         rows = (await s.scalars(select(ModAction).where(ModAction.actor_id == g.user.id)
                                 .order_by(ModAction.id.desc()).limit(100))).all()
     return {"items": [modlog_out(a) for a in rows]}
+
+
+# ---------- Апелляции ----------
+def appeal_out(b: Ban, user: User | None) -> dict:
+    return {"ban_id": b.id, "user_id": b.user_id, "username": user.username if user else None,
+            "issued_by": b.issued_by, "reason": b.reason, "text": b.appeal_text,
+            "ends_at": b.ends_at.isoformat() if b.ends_at else None,
+            "appeal_created_at": b.appeal_created_at.isoformat() if b.appeal_created_at else None}
+
+
+@bp.get("/appeals")
+@require_perm("report.review")
+async def appeals():
+    """Очередь апелляций. Свои баны модератор не видит — их разбирает кто-то другой."""
+    async with session_scope() as s:
+        rows = (await s.execute(
+            select(Ban, User).join(User, User.id == Ban.user_id)
+            .where(Ban.appeal_status == AppealStatus.PENDING, Ban.issued_by != g.user.id)
+            .order_by(Ban.appeal_created_at)
+        )).all()
+    return {"items": [appeal_out(b, u) for b, u in rows]}
+
+
+@bp.post("/appeals/<int:ban_id>/decide")
+@require_perm("report.review")
+async def decide_appeal(ban_id: int):
+    """{decision: accept | reject, comment}. accept снимает бан."""
+    data = json_body()
+    decision = data.get("decision")
+    if decision not in {"accept", "reject"}:
+        raise ApiError("decision: accept | reject", 400, "validation_error")
+    async with session_scope() as s:
+        b = await s.get(Ban, ban_id, with_for_update=True)
+        if b is None or b.appeal_status != AppealStatus.PENDING:
+            raise ApiError("Апелляция не найдена", 404, "not_found")
+        if b.issued_by == g.user.id:
+            raise ApiError("Нельзя рассматривать апелляцию на собственный бан", 403, "own_ban")
+        if decision == "accept" and b.ends_at is None and "ban.lift_any" not in g.perms:
+            raise ApiError("Перманентный бан снимает только администратор", 403, "forbidden")
+        now = datetime.now(timezone.utc)
+        b.appeal_status = AppealStatus.ACCEPTED if decision == "accept" else AppealStatus.REJECTED
+        b.appeal_resolved_by, b.appeal_resolved_at = g.user.id, now
+        b.appeal_comment = (data.get("comment") or "").strip() or None
+        if decision == "accept":
+            b.lifted_by, b.lifted_at = g.user.id, now
+        log_action(s, g.user.id, f"appeal.{decision}", "user", b.user_id, ban_id=ban_id,
+                   comment=b.appeal_comment)
+    return {"ok": True, "appeal_status": b.appeal_status.value}

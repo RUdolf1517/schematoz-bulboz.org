@@ -52,6 +52,10 @@ class Ban(Base):
         server_default=AppealStatus.NONE.value,
     )
     appeal_text: Mapped[str | None] = mapped_column(Text)
+    appeal_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    appeal_resolved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    appeal_resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    appeal_comment: Mapped[str | None] = mapped_column(Text)
 
 
 class ModAction(Base):

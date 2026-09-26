@@ -31,12 +31,15 @@ def test_text_validation(qa):
 
 
 def test_enabling_voice_flag_reaches_stub(qa, make_user):
-    """Админ включил флаг — запрос доходит до заготовки-обработчика (NotImplementedError → 500).
+    """Админ включил флаг — запрос доходит до заготовки-обработчика (NotImplementedError → 501).
     Это ожидаемо до реализации VoiceAnswerHandler; важно, что проводка работает."""
     admin_c, _ = make_user("admin")
     r = admin_c.put("/admin/settings/features", json={"value": {"ANSWER_VOICE_ENABLED": True}})
     assert r.status_code == 200
     assert "voice" in qa["other_c"].get("/api/answers/capabilities").json["types"]
+    r = qa["other_c"].post(f"/api/questions/{qa['q']['id']}/answers",
+                           json={"content_type": "voice", "upload_id": "x"})
+    assert r.status_code == 501 and r.json["error"] == "not_implemented"
 
 
 def test_debate_requires_side(make_user):

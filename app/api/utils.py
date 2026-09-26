@@ -8,6 +8,7 @@ from flask import request
 from ..errors import ApiError
 from ..models import Answer, Question, User
 from ..services.answer_content import serialize_answer
+from ..services.gamification import level_name, visible_streak
 
 
 def json_body() -> dict[str, Any]:
@@ -40,7 +41,8 @@ def account_age_hours(user: User) -> float:
 def user_public(u: User) -> dict:
     return {"id": u.id, "username": u.username, "display_name": u.display_name,
             "avatar_url": u.avatar_url, "reputation": max(u.reputation, 0), "level": u.level,
-            "streak_days": u.streak_days}
+            "level_name": level_name(u.level),
+            "streak_days": visible_streak(u.streak_days, u.streak_last_date)}
 
 
 def answer_out(a: Answer, author: User | None = None, *, is_best: bool = False,
@@ -55,11 +57,13 @@ def answer_out(a: Answer, author: User | None = None, *, is_best: bool = False,
     }
 
 
-def question_out(q: Question, author: User | None = None, top_answer: dict | None = None) -> dict:
+def question_out(q: Question, author: User | None = None, top_answer: dict | None = None,
+                 room=None) -> dict:
     return {
         "id": q.id, "kind": q.kind.value, "title": q.title, "body": q.body,
         "author": user_public(author) if author else None, "author_id": q.author_id,
         "room_id": q.room_id, "category_id": q.category_id,
+        "room": {"slug": room.slug, "title": room.title} if room else None,
         "debate": {"a": q.debate_side_a, "b": q.debate_side_b} if q.kind.value == "debate" else None,
         "best_answer_id": q.best_answer_id, "answers_count": q.answers_count,
         "status": q.status.value, "created_at": q.created_at.isoformat(),

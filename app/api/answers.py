@@ -10,6 +10,7 @@ from ..models import Answer, ContentStatus, DebateSide, Question, QuestionKind
 from ..services import antispam
 from ..services.answer_content import AnswerDraft, enabled_types, get_handler
 from ..services.captcha import captcha_required
+from ..services.gamification import on_answer_created
 from ..services.reputation import cast_vote, remove_vote
 from . import bp
 from .utils import account_age_hours, answer_out, json_body
@@ -51,10 +52,11 @@ async def create_answer(qid: int):
         s.add(answer)
         await s.flush()
         await handler.persist(s, answer, draft)
+        new_badges = await on_answer_created(s, g.user, answer)
         await s.execute(update(Question).where(Question.id == qid)
                         .values(answers_count=Question.answers_count + 1))
         await s.refresh(answer)
-    return {"answer": answer_out(answer, g.user)}, 201
+    return {"answer": answer_out(answer, g.user), "new_badges": new_badges}, 201
 
 
 @bp.put("/answers/<int:aid>/vote")

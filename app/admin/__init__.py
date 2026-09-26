@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, g, request
+from flask import Blueprint, current_app, g, request
 from sqlalchemy import delete, func, select
 
 from ..auth.rbac import invalidate_perms, require_perm
@@ -14,7 +14,8 @@ from ..models import (
     Role, Room, Setting, User, UserRole,
 )
 from ..moderation import modlog_out
-from ..services.features import invalidate_features
+from ..services.captcha import invalidate_captcha_settings, validate_captcha_settings
+from ..services.features import get_features, invalidate_features
 from ..services.modlog import log_action
 from ..api.utils import json_body, req_str
 
@@ -74,11 +75,38 @@ async def create_room():
 
 
 @bp.get("/settings/<key>")
-@require_perm("settings.features")
 async def get_setting(key: str):
+    perm = SETTING_PERMS.get(key)
+    if perm is None:
+        raise ApiError("Неизвестная настройка", 404, "not_found")
+
+    @require_perm(perm)
+    async def _do():
+        if key == "features":
+            return {"key": key, "value": await get_features()}
+        async with session_scope() as s:
+            row = await s.get(Setting, key)
+        value = row.value if row else {}
+        if key == "captcha":
+            cfg = current_app.config
+            value = {"categories": cfg["KREMLE_CATEGORIES"], "question_count": cfg["KREMLE_QUESTION_COUNT"],
+                     "max_errors": cfg["KREMLE_MAX_ERRORS"], **value}
+        return {"key": key, "value": value}
+    return await _do()
+
+
+@bp.get("/users")
+@require_perm("role.assign")
+async def search_users():
+    q = (request.args.get("q") or "").strip().lower()
     async with session_scope() as s:
-        row = await s.get(Setting, key)
-    return {"key": key, "value": row.value if row else {}}
+        stmt = select(User).order_by(User.id).limit(20)
+        if q:
+            stmt = stmt.where(User.username.contains(q, autoescape=True) | User.email.contains(q, autoescape=True))
+        users = (await s.scalars(stmt)).all()
+    return {"items": [{"id": u.id, "username": u.username, "email": u.email,
+                       "reputation": u.reputation, "roles": sorted(r.code for r in u.roles),
+                       "created_at": u.created_at.isoformat()} for u in users]}
 
 
 @bp.put("/settings/<key>")
@@ -92,6 +120,13 @@ async def put_setting(key: str):
         value = json_body().get("value")
         if not isinstance(value, dict):
             raise ApiError("value — объект", 400, "validation_error")
+        if key == "captcha":
+            value = validate_captcha_settings(value)
+        if key == "features":
+            bad = [k for k, v in value.items()
+                   if k not in current_app.config["FEATURES"] or not isinstance(v, bool)]
+            if bad:
+                raise ApiError(f"Неизвестные флаги: {', '.join(bad)}", 400, "validation_error")
         async with session_scope() as s:
             row = await s.get(Setting, key, with_for_update=True)
             old = row.value if row else None
@@ -102,6 +137,8 @@ async def put_setting(key: str):
             log_action(s, g.user.id, "settings.update", "setting", None, key=key, old=old, new=value)
         if key == "features":
             invalidate_features()
+        if key == "captcha":
+            invalidate_captcha_settings()
         return {"key": key, "value": value}
     return await _do()
 

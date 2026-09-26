@@ -1,0 +1,47 @@
+def test_appeal_flow(make_user):
+    admin_c, admin = make_user("admin")
+    mod_c, _ = make_user("moderator")
+    victim_c, victim = make_user(username="victim")
+    ban_id = mod_c.post("/mod/bans", json={"user_id": victim["id"], "reason": "спам", "days": 7}).json["ban_id"]
+
+    # забаненный может войти, но не может постить
+    from tests.conftest import pass_captcha
+    pass_captcha(victim_c)
+    r = victim_c.post("/api/auth/login", json={"login": "victim", "password": "correct-horse"})
+    assert r.status_code == 200 and r.json["banned"] is True
+    assert victim_c.post("/api/questions", json={"title": "Я вернулся!"}).json["error"] == "banned"
+    assert victim_c.get("/api/auth/me").json["ban"]["id"] == ban_id
+
+    assert victim_c.post(f"/api/bans/{ban_id}/appeal", json={"text": "коротко"}).status_code == 400
+    assert victim_c.post(f"/api/bans/{ban_id}/appeal", json={"text": "Это был не спам, а ссылка на учебник"}).status_code == 200
+    assert victim_c.post(f"/api/bans/{ban_id}/appeal", json={"text": "Ещё раз прошу разобраться"}).status_code == 409
+
+    # выдавший бан модератор апелляцию не видит и решить не может
+    assert mod_c.get("/mod/appeals").json["items"] == []
+    assert mod_c.post(f"/mod/appeals/{ban_id}/decide", json={"decision": "accept"}).status_code == 403
+    # другой (админ) — может
+    assert [a["ban_id"] for a in admin_c.get("/mod/appeals").json["items"]] == [ban_id]
+    r = admin_c.post(f"/mod/appeals/{ban_id}/decide", json={"decision": "accept", "comment": "Разобрались"})
+    assert r.json["appeal_status"] == "accepted"
+    assert victim_c.get("/api/me/ban").json["ban"] is None
+    assert victim_c.post("/api/questions", json={"title": "Я вернулся!"}).status_code == 201
+    log = [a["action"] for a in admin_c.get("/admin/modlog").json["items"]]
+    assert "appeal.accept" in log and "ban.issue" in log
+
+
+def test_foreign_ban_cannot_be_appealed(make_user):
+    admin_c, _ = make_user("admin")
+    _, victim = make_user()
+    other_c, _ = make_user()
+    ban_id = admin_c.post("/mod/bans", json={"user_id": victim["id"], "reason": "x", "days": 1}).json["ban_id"]
+    assert other_c.post(f"/api/bans/{ban_id}/appeal", json={"text": "это не мой бан, но всё же"}).status_code == 404
+
+
+def test_mod_queue_has_preview(qa, make_user):
+    mod_c, _ = make_user("moderator")
+    qa["other_c"].post("/api/reports", json={"target_type": "answer", "target_id": qa["a"]["id"], "reason": "spam"})
+    item = mod_c.get("/mod/reports").json["items"][0]
+    assert item["target"]["text"].startswith("Потому что")
+    assert item["target"]["author"] == qa["answerer"]["username"]
+    assert item["target"]["question_id"] == qa["q"]["id"]
+    assert mod_c.get("/mod/reports?status=bogus").status_code == 400

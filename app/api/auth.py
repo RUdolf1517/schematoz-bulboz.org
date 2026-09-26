@@ -73,12 +73,11 @@ async def login():
         if antispam.hit_rate("login_fail", antispam.client_key(), 5, 900):
             antispam.mark_suspicious(antispam.client_key(), "login_bruteforce")
         raise ApiError("Неверный логин или пароль", 401, "invalid_credentials")
+    # Забаненный может войти — чтобы увидеть причину и подать апелляцию.
+    # Любые действия всё равно режет @require_perm.
     ban = await active_global_ban(user.id)
-    if ban is not None:
-        raise ApiError("Аккаунт заблокирован", 403, "banned", ban_id=ban.id,
-                       until=ban.ends_at.isoformat() if ban.ends_at else None, reason=ban.reason)
     login_user(user.id)
-    return {"user": user_public(user)}
+    return {"user": user_public(user), "banned": ban is not None}
 
 
 @bp.post("/auth/logout")
@@ -91,5 +90,9 @@ async def logout():
 @login_required
 async def me():
     from ..auth.rbac import get_user_perms
+    ban = await active_global_ban(g.user.id)
     return {"user": user_public(g.user), "roles": [r.code for r in g.user.roles],
-            "permissions": sorted(await get_user_perms(g.user.id))}
+            "permissions": sorted(await get_user_perms(g.user.id)),
+            "ban": {"id": ban.id, "reason": ban.reason,
+                    "ends_at": ban.ends_at.isoformat() if ban.ends_at else None,
+                    "appeal_status": ban.appeal_status.value} if ban else None}
