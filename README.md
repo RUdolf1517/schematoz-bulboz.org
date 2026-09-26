@@ -12,26 +12,40 @@ Q&A нового поколения для зумеров: вертикальн�
 
 ## Быстрый старт
 
+### Запуск на своём компьютере (Mac / Linux)
+
 ```bash
 python3.12 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 
-cp .env.example .env              # укажи DATABASE_URL и REDIS_URL
-export $(grep -v '^#' .env | xargs)
-
-alembic upgrade head              # схема БД
-flask --app app seed              # роли, права, юр. страницы, стартовые комнаты
+brew install postgresql@16 && brew services start postgresql@16   # если Postgres ещё нет (Mac)
+./scripts/setup_local_pg.sh --demo     # .env, роль и база bulboz, миграции, seed, демо-данные
 flask --app app create-admin admin admin@example.com
 
 hypercorn "app.asgi:asgi_app" --bind 0.0.0.0:8000
 ```
 
-**Без Docker, Postgres и Redis** (только для разработки):
+- `.env` читается автоматически (python-dotenv) — `export` не нужен.
+- Если Redis не запущен, скрипт сам поставит `REDIS_URL=memory://`, для разработки этого хватает.
+- `flask --app app doctor` проверяет PostgreSQL, миграции, роли и Redis и подсказывает, что делать.
+- Если база недоступна, CLI и сервер выводят одну понятную строку вместо traceback: например, «В PostgreSQL нет роли bulboz → createuser -P bulboz» или «Postgres не запущен → brew services start postgresql@16». API в этом случае отвечает `503 db_unavailable`.
+
+**Без установки Postgres и Redis вообще** (PostgreSQL 16 из pip-пакета pgserver):
 
 ```bash
-./scripts/reset_dev_db.sh                         # PostgreSQL 16 из pip-пакета pgserver + миграции + seed + демо
+./scripts/reset_dev_db.sh                         # БД в .pgdata + миграции + seed + демо
 export DATABASE_URL=$(python scripts/dev_pg.py) REDIS_URL=memory:// DEMO_MODE=1
 hypercorn "app.asgi:asgi_app" --bind 0.0.0.0:8000
+```
+
+### Прод
+
+```bash
+cp .env.example .env              # DATABASE_URL (через PgBouncer, обычно :6432), REDIS_URL, SECRET_KEY
+alembic upgrade head && flask --app app seed
+flask --app app create-admin admin admin@example.com
+hypercorn "app.asgi:asgi_app" --bind 0.0.0.0:8000
+# cron раз в сутки: flask --app app recompute-ratings
 ```
 
 ### Тестовые аккаунты (создаёт `scripts/demo_data.py`)
@@ -56,7 +70,7 @@ hypercorn "app.asgi:asgi_app" --bind 0.0.0.0:8000
 **Тесты** гоняются на настоящем PostgreSQL (pgserver) с миграциями Alembic:
 
 ```bash
-pytest -q                 # 101 тест: API, RBAC, репутация, модерация, апелляции, уведомления, подписки, поиск, правка, страницы
+pytest -q                 # 104 теста: API, RBAC, репутация, модерация, апелляции, уведомления, подписки, поиск, правка, страницы
 ```
 
 E2E smoke в jsdom (настоящий `app.js` против живого сервера): см. [`tests/e2e/README.md`](tests/e2e/README.md).

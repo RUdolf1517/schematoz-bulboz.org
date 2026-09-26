@@ -15,6 +15,7 @@ dependencies = [
     "markdown>=3.6",
     "nh3>=0.2",
     "pillow>=10",
+    "python-dotenv>=1.0",
     "kremle-detect[flask] @ git+https://github.com/RUdolf1517/KremleXYZ-Detect.git",
 ]
 

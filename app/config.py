@@ -3,6 +3,12 @@ from __future__ import annotations
 
 import os
 
+try:  # .env подхватывается сам — не нужно делать export руками
+    from dotenv import load_dotenv
+    load_dotenv(os.environ.get("ENV_FILE", ".env"), override=False)
+except ImportError:  # python-dotenv — необязательная зависимость
+    pass
+
 
 def _bool(name: str, default: bool) -> bool:
     return os.environ.get(name, "1" if default else "0").lower() in {"1", "true", "yes"}
