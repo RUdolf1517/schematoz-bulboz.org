@@ -220,9 +220,12 @@ function feedCard(q) {
   const cover = q.cover_url ? `<img class="card-cover" src="${esc(q.cover_url)}" alt="" loading="lazy">` : "";
   return `<article class="card ${q.cover_url ? "has-cover" : ""}" data-href="/q/${q.id}" tabindex="-1">
     <div><span class="kind">${KIND[q.kind] || esc(q.kind)}</span>${room}<span class="q-rating" title="Рейтинг вопроса: голоса + ответы + комментарии">★ ${esc(q.rating)}</span></div>
-    ${cover}
-    <h2>${esc(q.title)}</h2>
-    ${preview}
+    <div class="card-main">
+      ${cover}
+      <h2>${esc(q.title)}</h2>
+      ${q.body ? `<p class="card-desc">${esc(mdPlain(q.body))}</p>` : ""}
+      ${preview}
+    </div>
     <div class="meta-row"><span>${answersWord(q.answers_count)}</span><span>@${esc(q.author?.username)}</span><span class="open-hint">Открыть →</span></div>
   </article>`;
 }
