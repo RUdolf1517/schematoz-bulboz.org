@@ -30,13 +30,25 @@ command -v psql >/dev/null || {
 }
 
 # Суперпользователь: на Mac/Homebrew это твой логин, на Linux — postgres (через sudo).
+pg_up() { psql -h "$DB_HOST" -p "$1" -d postgres -qtA -c "select 1" >/dev/null 2>&1 || pg_isready -q -h "$DB_HOST" -p "$1" 2>/dev/null; }
+
+# Частый случай: .env скопирован со старого примера с портом PgBouncer (6432),
+# а локальный Postgres слушает стандартный 5432 — чиним .env сами.
+if ! pg_up "$DB_PORT" && [ "$DB_PORT" != "5432" ] && pg_up 5432; then
+  echo "• На порту $DB_PORT никого нет, а PostgreSQL отвечает на 5432 — исправляю порт в .env"
+  sed -i.bak -E "s#^(DATABASE_URL=.*@[^/:]+):$DB_PORT/#\1:5432/#" .env && rm -f .env.bak
+  DB_PORT=5432
+fi
+
 ADMIN_PSQL=(psql -h "$DB_HOST" -p "$DB_PORT" -d postgres -v ON_ERROR_STOP=1 -qtA)
 if ! "${ADMIN_PSQL[@]}" -c "select 1" >/dev/null 2>&1; then
   if command -v sudo >/dev/null && sudo -u postgres psql -qtA -c "select 1" >/dev/null 2>&1; then
     ADMIN_PSQL=(sudo -u postgres psql -v ON_ERROR_STOP=1 -qtA)
   else
     echo "✗ Не могу подключиться к PostgreSQL на $DB_HOST:$DB_PORT."
-    echo "  Запущен ли он?  Mac: brew services start postgresql@16"
+    echo "  • Запущен ли он?  Mac: brew services restart postgresql@16 && brew services list"
+    echo "  • На каком порту слушает:  pg_isready; lsof -nP -iTCP -sTCP:LISTEN | grep postgres"
+    echo "  • Порт и хост берутся из DATABASE_URL в .env — поправь, если отличаются"
     exit 1
   fi
 fi

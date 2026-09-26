@@ -35,7 +35,9 @@ def db_problem(exc: BaseException, url: str = "") -> str | None:
     if "password authentication failed" in text or "InvalidPassword" in names:
         return f"PostgreSQL не принял пароль. {where}\n   Проверь логин и пароль в DATABASE_URL (.env).\n   {HINT_SETUP}"
     if "ConnectionRefused" in names or "Connect call failed" in text or "Errno 61" in text or "Errno 111" in text:
-        return (f"PostgreSQL не отвечает — он не запущен или слушает другой порт. {where}\n"
+        tip = ("\n   Порт 6432 — это PgBouncer (прод). Локальный Postgres обычно на 5432: поправь DATABASE_URL в .env"
+               if ":6432/" in (url or "") else "")
+        return (f"PostgreSQL не отвечает — он не запущен или слушает другой порт. {where}{tip}\n"
                 f"   Mac + Homebrew: brew services start postgresql@16\n   {HINT_SETUP}")
     if "nodename nor servname" in text or "Name or service not known" in text or "gaierror" in names:
         return f"Не удаётся найти хост базы данных. {where}\n   {HINT_SETUP}"
