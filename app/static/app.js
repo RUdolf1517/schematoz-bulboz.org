@@ -697,64 +697,83 @@ async function pageSettings() {
   let base;
   try { base = await api("GET", `/api/users/${encodeURIComponent(d.user.username)}`); } catch (_) { return; }
   const opts = (obj, cur) => Object.entries(obj).map(([k, v]) => `<option value="${esc(k)}"${k === cur ? " selected" : ""}>${esc(v)}</option>`).join("");
-  const chips = (name, obj, cur) => Object.entries(obj).map(([k, v]) => `<label class="pick"><input type="radio" name="${name}" value="${esc(k)}"${k === cur ? " checked" : ""}><span class="swatch ${name}-${esc(k)}"></span>${esc(v)}</label>`).join("");
+  const field = (label, control, hint = "") => `<div class="st-field"><span class="st-label">${label}</span>${control}${hint ? `<small class="st-hint">${hint}</small>` : ""}</div>`;
+  const text = (name, val, max, ph = "") => `<input class="input" name="${name}" maxlength="${max}" placeholder="${esc(ph)}" value="${esc(val)}">`;
   const lvl = d.user.level, unlimited = d.user.rating_tier > 0;
+  const SECTIONS_UI = [["basic", "👤", "Основное"], ["media", "🖼", "Аватар"], ["look", "🎨", "Оформление"], ["links", "🏷", "Интересы"], ["show", "🏆", "Витрина"], ["privacy", "🙈", "Приватность"]];
+  $("#st-nav").innerHTML = SECTIONS_UI.map(([id, e, t]) => `<a href="#st-${id}">${e} ${t}</a>`).join("");
   form.innerHTML = `
-    <section class="panel"><h2>👤 Основное</h2>
-      <label>Отображаемое имя<input class="input" name="display_name" maxlength="${L.display_name}" value="${esc(s.display_name)}"></label>
-      <label>Короткое био<textarea name="bio" rows="2" maxlength="${L.bio}">${esc(s.bio)}</textarea></label>
-      <div class="row2">
-        <label>Статус-эмодзи<input class="input" name="status_emoji" maxlength="8" placeholder="😎" value="${esc(s.status_emoji)}"></label>
-        <label>Статус<input class="input" name="status_text" maxlength="${L.status_text}" placeholder="готовлюсь к ЕГЭ 📚" value="${esc(s.status_text)}"></label>
+    <section class="st-card" id="st-basic"><h2>👤 Основное</h2>
+      <div class="st-grid">
+        ${field("Отображаемое имя", text("display_name", s.display_name, L.display_name))}
+        ${field("Местоимения", text("pronouns", s.pronouns, L.pronouns, "он/его"))}
+        ${field("Статус-эмодзи", text("status_emoji", s.status_emoji, 8, "😎"), "Только эмодзи")}
+        ${field("Город", text("city", s.city, L.city, "Казань"))}
       </div>
-      <div class="row2">
-        <label>Город<input class="input" name="city" maxlength="${L.city}" value="${esc(s.city)}"></label>
-        <label>Местоимения<input class="input" name="pronouns" maxlength="${L.pronouns}" placeholder="он/его" value="${esc(s.pronouns)}"></label>
-      </div>
-      <label>О себе (markdown, до ${L.about} символов)<textarea name="about" rows="5" maxlength="${L.about}">${esc(s.about)}</textarea></label>
+      ${field("Статус", text("status_text", s.status_text, L.status_text, "готовлюсь к ЕГЭ 📚"))}
+      ${field("Короткое био", `<textarea class="input" name="bio" rows="2" maxlength="${L.bio}">${esc(s.bio)}</textarea>`, `До ${L.bio} символов, видно под именем`)}
+      ${field("О себе", `<textarea class="input" name="about" rows="5" maxlength="${L.about}">${esc(s.about)}</textarea>`, `Markdown, до ${L.about} символов. Отдельный блок на профиле`)}
     </section>
-    <section class="panel"><h2>🖼 Аватар и обложка</h2>
-      <div class="media-row"><div id="av-prev"></div>
-        <label class="btn btn-sm btn-ghost">Загрузить аватар<input type="file" accept="image/*" id="av-file" hidden></label>
-        <button type="button" class="btn btn-sm btn-ghost" id="av-clear">Убрать</button></div>
-      <div class="media-row"><div id="bn-prev" class="bn-prev"></div>
-        <label class="btn btn-sm btn-ghost">Загрузить обложку<input type="file" accept="image/*" id="bn-file" hidden></label>
-        <button type="button" class="btn btn-sm btn-ghost" id="bn-clear">Убрать</button></div>
+
+    <section class="st-card" id="st-media"><h2>🖼 Аватар и обложка</h2>
+      <div class="st-media">
+        <div class="st-media-item">
+          <div id="av-prev" class="st-av-prev"></div>
+          <div class="st-btns"><label class="btn btn-sm btn-ghost st-file">Загрузить аватар<input type="file" accept="image/*" id="av-file"></label>
+            <button type="button" class="btn btn-sm btn-ghost" id="av-clear">Убрать</button></div>
+        </div>
+        <div class="st-media-item st-media-wide">
+          <div id="bn-prev" class="st-bn-prev"></div>
+          <div class="st-btns"><label class="btn btn-sm btn-ghost st-file">Загрузить обложку<input type="file" accept="image/*" id="bn-file"></label>
+            <button type="button" class="btn btn-sm btn-ghost" id="bn-clear">Убрать</button></div>
+        </div>
+      </div>
       <h3>Рамка аватара</h3>
-      <div class="picks">${Object.entries(O.frames).map(([k, f]) => { const locked = !unlimited && lvl < f.min_level;
-        return `<label class="pick${locked ? " locked" : ""}" title="${locked ? `Откроется на ${f.min_level} уровне` : ""}"><input type="radio" name="avatar_frame" value="${esc(k)}"${k === s.avatar_frame ? " checked" : ""}${locked ? " disabled" : ""}><span class="avatar frame-${esc(k)}">${initial(d.user.username)}</span>${esc(f.title)}${locked ? ` 🔒${f.min_level}` : ""}</label>`; }).join("")}</div>
+      <div class="st-options">${Object.entries(O.frames).map(([k, f]) => { const locked = !unlimited && lvl < f.min_level;
+        return `<label class="st-opt${locked ? " is-locked" : ""}" title="${locked ? `Откроется на ${f.min_level} уровне` : ""}"><input type="radio" name="avatar_frame" value="${esc(k)}"${k === s.avatar_frame ? " checked" : ""}${locked ? " disabled" : ""}>
+          <span class="st-opt-body"><span class="avatar frame-${esc(k)}">${initial(d.user.username)}</span><span>${esc(f.title)}</span>${locked ? `<small>🔒 ур. ${f.min_level}</small>` : ""}</span></label>`; }).join("")}</div>
     </section>
-    <section class="panel"><h2>🎨 Оформление</h2>
-      <h3>Тема</h3><div class="picks">${chips("theme", O.themes, s.theme)}</div>
-      <div class="row2">
-        <label>Акцентный цвет<span class="accent-row"><input type="color" name="accent" value="${esc(s.accent || "#ff5a36")}"><label class="toggle-inline"><input type="checkbox" name="accent_on"${s.accent ? " checked" : ""}> свой цвет</label></span></label>
-        <label>Шрифт<select name="font">${opts(O.fonts, s.font)}</select></label>
+
+    <section class="st-card" id="st-look"><h2>🎨 Оформление</h2>
+      <h3>Тема</h3>
+      <div class="st-options st-themes">${Object.entries(O.themes).map(([k, v]) => `<label class="st-opt"><input type="radio" name="theme" value="${esc(k)}"${k === s.theme ? " checked" : ""}>
+        <span class="st-opt-body"><span class="st-swatch sw-${esc(k)}"></span><span>${esc(v)}</span></span></label>`).join("")}</div>
+      <div class="st-grid">
+        <div class="st-field"><span class="st-label">Акцентный цвет</span>
+          <div class="st-accent"><input type="color" name="accent" value="${esc(s.accent || "#ff5a36")}">
+            <label class="st-check"><input type="checkbox" name="accent_on"${s.accent ? " checked" : ""}> свой цвет вместо цвета темы</label></div></div>
+        ${field("Шрифт", `<select class="input" name="font">${opts(O.fonts, s.font)}</select>`)}
+        ${field("Карточки", `<select class="input" name="card_style">${opts(O.card_styles, s.card_style)}</select>`)}
+        ${field("Шапка профиля", `<select class="input" name="layout">${opts(O.layouts, s.layout)}</select>`)}
       </div>
-      <div class="row2">
-        <label>Карточки<select name="card_style">${opts(O.card_styles, s.card_style)}</select></label>
-        <label>Раскладка шапки<select name="layout">${opts(O.layouts, s.layout)}</select></label>
-      </div>
     </section>
-    <section class="panel"><h2>🏷 Интересы и ссылки</h2>
-      <label>Интересы через запятую (до ${L.interests})<input class="input" name="interests" value="${esc(s.interests.join(", "))}" placeholder="аниме, физика, cs2"></label>
-      <div id="links"></div>
-      <button type="button" class="btn btn-sm btn-ghost" id="add-link">+ ссылка</button>
+
+    <section class="st-card" id="st-links"><h2>🏷 Интересы и ссылки</h2>
+      ${field("Интересы", text("interests", s.interests.join(", "), 400, "аниме, физика, cs2"), `Через запятую, до ${L.interests}`)}
+      <div class="st-field"><span class="st-label">Ссылки</span><div id="links" class="st-links"></div>
+        <button type="button" class="btn btn-sm btn-ghost" id="add-link">+ Добавить ссылку</button>
+        <small class="st-hint">До ${L.links} ссылок, только https://</small></div>
     </section>
-    <section class="panel"><h2>🏆 Витрина и закреп</h2>
-      <p class="muted">Выбери до ${L.showcase_badges} бейджей, они будут в шапке профиля.</p>
-      <div class="picks">${d.badges.length ? d.badges.map((b) => `<label class="pick"><input type="checkbox" name="showcase" value="${esc(b.code)}"${s.showcase_badges.includes(b.code) ? " checked" : ""}>${esc(b.emoji)} ${esc(b.title)}</label>`).join("") : `<span class="muted">Бейджей пока нет</span>`}</div>
-      <label>Закреплённый ответ<select name="pinned_answer_id"><option value="">— не закреплять —</option>${d.answers.map((a) => `<option value="${a.id}"${a.id === s.pinned_answer_id ? " selected" : ""}>${esc(a.question_title.slice(0, 80))}</option>`).join("")}</select></label>
+
+    <section class="st-card" id="st-show"><h2>🏆 Витрина и закреп</h2>
+      <div class="st-field"><span class="st-label">Бейджи в шапке профиля</span>
+        <div class="st-options">${d.badges.length ? d.badges.map((b) => `<label class="st-opt"><input type="checkbox" name="showcase" value="${esc(b.code)}"${s.showcase_badges.includes(b.code) ? " checked" : ""}>
+          <span class="st-opt-body"><span class="st-emoji">${esc(b.emoji)}</span><span>${esc(b.title)}</span></span></label>`).join("") : `<span class="muted">Бейджей пока нет: ответь на пару вопросов</span>`}</div>
+        <small class="st-hint">До ${L.showcase_badges} штук</small></div>
+      ${field("Закреплённый ответ", `<select class="input" name="pinned_answer_id"><option value="">— не закреплять —</option>${d.answers.map((a) => `<option value="${a.id}"${a.id === s.pinned_answer_id ? " selected" : ""}>${esc(a.question_title.slice(0, 80))}</option>`).join("")}</select>`, d.answers.length ? "" : "Появится, когда ответишь на вопрос")}
     </section>
-    <section class="panel"><h2>🙈 Приватность разделов</h2>
-      <p class="muted">Отмеченные разделы увидишь только ты.</p>
-      <div class="picks">${Object.entries(O.sections).map(([k, v]) => `<label class="pick"><input type="checkbox" name="hidden" value="${esc(k)}"${s.hidden_sections.includes(k) ? " checked" : ""}>${esc(v)}</label>`).join("")}</div>
+
+    <section class="st-card" id="st-privacy"><h2>🙈 Приватность</h2>
+      <p class="muted st-lead">Отмеченные разделы видишь только ты. Сервер не отдаёт их даже через API.</p>
+      <div class="st-toggles">${Object.entries(O.sections).map(([k, v]) => `<label class="st-check st-toggle"><input type="checkbox" name="hidden" value="${esc(k)}"${s.hidden_sections.includes(k) ? " checked" : ""}> Скрыть: ${esc(v)}</label>`).join("")}</div>
     </section>
-    <div class="save-bar"><button class="btn btn-accent">Сохранить</button> <a class="btn btn-ghost" href="/u/${encodeURIComponent(d.user.username)}">Открыть профиль</a></div>`;
+
+    <div class="st-save"><button class="btn btn-accent">💾 Сохранить</button><a class="btn btn-ghost" href="/u/${encodeURIComponent(d.user.username)}">Открыть профиль</a><span class="st-dirty muted" id="st-dirty" hidden>Есть несохранённые изменения</span></div>`;
 
   let links = [...s.links];
   let avatar = s.avatar_url, banner = s.banner_url;
   const renderLinks = () => {
-    $("#links").innerHTML = links.map((l, i) => `<div class="row2 link-row"><input class="input" data-i="${i}" data-k="title" placeholder="Название" maxlength="30" value="${esc(l.title)}"><input class="input" data-i="${i}" data-k="url" placeholder="https://…" value="${esc(l.url)}"><button type="button" class="btn btn-sm btn-ghost" data-del="${i}">✕</button></div>`).join("");
+    $("#links").innerHTML = links.map((l, i) => `<div class="st-link"><input class="input" data-i="${i}" data-k="title" placeholder="Название" maxlength="30" value="${esc(l.title)}"><input class="input" data-i="${i}" data-k="url" placeholder="https://…" value="${esc(l.url)}"><button type="button" class="btn btn-sm btn-ghost" data-del="${i}" aria-label="Удалить">✕</button></div>`).join("");
     $("#add-link").hidden = links.length >= L.links;
   };
   $("#links").addEventListener("input", (e) => { const t = e.target; if (t.dataset.i) { links[+t.dataset.i][t.dataset.k] = t.value; preview(); } });
@@ -790,24 +809,25 @@ async function pageSettings() {
     $("#av-prev").innerHTML = avatarHTML(user, "lg");
     $("#bn-prev").style.backgroundImage = banner ? `url('${banner}')` : "";
   };
-  form.addEventListener("input", preview);
-  form.addEventListener("change", preview);
+  const dirty = () => { $("#st-dirty").hidden = false; };
+  form.addEventListener("input", () => { preview(); dirty(); });
+  form.addEventListener("change", () => { preview(); dirty(); });
   const hook = (inputId, set) => {
     $(inputId).onchange = async (e) => {
       const file = e.target.files[0]; e.target.value = "";
       if (!file) return;
-      try { const r = await uploadImage(file); set(r.url); preview(); toast("Загружено, не забудь сохранить"); } catch (_) {}
+      try { const r = await uploadImage(file); set(r.url); preview(); dirty(); toast("Загружено, не забудь сохранить"); } catch (_) {}
     };
   };
   hook("#av-file", (u) => (avatar = u)); hook("#bn-file", (u) => (banner = u));
-  $("#av-clear").onclick = () => { avatar = null; preview(); };
-  $("#bn-clear").onclick = () => { banner = null; preview(); };
+  $("#av-clear").onclick = () => { avatar = null; preview(); dirty(); };
+  $("#bn-clear").onclick = () => { banner = null; preview(); dirty(); };
   form.onsubmit = async (e) => {
     e.preventDefault();
     try {
       const r = await api("PATCH", "/api/me/profile", collect());
       base.user = { ...base.user, ...r.user }; base.custom = { ...base.custom, ...r.settings };
-      toast("Профиль сохранён ✨"); preview();
+      toast("Профиль сохранён ✨"); preview(); $("#st-dirty").hidden = true;
     } catch (_) {}
   };
   preview();

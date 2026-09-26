@@ -1,9 +1,24 @@
 {% extends "base.html" %}
+{% block title %}Настройки профиля — schematoz-bulboz.org{% endblock %}
+{% block main_class %}main-wide{% endblock %}
 {% block content %}
-<h1>Настройки профиля</h1>
-<div class="settings-layout">
-  <form class="settings-form" id="settings-form"><p class="muted">Загружаем…</p></form>
-  <aside class="settings-preview"><div class="sticky"><b class="muted">Превью</b><div id="preview"></div></div></aside>
+<div class="st-page">
+  <header class="st-header">
+    <h1>Настройки профиля</h1>
+    <p class="muted">Всё, что меняешь слева, сразу видно в превью. Сохраняется по кнопке внизу.</p>
+  </header>
+  <div class="st-layout">
+    <div class="st-col">
+      <nav class="st-nav" id="st-nav"></nav>
+      <form class="st-form form" id="settings-form" novalidate><p class="muted">Загружаем…</p></form>
+      <section class="st-card" id="login-keys"></section>
+    </div>
+    <aside class="st-aside">
+      <div class="st-aside-inner">
+        <div class="st-aside-title">👀 Так тебя видят другие</div>
+        <div class="st-preview" id="preview"></div>
+      </div>
+    </aside>
+  </div>
 </div>
-<div class="panel" id="login-keys"></div>
 {% endblock %}
