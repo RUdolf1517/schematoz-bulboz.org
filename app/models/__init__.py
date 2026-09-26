@@ -8,10 +8,10 @@ from .enums import *  # noqa: F401,F403
 from .gamification import Notification, UserBadge
 from .moderation import Ban, ModAction, Report
 from .site import LegalPage, LegalPageVersion, Setting, UserConsent
-from .user import Permission, Role, User, UserRole, role_permissions
+from .user import LoginKey, Permission, Role, User, UserRole, role_permissions
 
 __all__ = [
-    "Base", "User", "Role", "Permission", "UserRole", "role_permissions",
+    "Base", "User", "LoginKey", "Role", "Permission", "UserRole", "role_permissions",
     "Category", "Room", "RoomMember", "Question", "Answer", "AnswerMedia", "Vote",
     "ReputationEvent", "DebateVote", "Follow", "Report", "Ban", "ModAction",
     "UserBadge", "Notification", "LegalPage", "LegalPageVersion", "UserConsent", "Setting",

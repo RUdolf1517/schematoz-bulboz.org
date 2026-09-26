@@ -62,3 +62,15 @@ class User(TimestampMixin, Base):
         lazy="selectin",
         viewonly=True,
     )
+
+
+class LoginKey(Base):
+    """Ключ из «файла входа». Храним только sha256 — сам ключ видит лишь пользователь."""
+    __tablename__ = "login_keys"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    label: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

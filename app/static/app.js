@@ -509,6 +509,10 @@ async function pageProfile() {
       fb.className = `btn btn-sm ${following ? "btn-ghost" : "btn-accent"}`;
     } catch (_) {}
   };
+  if (ME && ME.user.id === u.id) {
+    root.insertAdjacentHTML("beforeend", `<div class="panel" id="login-keys"></div>`);
+    loginKeysPanel($("#login-keys"));
+  }
   $("#share-profile").onclick = () => shareDialog(`/api/share/user/${encodeURIComponent(u.username)}.png`, `/u/${encodeURIComponent(u.username)}`);
 }
 
@@ -537,6 +541,67 @@ async function pageAuth() {
       }
     }
   };
+  if (mode === "login") initFileLogin(next);
+}
+
+async function loginWithKeyFile(file, next) {
+  let parsed;
+  try {
+    if (file.size > 4096) throw new Error("big");
+    const text = (await file.text()).trim();
+    parsed = text.startsWith("{") ? JSON.parse(text) : { key: text };
+  } catch (_) { toast("Это не файл входа schematoz-bulboz", true); return; }
+  try {
+    const r = await api("POST", "/api/auth/login-file", { key: parsed.key }, { quiet: true });
+    toast(`Привет, @${r.user.username}!`);
+    location.href = r.banned ? "/banned" : next;
+  } catch (err) {
+    if (err.data?.error === "captcha_required") {
+      toast("Слишком много попыток — реши задачку из ЕГЭ и попробуй снова", true);
+      setTimeout(() => (location.href = `/captcha?next=${encodeURIComponent(here())}`), 1200);
+    } else toast(err.data?.message || "Не получилось войти", true);
+  }
+}
+
+function initFileLogin(next) {
+  const input = $("#keyfile"), drop = $("#file-drop");
+  if (!input) return;
+  input.onchange = () => { if (input.files[0]) loginWithKeyFile(input.files[0], next); input.value = ""; };
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (e) => {
+    e.preventDefault(); drop.classList.remove("over");
+    if (e.dataTransfer.files[0]) loginWithKeyFile(e.dataTransfer.files[0], next);
+  });
+}
+
+async function loginKeysPanel(root) {
+  async function render() {
+    const d = await api("GET", "/api/auth/login-keys");
+    root.innerHTML = `<h2 style="margin-top:0">🔑 Файлы входа</h2>
+      <p class="muted" style="font-size:13px">Скачай файл — и входи им на странице входа без логина и пароля. Храни его как пароль: кто получил файл, тот вошёл. Потерял — отзови.</p>
+      ${d.items.length ? `<table class="list">${d.items.map((k) => `<tr><td>${esc(k.label)}</td><td class="muted">создан ${esc(fmtDate(k.created_at))}<br>${k.last_used_at ? "вход " + esc(fmtDate(k.last_used_at)) : "ещё не использовался"}</td><td><button class="btn btn-sm btn-ghost" data-revoke="${k.id}">Отозвать</button></td></tr>`).join("")}</table>` : ""}
+      <button class="btn btn-accent btn-sm" id="new-key" ${d.items.length >= d.max ? "disabled" : ""}>Скачать новый файл входа</button>`;
+    $("#new-key", root).onclick = async () => {
+      const label = prompt("Название (например, «Ноутбук» или «Телефон»)", "Файл входа");
+      if (label === null) return;
+      try {
+        const r = await api("POST", "/api/auth/login-keys", { label });
+        const blob = new Blob([JSON.stringify(r.file, null, 2)], { type: "application/json" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob); a.download = r.filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        toast("Файл скачан. Второй раз его не скачать — храни надёжно");
+        render();
+      } catch (_) {}
+    };
+    $$("[data-revoke]", root).forEach((b) => (b.onclick = async () => {
+      if (!confirm("Отозвать ключ? Войти этим файлом больше не получится.")) return;
+      try { await api("DELETE", `/api/auth/login-keys/${b.dataset.revoke}`); toast("Ключ отозван"); render(); } catch (_) {}
+    }));
+  }
+  await render();
 }
 
 // ---------------------------------------------------------------- banned / appeal

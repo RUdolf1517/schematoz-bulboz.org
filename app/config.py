@@ -23,6 +23,8 @@ class Config:
     if _bool("COOKIE_CROSS_SITE", False):
         SESSION_COOKIE_SAMESITE = "None"
         SESSION_COOKIE_SECURE = True
+        # Partitioned (CHIPS): иначе Chrome блокирует стороннюю cookie во фрейме — и вход «не работает»
+        SESSION_COOKIE_PARTITIONED = True
     # Показывать тестовые аккаунты на странице входа (НИКОГДА не включать в проде)
     DEMO_MODE = _bool("DEMO_MODE", False)
     SESSION_TTL_SECONDS = 30 * 24 * 3600

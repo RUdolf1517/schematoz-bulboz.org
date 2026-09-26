@@ -240,3 +240,11 @@ table.list td, table.list th { padding: 8px 6px; border-bottom: 1px solid var(--
 .follow-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
 .freeze { font-size: 13px; opacity: .85; }
 .edit-box textarea, .edit-box input { width: 100%; }
+
+/* --- файл входа --- */
+.or-sep { display: flex; align-items: center; gap: 10px; margin: 18px 0 10px; opacity: .6; font-size: 13px; }
+.or-sep::before, .or-sep::after { content: ""; flex: 1; border-top: 1px solid currentColor; opacity: .4; }
+.file-drop { display: flex; flex-direction: column; gap: 4px; align-items: center; text-align: center; padding: 18px; cursor: pointer;
+  border: 2px dashed rgba(255,255,255,.25); border-radius: 14px; }
+.file-drop.over, .file-drop:hover { border-color: var(--accent, #b4ff39); }
+.file-drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
