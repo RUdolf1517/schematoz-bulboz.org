@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..errors import ApiError
 from ..models import Answer, ContentStatus, Question, RepReason, ReputationEvent, User, Vote
 from .gamification import on_scheme
+from .notifications import notify
 from .ranking import hot_score
 
 AUTHOR_VALUES = frozenset({5, -1})
@@ -120,6 +121,8 @@ async def cast_vote(s: AsyncSession, voter: User, answer_id: int, value: int) ->
         await _apply_rep(s, user_id=answer.author_id, delta=value, reason=_reason(value, is_author),
                          actor_id=voter.id, answer=answer, question=question)
         if is_author and value == BEST_ANSWER_VALUE:
+            notify(s, answer.author_id, "scheme", question_id=question.id, answer_id=answer.id,
+                   question_title=question.title[:120])
             new_badges = await on_scheme(s, answer.author_id)  # бейджи получает автор ответа
 
     if is_author:

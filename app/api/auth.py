@@ -23,7 +23,7 @@ MIN_AGE = 14
 
 
 @bp.post("/auth/register")
-@captcha_required(always=True)
+@captcha_required()  # капча только при подозрительной активности
 async def register():
     data = json_body()
     username = (req_str(data, "username", min_len=3, max_len=32) or "").lower()
@@ -62,7 +62,7 @@ async def register():
 
 
 @bp.post("/auth/login")
-@captcha_required(always=True)
+@captcha_required()  # после 5 неудачных входов за 15 минут — капча
 async def login():
     data = json_body()
     login_ = (req_str(data, "login", max_len=254) or "").lower()
@@ -90,8 +90,12 @@ async def logout():
 @login_required
 async def me():
     from ..auth.rbac import get_user_perms
+    from ..services.notifications import unread_count
     ban = await active_global_ban(g.user.id)
+    async with session_scope() as s:
+        unread = await unread_count(s, g.user.id)
     return {"user": user_public(g.user), "roles": [r.code for r in g.user.roles],
+            "unread_notifications": unread,
             "permissions": sorted(await get_user_perms(g.user.id)),
             "ban": {"id": ban.id, "reason": ban.reason,
                     "ends_at": ban.ends_at.isoformat() if ban.ends_at else None,

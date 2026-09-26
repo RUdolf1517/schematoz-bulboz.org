@@ -2,6 +2,8 @@
 
 Стрик: день засчитывается, если пользователь ОТВЕТИЛ хотя бы на один вопрос
 (просто зайти мало). Дни считаются по московскому времени.
+Заморозка: одна в ISO-неделю. Если пропущен ровно один день, заморозка тратится
+автоматически и стрик продолжается.
 """
 from __future__ import annotations
 
@@ -14,6 +16,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Answer, ContentStatus, Question, RepReason, ReputationEvent, User, UserBadge
+from .notifications import notify
 
 MSK = ZoneInfo("Europe/Moscow")
 
@@ -57,20 +60,38 @@ def msk_today(now: datetime | None = None) -> date:
     return (now or datetime.now(MSK)).astimezone(MSK).date()
 
 
-def next_streak(current: int, last: date | None, today: date) -> int:
+def iso_week(d: date) -> str:
+    y, w, _ = d.isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def freeze_available(freeze_week: str | None, today: date) -> bool:
+    return freeze_week != iso_week(today)
+
+
+def next_streak(current: int, last: date | None, today: date,
+                freeze_week: str | None = "used") -> tuple[int, bool]:
+    """Возвращает (новый стрик, потрачена ли заморозка)."""
     if last == today:
-        return current
+        return current, False
     if last == today - timedelta(days=1):
-        return current + 1
-    return 1
+        return current + 1, False
+    if last == today - timedelta(days=2) and current > 0 and freeze_available(freeze_week, today):
+        return current + 1, True
+    return 1, False
 
 
-def visible_streak(current: int, last: date | None, today: date | None = None) -> int:
-    """Стрик «сгорает», если вчера и сегодня не было ответов."""
+def visible_streak(current: int, last: date | None, today: date | None = None,
+                   freeze_week: str | None = "used") -> int:
+    """Стрик «сгорает», если вчера и сегодня не было ответов (с учётом доступной заморозки)."""
     today = today or msk_today()
-    if last is None or last < today - timedelta(days=1):
+    if last is None:
         return 0
-    return current
+    if last >= today - timedelta(days=1):
+        return current
+    if last == today - timedelta(days=2) and freeze_available(freeze_week, today):
+        return current  # ещё можно спасти: сегодняшний ответ потратит заморозку
+    return 0
 
 
 async def award(s: AsyncSession, user_id: int, code: str) -> bool:
@@ -80,7 +101,11 @@ async def award(s: AsyncSession, user_id: int, code: str) -> bool:
         insert(UserBadge).values(user_id=user_id, code=code)
         .on_conflict_do_nothing().returning(UserBadge.code)
     )
-    return res.scalar() is not None
+    new = res.scalar() is not None
+    if new:
+        b = BADGES[code]
+        notify(s, user_id, "badge", code=code, title=b.title, emoji=b.emoji)
+    return new
 
 
 async def on_answer_created(s: AsyncSession, user: User, answer: Answer,
@@ -88,7 +113,10 @@ async def on_answer_created(s: AsyncSession, user: User, answer: Answer,
     now = (now or datetime.now(MSK)).astimezone(MSK)
     today = now.date()
     db_user = await s.get(User, user.id, with_for_update=True)
-    db_user.streak_days = next_streak(db_user.streak_days, db_user.streak_last_date, today)
+    db_user.streak_days, used_freeze = next_streak(
+        db_user.streak_days, db_user.streak_last_date, today, db_user.streak_freeze_week)
+    if used_freeze:
+        db_user.streak_freeze_week = iso_week(today)
     db_user.streak_last_date = today
 
     new = []

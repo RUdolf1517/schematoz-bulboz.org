@@ -69,7 +69,6 @@ def make_user(app):
     def _make(role: str = "user", username: str | None = None):
         client = app.test_client()
         name = username or f"user{next(_n)}"
-        pass_captcha(client)
         r = client.post("/api/auth/register", json={
             "username": name, "email": f"{name}@example.com", "password": "correct-horse",
             "birth_year": 2008, "accept_terms": True,

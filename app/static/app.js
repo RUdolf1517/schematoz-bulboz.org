@@ -460,10 +460,7 @@ async function pageProfile() {
 async function pageAuth() {
   const root = $("#auth");
   const mode = root.dataset.mode, next = root.dataset.next || "/";
-  const status = await fetch("/kremle/status", { credentials: "same-origin" }).then((r) => r.json()).catch(() => ({ verified: false }));
   const form = $("#auth-form");
-  $("#captcha-step").hidden = status.verified;
-  form.hidden = !status.verified;
   form.onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(form);
@@ -476,12 +473,11 @@ async function pageAuth() {
     } catch (err) {
       btn.disabled = false;
       if (err.data?.error === "captcha_required") {
-        // капча «тратится» на одну попытку — нужна новая
-        toast("Нужна новая капча — это защита от подбора пароля", true);
-        $("#captcha-step").hidden = false; form.hidden = true;
+        // капча только при подозрительной активности (например, много неудачных входов)
+        toast("Слишком много попыток — реши задачку из ЕГЭ и попробуй снова", true);
+        setTimeout(() => (location.href = `/captcha?next=${encodeURIComponent(here())}`), 1200);
       } else {
         toast(err.data?.message || "Ошибка", true);
-        if (err.status !== 400) { $("#captcha-step").hidden = false; form.hidden = true; }
       }
     }
   };

@@ -1,25 +1,27 @@
 from tests.conftest import pass_captcha
 
 
-def test_register_requires_captcha(app):
+def test_register_and_login_without_captcha(app):
     c = app.test_client()
-    r = c.post("/api/auth/register", json={"username": "bot", "email": "b@x.ru",
-                                           "password": "12345678", "birth_year": 2000,
+    r = c.post("/api/auth/register", json={"username": "nocaptcha", "email": "n@x.ru",
+                                           "password": "12345678", "birth_year": 2005,
                                            "accept_terms": True})
-    assert r.status_code == 403
-    assert r.json["error"] == "captcha_required"
-    assert r.json["challenge_url"] == "/kremle/challenge"
-
-
-def test_captcha_is_consumed_per_login(app, make_user):
-    c, user = make_user(username="dasha")
+    assert r.status_code == 201, r.json
     c.post("/api/auth/logout")
-    body = {"login": "dasha", "password": "correct-horse"}
-    assert c.post("/api/auth/login", json=body).status_code == 403
+    assert c.post("/api/auth/login", json={"login": "nocaptcha", "password": "12345678"}).status_code == 200
+
+
+def test_bruteforce_triggers_captcha(app, make_user):
+    make_user(username="victim2")
+    c = app.test_client()
+    bad = {"login": "victim2", "password": "wrong-password"}
+    for _ in range(6):
+        assert c.post("/api/auth/login", json=bad).status_code == 401
+    good = {"login": "victim2", "password": "correct-horse"}
+    r = c.post("/api/auth/login", json=good)
+    assert r.status_code == 403 and r.json["error"] == "captcha_required"
     pass_captcha(c)
-    assert c.post("/api/auth/login", json=body).status_code == 200
-    c.post("/api/auth/logout")
-    assert c.post("/api/auth/login", json=body).status_code == 403  # капча снова нужна
+    assert c.post("/api/auth/login", json=good).status_code == 200
 
 
 def test_too_young(app):

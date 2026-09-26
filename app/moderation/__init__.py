@@ -15,6 +15,7 @@ from ..models import (
     ReportStatus, ReportTarget, User,
 )
 from ..services.modlog import log_action
+from ..services.notifications import notify
 from ..api.utils import json_body
 
 bp = Blueprint("mod", __name__, url_prefix="/mod")
@@ -156,6 +157,8 @@ async def ban():
         s.add(b)
         await s.flush()
         log_action(s, g.user.id, "ban.issue", "user", user_id, ban_id=b.id, days=days, reason=reason)
+        notify(s, user_id, "ban", ban_id=b.id, reason=reason,
+               until=ends_at.isoformat() if ends_at else None)
         ban_id = b.id
     revoke_all_sessions(user_id)
     return {"ban_id": ban_id, "ends_at": ends_at.isoformat() if ends_at else None}, 201
@@ -234,4 +237,5 @@ async def decide_appeal(ban_id: int):
             b.lifted_by, b.lifted_at = g.user.id, now
         log_action(s, g.user.id, f"appeal.{decision}", "user", b.user_id, ban_id=ban_id,
                    comment=b.appeal_comment)
+        notify(s, b.user_id, "appeal", ban_id=ban_id, decision=decision, comment=b.appeal_comment)
     return {"ok": True, "appeal_status": b.appeal_status.value}

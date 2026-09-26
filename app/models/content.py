@@ -77,6 +77,7 @@ class Question(TimestampMixin, Base):
         ForeignKey("answers.id", use_alter=True, ondelete="SET NULL")
     )
     score_hot: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     answers_count: Mapped[int] = mapped_column(default=0, server_default="0")
     views_count: Mapped[int] = mapped_column(default=0, server_default="0")
 
@@ -106,6 +107,7 @@ class Answer(TimestampMixin, Base):
         server_default=ContentStatus.ACTIVE.value,
     )
     score: Mapped[int] = mapped_column(default=0, server_default="0")
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     media: Mapped["AnswerMedia | None"] = relationship(
         back_populates="answer", uselist=False, lazy="noload"

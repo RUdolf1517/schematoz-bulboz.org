@@ -3,13 +3,7 @@
 <div class="panel form auth" id="auth" data-mode="{{ mode }}" data-next="{{ next }}">
   <h1>{{ 'Вход' if mode == 'login' else 'Регистрация' }}</h1>
 
-  <div class="captcha-step" id="captcha-step" hidden>
-    <p>Сначала докажи, что ты не бот: реши пару задачек из ЕГЭ 🧮</p>
-    <a class="btn btn-accent" id="captcha-link" href="/captcha?next={{ request.full_path|urlencode }}">Решить задачки</a>
-  </div>
-
-  <form id="auth-form" hidden>
-    <p class="ok-note">✅ Капча пройдена — можно {{ 'входить' if mode == 'login' else 'регистрироваться' }}</p>
+  <form id="auth-form">
     {% if mode == 'login' %}
       <label>Ник или email <input name="login" required autocomplete="username"></label>
       <label>Пароль <input name="password" type="password" required autocomplete="current-password"></label>

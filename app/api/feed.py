@@ -6,12 +6,12 @@ from sqlalchemy import select
 from ..auth.sessions import current_user_id
 from ..db import session_scope
 from ..errors import ApiError
-from ..models import Answer, ContentStatus, Question, Room, RoomMember, User
+from ..models import Answer, ContentStatus, Follow, Question, Room, RoomMember, User
 from . import bp
 from .utils import answer_out, question_out
 
 PAGE = 20
-TABS = {"hot", "new", "unanswered", "my_rooms"}
+TABS = {"hot", "new", "unanswered", "my_rooms", "following"}
 
 
 def best_answer_order(q_best_id):
@@ -43,7 +43,12 @@ async def feed():
                 raise ApiError("Нужно войти", 401, "unauthorized")
             stmt = stmt.where(Question.room_id.in_(
                 select(RoomMember.room_id).where(RoomMember.user_id == uid)))
-        order = ((Question.id.desc(),) if tab in {"new", "unanswered"}
+        if tab == "following":
+            if not uid:
+                raise ApiError("Нужно войти", 401, "unauthorized")
+            stmt = stmt.where(Question.author_id.in_(
+                select(Follow.followee_id).where(Follow.follower_id == uid)))
+        order = ((Question.id.desc(),) if tab in {"new", "unanswered", "following"}
                  else (Question.score_hot.desc(), Question.id.desc()))
         rows = (await s.execute(stmt.order_by(*order).offset(offset).limit(PAGE))).all()
 

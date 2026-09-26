@@ -51,6 +51,8 @@ class User(TimestampMixin, Base):
     level: Mapped[int] = mapped_column(SmallInteger, default=1, server_default="1")
     streak_days: Mapped[int] = mapped_column(default=0, server_default="0")
     streak_last_date: Mapped[date | None]
+    # ISO-неделя последней использованной заморозки стрика, например "2026-W39"
+    streak_freeze_week: Mapped[str | None] = mapped_column(String(8))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     roles: Mapped[list[Role]] = relationship(

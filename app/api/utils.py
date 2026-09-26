@@ -8,7 +8,7 @@ from flask import request
 from ..errors import ApiError
 from ..models import Answer, Question, User
 from ..services.answer_content import serialize_answer
-from ..services.gamification import level_name, visible_streak
+from ..services.gamification import freeze_available, level_name, msk_today, visible_streak
 
 
 def json_body() -> dict[str, Any]:
@@ -42,7 +42,8 @@ def user_public(u: User) -> dict:
     return {"id": u.id, "username": u.username, "display_name": u.display_name,
             "avatar_url": u.avatar_url, "reputation": max(u.reputation, 0), "level": u.level,
             "level_name": level_name(u.level),
-            "streak_days": visible_streak(u.streak_days, u.streak_last_date)}
+            "streak_days": visible_streak(u.streak_days, u.streak_last_date, None, u.streak_freeze_week),
+            "streak_freeze_available": freeze_available(u.streak_freeze_week, msk_today())}
 
 
 def answer_out(a: Answer, author: User | None = None, *, is_best: bool = False,
@@ -54,6 +55,7 @@ def answer_out(a: Answer, author: User | None = None, *, is_best: bool = False,
         "debate_side": a.debate_side.value if a.debate_side else None,
         "score": a.score, "is_best": is_best, "my_vote": my_vote,
         "created_at": a.created_at.isoformat(),
+        "edited_at": a.edited_at.isoformat() if a.edited_at else None,
     }
 
 
@@ -67,5 +69,6 @@ def question_out(q: Question, author: User | None = None, top_answer: dict | Non
         "debate": {"a": q.debate_side_a, "b": q.debate_side_b} if q.kind.value == "debate" else None,
         "best_answer_id": q.best_answer_id, "answers_count": q.answers_count,
         "status": q.status.value, "created_at": q.created_at.isoformat(),
+        "edited_at": q.edited_at.isoformat() if q.edited_at else None,
         "top_answer": top_answer,
     }

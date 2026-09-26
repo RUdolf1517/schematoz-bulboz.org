@@ -4,8 +4,9 @@ from sqlalchemy import case, func, select
 
 from ..db import session_scope
 from ..errors import ApiError
+from ..auth.sessions import current_user_id
 from ..models import (
-    Answer, ContentStatus, Question, RepReason, ReputationEvent, Room, User,
+    Answer, ContentStatus, Follow, Question, RepReason, ReputationEvent, Room, User,
 )
 from ..services.gamification import user_badges
 from . import bp
@@ -65,6 +66,12 @@ async def profile(username: str):
                                                 Answer.status == ContentStatus.ACTIVE).scalar_subquery(),
         ))).one()
         badges = await user_badges(s, user.id)
+        from .social import follow_counts
+        counts = await follow_counts(s, user.id)
+        viewer = current_user_id()
+        i_follow = None
+        if viewer and viewer != user.id:
+            i_follow = await s.get(Follow, (viewer, user.id)) is not None
 
     topics = [{
         "room_id": room_id, "room_slug": slug, "title": title or "Общая лента",
@@ -74,7 +81,8 @@ async def profile(username: str):
     return {
         "user": {**user_public(user), "bio": user.bio, "created_at": user.created_at.isoformat()},
         "stats": {"questions": stats[0], "answers": stats[1],
-                  "schemes": sum(t["schemes"] for t in topics)},
+                  "schemes": sum(t["schemes"] for t in topics), **counts},
+        "i_follow": i_follow,
         "topics": topics,
         "badges": badges,
         "best_answers": [{"answer_id": a.id, "question_id": q.id, "question_title": q.title,
