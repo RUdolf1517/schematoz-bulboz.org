@@ -55,7 +55,7 @@ def test_follow_and_following_feed(make_user):
     b_c, b = make_user(username="star")
     assert a_c.put("/api/users/fan/follow").status_code == 400
     r = a_c.put("/api/users/star/follow")
-    assert r.json == {"following": True, "followers": 1, "following_count": 0} or r.json["followers"] == 1
+    assert r.json == {"following": True, "followers": 1, "following_count": 0}
     a_c.put("/api/users/star/follow")                       # идемпотентно
     assert kinds(b_c).count("follow") == 1
     prof = a_c.get("/api/users/star").json
@@ -64,7 +64,7 @@ def test_follow_and_following_feed(make_user):
     b_c.post("/api/questions", json={"title": "Вопрос от звезды"})
     make_user()[0].post("/api/questions", json={"title": "Вопрос от ноунейма"})
     assert [q["title"] for q in a_c.get("/api/feed?tab=following").json["items"]] == ["Вопрос от звезды"]
-    a_c.delete("/api/users/star/follow")
+    assert a_c.delete("/api/users/star/follow").json["following"] is False
     assert a_c.get("/api/feed?tab=following").json["items"] == []
     assert a_c.put("/api/users/nobody/follow").status_code == 404
 

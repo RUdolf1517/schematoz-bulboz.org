@@ -5,7 +5,7 @@
   <button data-tab="hot" class="active">🔥 Горячее</button>
   <button data-tab="new">Новое</button>
   <button data-tab="unanswered">Без ответа</button>
-  {% if logged_in %}<button data-tab="my_rooms">Мои комнаты</button>{% endif %}
+  {% if logged_in %}<button data-tab="my_rooms">Мои комнаты</button><button data-tab="following">Подписки</button>{% endif %}
 </div>
 <section class="feed" id="feed" tabindex="0" aria-label="Лента вопросов. Листай вверх-вниз или стрелками"></section>
 <p class="hint">Листай ↑↓ или свайпом · жми на карточку, чтобы открыть вопрос</p>

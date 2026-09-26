@@ -70,7 +70,7 @@ async def follow(username: str):
         if res.scalar() is not None:
             notify(s, target.id, "follow", username=g.user.username)
         counts = await follow_counts(s, target.id)
-    return {"following": True, **counts}
+    return {"following": True, "followers": counts["followers"], "following_count": counts["following"]}
 
 
 @bp.delete("/users/<username>/follow")
@@ -81,7 +81,7 @@ async def unfollow(username: str):
         target = await _user_by_name(s, username)
         await s.execute(delete(Follow).where(Follow.follower_id == g.user.id, Follow.followee_id == target.id))
         counts = await follow_counts(s, target.id)
-    return {"following": False, **counts}
+    return {"following": False, "followers": counts["followers"], "following_count": counts["following"]}
 
 
 # ---------- поиск ----------

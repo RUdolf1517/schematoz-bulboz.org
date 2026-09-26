@@ -14,6 +14,8 @@
       <a href="/rooms" class="{{ 'active' if page_name in ('rooms', 'room') }}">Комнаты</a>
     </nav>
     <div class="top-actions">
+      <a class="btn btn-ghost btn-sm icon-btn" href="/search" aria-label="Поиск" title="Поиск">🔍</a>
+      {% if logged_in %}<a class="btn btn-ghost btn-sm icon-btn bell" href="/notifications" aria-label="Уведомления" title="Уведомления">🔔<span class="bell-count" id="bell-count" hidden></span></a>{% endif %}
       <a class="btn btn-accent btn-sm" href="/ask">+ Спросить</a>
       {% if logged_in %}
         <div class="user-menu" id="user-menu">

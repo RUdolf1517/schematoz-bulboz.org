@@ -32,7 +32,6 @@ const txt = (dom, sel) => (dom.window.document.querySelector(sel)?.textContent |
 function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " " + name + (extra ? "  — " + extra : "")); if (!cond) process.exitCode = 1; }
 
 (async () => {
-  const captchaCookie = process.argv[2];
   // 1. Лента анонимно: карточки, кнопка «Войти» в хедере
   let d = await open("/");
   const cards = d.window.document.querySelectorAll(".card[data-href]");
@@ -47,14 +46,11 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   check("вопрос: «Схема» первой", d.window.document.querySelector(".answer")?.classList.contains("best"));
   check("вопрос: призыв войти", txt(d, "#question").includes("Войди, чтобы ответить"));
 
-  // 3. Вход: без капчи — шаг капчи, с капчей — форма
+  // 3. Вход сразу формой, без капчи
   d = await open("/login?next=/q/1");
-  check("логин: сначала капча", !d.window.document.querySelector("#captcha-step").hidden);
   check("логин: демо-аккаунты показаны", txt(d, ".demo-box").includes("admin-demo-2026"));
-  jar.setCookieSync(`session=${captchaCookie}; Path=/`, BASE);
-  d = await open("/login?next=/q/1");
   const f = d.window.document.querySelector("#auth-form");
-  check("логин: после капчи форма видна", !f.hidden);
+  check("логин: форма видна без капчи", f && !f.hidden && !d.window.document.querySelector("#captcha-step"));
   f.elements.login.value = "dasha"; f.elements.password.value = "demo-password";
   f.dispatchEvent(new d.window.Event("submit", { cancelable: true }));
   await sleep(900);
@@ -82,6 +78,30 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   await sleep(1200);
   check("ответ опубликован", txt(d, "#question").includes("Карточки + таймлайн"));
 
+  // 5б. Редактирование своего ответа
+  d = await open("/q/4");
+  const mine = [...d.window.document.querySelectorAll("[data-edit-a]")];
+  check("свой ответ: кнопки изменить/удалить", mine.length === 1);
+  mine[0].click(); await sleep(200);
+  const ef = d.window.document.querySelector("#edit-form");
+  ef.elements.body.value = "Карточки + таймлайн, 20 минут в день. UPD: и пробники!";
+  ef.dispatchEvent(new d.window.Event("submit", { cancelable: true })); await sleep(1000);
+  check("ответ изменён, пометка «изменено»", txt(d, "#question").includes("UPD: и пробники") && txt(d, "#question").includes("изменено"));
+
+  // 5в. Поиск и подписка
+  d = await open("/search?q=шарик", 1200);
+  check("поиск находит вопрос", txt(d, "#search-results").includes("Почему шарик"));
+  d = await open("/u/kotik_na_fizmate");
+  const fbtn = d.window.document.querySelector("#follow-btn");
+  check("кнопка подписки", txt(d, "#follow-btn") === "Подписаться");
+  fbtn.click(); await sleep(900);
+  check("подписка оформлена", txt(d, "#follow-btn") === "Отписаться");
+  d = await open("/");
+  d.window.document.querySelector('[data-tab="following"]').click(); await sleep(900);
+  check("вкладка «Подписки»", d.window.document.querySelectorAll("#feed .card[data-href]").length >= 1);
+  d = await open("/notifications");
+  check("страница уведомлений", !!d.window.document.querySelector("#read-all"));
+
   // 6. Холивар: голос за сторону
   d = await open("/q/2");
   d.window.document.querySelector('[data-side="b"]').click(); await sleep(900);
@@ -103,7 +123,6 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
 
   // 8. Выход и вход админом
   d.window.document.querySelector("#logout-btn").click(); await sleep(700);
-  jar.setCookieSync(`session=${captchaCookie}; Path=/`, BASE);
   d = await open("/login");
   const f2 = d.window.document.querySelector("#auth-form");
   f2.elements.login.value = "admin"; f2.elements.password.value = "admin-demo-2026";

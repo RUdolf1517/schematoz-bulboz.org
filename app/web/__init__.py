@@ -53,6 +53,18 @@ def room(slug: str):
     return page("room.html", "room", slug=slug)
 
 
+@bp.get("/notifications")
+def notifications():
+    if not current_user_id():
+        return redirect(url_for("web.login", next="/notifications"))
+    return page("notifications.html", "notifications")
+
+
+@bp.get("/search")
+def search():
+    return page("search.html", "search", q=(request.args.get("q") or "")[:200])
+
+
 @bp.get("/u/<username>")
 def profile(username: str):
     return page("profile.html", "profile", username=username)

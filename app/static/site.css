@@ -227,3 +227,16 @@ table.list td, table.list th { padding: 8px 6px; border-bottom: 1px solid var(--
   .stats { grid-template-columns: repeat(2, 1fr); }
   .feed { height: calc(100dvh - var(--header-h) - 100px); }
 }
+
+/* --- уведомления, поиск, подписки, редактирование --- */
+.icon-btn { padding-inline: 8px; position: relative; }
+.bell-count { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
+  background: #ff3b5c; color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.notif { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; margin-bottom: 8px;
+  background: var(--panel, #16161d); text-decoration: none; color: inherit; }
+.notif.unread { outline: 2px solid var(--accent, #b4ff39); }
+.notif .e { font-size: 22px; } .notif small { display: block; opacity: .6; font-size: 12px; }
+.edited { opacity: .6; font-size: 12px; font-style: italic; }
+.follow-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.freeze { font-size: 13px; opacity: .85; }
+.edit-box textarea, .edit-box input { width: 100%; }

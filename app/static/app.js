@@ -78,12 +78,20 @@ async function loadMe() {
   $("#me-profile").href = `/u/${encodeURIComponent(ME.user.username)}`;
   $("#me-mod").hidden = !ME.permissions.includes("report.review");
   $("#me-admin").hidden = !ME.permissions.includes("analytics.read");
+  setBell(ME.unread_notifications || 0);
   if (ME.ban && document.body.dataset.page !== "banned") {
     const b = $("#ban-banner");
     b.innerHTML = `Аккаунт заблокирован${ME.ban.ends_at ? " до " + esc(fmtDate(ME.ban.ends_at)) : " навсегда"}. <a href="/banned">Подробнее и апелляция →</a>`;
     b.hidden = false;
   }
   return ME;
+}
+
+function setBell(n) {
+  const el = $("#bell-count");
+  if (!el) return;
+  el.textContent = n > 99 ? "99+" : String(n);
+  el.hidden = !n;
 }
 
 function initHeader() {
@@ -241,8 +249,9 @@ async function pageQuestion() {
     const modBtn = perm("content.hide") ? `<button class="link-btn" data-hide="${a.id}">Скрыть</button>` : "";
     return `<div class="answer ${a.is_best ? "best" : ""}" id="a${a.id}" data-aid="${a.id}">
       <div class="byline">${userLink(a.author)} ${a.is_best ? `<span class="scheme-badge">🔥 Схема</span>` : ""} ${side} <span>· ${esc(fmtDate(a.created_at))}</span></div>
-      <div class="text">${esc(a.content.body)}</div>
+      <div class="text">${esc(a.content.body)}</div>${a.edited_at ? `<div class="edited">изменено ${esc(fmtDate(a.edited_at))}</div>` : ""}
       <div class="actions">${voteButtons(a)}<span class="spacer"></span>
+        ${ME && ME.user.id === a.author_id ? `<button class="link-btn" data-edit-a="${a.id}">Изменить</button><button class="link-btn" data-del-a="${a.id}">Удалить</button>` : ""}
         <button class="link-btn" data-share="${a.id}">📤 В сторис</button>
         <button class="link-btn" data-report="${a.id}">Пожаловаться</button>${modBtn}</div>
     </div>`;
@@ -282,8 +291,9 @@ async function pageQuestion() {
       <div class="panel q-head">
         <span class="kind">${KIND[q.kind] || esc(q.kind)}</span>
         <h1>${esc(q.title)}</h1>
-        ${q.body ? `<div class="body">${esc(q.body)}</div>` : ""}
+        ${q.body ? `<div class="body">${esc(q.body)}</div>` : ""}${q.edited_at ? `<div class="edited">изменено ${esc(fmtDate(q.edited_at))}</div>` : ""}
         <div class="byline">${userLink(q.author)} <span>· ${esc(fmtDate(q.created_at))}</span>${room}<span class="spacer" style="flex:1"></span>
+          ${data.you_are_author ? `<button class="link-btn" data-edit-q>Изменить</button><button class="link-btn" data-del-q>Удалить</button>` : ""}
           <button class="link-btn" data-report-q="${q.id}">Пожаловаться</button>${qMod}</div>
         ${debateHtml()}
       </div>
@@ -313,6 +323,37 @@ async function pageQuestion() {
     $$("[data-side]", root).forEach((btn) => (btn.onclick = async () => {
       if (!requireLogin()) return;
       try { await api("PUT", `/api/questions/${qid}/debate-vote`, { side: btn.dataset.side }); await reload(); } catch (_) {}
+    }));
+    $$("[data-edit-a]", root).forEach((b) => (b.onclick = () => {
+      const aid = Number(b.dataset.editA), a = data.answers.find((x) => x.id === aid);
+      const m = modal(`<h2>Изменить ответ</h2><form class="form edit-box" id="edit-form"><textarea class="input" name="body" rows="6" maxlength="5000" required>${esc(a.content.body)}</textarea>
+        <div class="row"><button type="button" class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-accent">Сохранить</button></div></form>`);
+      $("#edit-form", m.el).onsubmit = async (e) => {
+        e.preventDefault();
+        try { await api("PATCH", `/api/answers/${aid}`, { body: e.target.elements.body.value }); m.close(); toast("Сохранено"); await reload(); } catch (_) {}
+      };
+    }));
+    $$("[data-del-a]", root).forEach((b) => (b.onclick = async () => {
+      if (!confirm("Удалить ответ? Репутация, полученная за него, останется.")) return;
+      try { await api("DELETE", `/api/answers/${b.dataset.delA}`); toast("Ответ удалён"); await reload(); } catch (_) {}
+    }));
+    $$("[data-edit-q]", root).forEach((b) => (b.onclick = () => {
+      const q = data.question, locked = data.answers.length > 0;
+      const m = modal(`<h2>Изменить вопрос</h2><form class="form edit-box" id="edit-form">
+        <label>Заголовок<input class="input" name="title" maxlength="200" minlength="5" value="${esc(q.title)}" ${locked ? "disabled" : ""}></label>
+        ${locked ? `<p class="muted" style="font-size:13px">На вопрос уже ответили — заголовок менять нельзя, но можно дополнить подробности.</p>` : ""}
+        <label>Подробности<textarea class="input" name="body" rows="5" maxlength="5000">${esc(q.body || "")}</textarea></label>
+        <div class="row"><button type="button" class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-accent">Сохранить</button></div></form>`);
+      $("#edit-form", m.el).onsubmit = async (e) => {
+        e.preventDefault();
+        const el = e.target.elements, body = { body: el.body.value };
+        if (!locked) body.title = el.title.value;
+        try { await api("PATCH", `/api/questions/${qid}`, body); m.close(); toast("Сохранено"); await reload(); } catch (_) {}
+      };
+    }));
+    $$("[data-del-q]", root).forEach((b) => (b.onclick = async () => {
+      if (!confirm("Удалить вопрос вместе с ответами?")) return;
+      try { await api("DELETE", `/api/questions/${qid}`); toast("Вопрос удалён"); location.href = "/"; } catch (_) {}
     }));
     $$("[data-report]", root).forEach((b) => (b.onclick = () => reportDialog("answer", Number(b.dataset.report))));
     $$("[data-report-q]", root).forEach((b) => (b.onclick = () => reportDialog("question", Number(b.dataset.reportQ))));
@@ -438,6 +479,10 @@ async function pageProfile() {
         <div class="stat"><b>${d.stats.schemes}</b><span>схем</span></div>
         <div class="stat"><b>${d.stats.answers}</b><span>ответов</span></div>
       </div>
+      ${u.streak_freeze_available ? `<div class="freeze">❄️ Заморозка стрика доступна — пропуск одного дня на этой неделе не сбросит 🔥</div>` : ""}
+      <div class="follow-row"><span><b id="followers-n">${d.stats.followers}</b> подписчиков</span><span><b>${d.stats.following}</b> подписок</span>
+        ${d.i_follow === null || d.i_follow === undefined ? "" : `<button class="btn btn-sm ${d.i_follow ? "btn-ghost" : "btn-accent"}" id="follow-btn">${d.i_follow ? "Отписаться" : "Подписаться"}</button>`}
+        ${!ME && d.i_follow == null ? `<a class="btn btn-sm btn-accent" href="/login?next=${encodeURIComponent(here())}">Подписаться</a>` : ""}</div>
       <button class="btn btn-sm btn-ghost" id="share-profile">📤 Поделиться в сторис</button>
     </div>
     <div class="panel"><h2 style="margin-top:0">За что репутация</h2>
@@ -453,6 +498,17 @@ async function pageProfile() {
     <div class="panel"><h2 style="margin-top:0">Лучшие ответы</h2>
       ${d.best_answers.length ? d.best_answers.map((b) => `<a class="best-item" href="/q/${b.question_id}#a${b.answer_id}"><b>${esc(b.question_title)}</b><small>${esc(b.body)}</small></a>`).join("") : `<p class="muted">Схем пока нет.</p>`}
     </div>`;
+  let following = d.i_follow;
+  const fb = $("#follow-btn");
+  if (fb) fb.onclick = async () => {
+    try {
+      const r = await api(following ? "DELETE" : "PUT", `/api/users/${encodeURIComponent(u.username)}/follow`);
+      following = r.following;
+      $("#followers-n").textContent = r.followers;
+      fb.textContent = following ? "Отписаться" : "Подписаться";
+      fb.className = `btn btn-sm ${following ? "btn-ghost" : "btn-accent"}`;
+    } catch (_) {}
+  };
   $("#share-profile").onclick = () => shareDialog(`/api/share/user/${encodeURIComponent(u.username)}.png`, `/u/${encodeURIComponent(u.username)}`);
 }
 
@@ -634,7 +690,7 @@ async function pageAdmin() {
     async captcha(panel) {
       const { value: v } = await api("GET", "/admin/settings/captcha");
       const CATS = { math: "Математика", physics: "Физика", russian: "Русский", literature: "Литература" };
-      panel.innerHTML = `<form class="panel form" id="cap-form"><p class="muted">Капча kremle-detect: задания ЕГЭ. Обязательна на входе и регистрации, а также при подозрительной активности.</p>
+      panel.innerHTML = `<form class="panel form" id="cap-form"><p class="muted">Капча kremle-detect: задания ЕГЭ. Включается только при подозрительной активности: 5+ неудачных входов, частые регистрации или спам.</p>
         <b>Предметы</b>${Object.entries(CATS).map(([k, n]) => `<label class="check"><input type="checkbox" name="cat" value="${k}" ${v.categories.includes(k) ? "checked" : ""}> ${n}</label>`).join("")}
         <label>Вопросов в капче<input type="number" name="question_count" min="1" max="15" value="${v.question_count}"></label>
         <label>Допустимо ошибок<input type="number" name="max_errors" min="0" max="14" value="${v.max_errors}"></label>
@@ -706,10 +762,51 @@ async function pageAdmin() {
   });
 }
 
+// ---------------------------------------------------------------- notifications
+const NOTIF = {
+  answer: (p) => ["💬", `@${esc(p.username)} ответил(а) на твой вопрос «${esc(p.question_title)}»`, `/q/${p.question_id}#a${p.answer_id}`],
+  scheme: (p) => ["🔥", `Твой ответ стал «Схемой» в вопросе «${esc(p.question_title)}» (+5)`, `/q/${p.question_id}#a${p.answer_id}`],
+  badge: (p) => [esc(p.emoji || "🏅"), `Новый бейдж: ${esc(p.title)}`, ME ? `/u/${encodeURIComponent(ME.user.username)}` : "#"],
+  follow: (p) => ["👋", `@${esc(p.username)} подписался(ась) на тебя`, `/u/${encodeURIComponent(p.username)}`],
+  ban: (p) => ["⛔", `Аккаунт заблокирован. Причина: ${esc(p.reason || "—")}`, "/banned"],
+  appeal: (p) => ["⚖️", p.decision === "accept" || p.decision === "approve" ? "Апелляцию приняли — блокировка снята" : `Апелляцию отклонили${p.comment ? ": " + esc(p.comment) : ""}`, "/banned"],
+};
+
+async function pageNotifications() {
+  const root = $("#notifications");
+  const d = await api("GET", "/api/notifications");
+  root.innerHTML = d.items.length ? d.items.map((n) => {
+    const [e, text, href] = (NOTIF[n.kind] || (() => ["🔔", esc(n.kind), "#"]))(n.payload || {});
+    return `<a class="notif ${n.is_read ? "" : "unread"}" href="${href}"><span class="e">${e}</span><span>${text}<small>${esc(fmtDate(n.created_at))}</small></span></a>`;
+  }).join("") : `<p class="muted">Пока тихо. Ответь на пару вопросов — и тут станет шумно 😉</p>`;
+  $("#read-all").onclick = async () => {
+    const r = await api("POST", "/api/notifications/read", {});
+    setBell(r.unread);
+    $$(".notif.unread", root).forEach((x) => x.classList.remove("unread"));
+  };
+}
+
+// ---------------------------------------------------------------- search
+async function pageSearch() {
+  const form = $("#search-form"), out = $("#search-results");
+  async function run(q) {
+    if (q.trim().length < 2) { out.innerHTML = ""; return; }
+    history.replaceState(null, "", `/search?q=${encodeURIComponent(q)}`);
+    try {
+      const d = await api("GET", `/api/search?q=${encodeURIComponent(q)}`);
+      out.innerHTML = d.items.length
+        ? d.items.map((q) => `<a class="best-item" href="/q/${q.id}"><b>${esc(q.title)}</b><small>${answersWord(q.answers_count)} · @${esc(q.author?.username)}</small></a>`).join("")
+        : `<p class="muted">Ничего не нашли. Может, самое время <a href="/ask">спросить</a>?</p>`;
+    } catch (_) {}
+  }
+  form.onsubmit = (e) => { e.preventDefault(); run(form.elements.q.value); };
+  if (form.elements.q.value) run(form.elements.q.value);
+}
+
 // ---------------------------------------------------------------- boot
 const PAGES = {
   feed: () => initFeed(), room: pageRoom, question: pageQuestion, ask: pageAsk, rooms: pageRooms,
-  profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, mod: pageMod, admin: pageAdmin,
+  profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, notifications: pageNotifications, search: pageSearch, mod: pageMod, admin: pageAdmin,
 };
 
 (async function boot() {
