@@ -46,6 +46,9 @@ def user_public(u: User) -> dict:
             "level_name": level_name(u.level),
             "streak_days": visible_streak(u.streak_days, u.streak_last_date, None, u.streak_freeze_week),
             "streak_freeze_available": freeze_available(u.streak_freeze_week, msk_today()),
+            "avatar_frame": (u.profile or {}).get("avatar_frame", "none"),
+            "accent": (u.profile or {}).get("accent"),
+            "status_emoji": (u.profile or {}).get("status_emoji", ""),
             **public_rating(u)}
 
 

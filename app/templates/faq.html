@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ page.title }} — schematoz-bulboz.org{% endblock %}
+{% block content %}
+<article class="legal faq" id="faq">
+  <h1>{{ page.title }}</h1>
+  <p class="meta">Обновлено {{ version.created_at.strftime('%d.%m.%Y') }}</p>
+  {% if intro %}<div class="faq-intro">{{ intro }}</div>{% endif %}
+  <input class="input faq-search" id="faq-search" type="search" placeholder="🔍 Поиск по вопросам" aria-label="Поиск по FAQ">
+  <div class="faq-list">
+    {% for q, a in items %}
+    <details class="faq-item" id="q{{ loop.index }}">
+      <summary>{{ q }}</summary>
+      <div class="md">{{ a }}</div>
+    </details>
+    {% else %}
+    <p class="muted">Вопросов пока нет.</p>
+    {% endfor %}
+  </div>
+  <p class="muted faq-empty" id="faq-empty" hidden>Ничего не нашли. <a href="/ask">Спросить в ленте →</a></p>
+</article>
+{% endblock %}

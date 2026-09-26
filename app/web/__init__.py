@@ -68,6 +68,13 @@ def debates():
     return page("feed.html", "feed", preset_tab="debates")
 
 
+@bp.get("/settings")
+def settings():
+    if not current_user_id():
+        return redirect(url_for("web.login", next="/settings"))
+    return page("settings.html", "settings")
+
+
 @bp.get("/notifications")
 def notifications():
     if not current_user_id():

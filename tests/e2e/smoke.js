@@ -60,6 +60,23 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   f.dispatchEvent(new d.window.Event("submit", { cancelable: true }));
   await sleep(900);
 
+  // 3b. Настройки профиля: живое превью + сохранение + FAQ
+  d = await open("/settings", 1500);
+  let sf = d.window.document.querySelector("#settings-form");
+  check("настройки: форма загрузилась", !!sf.querySelector("[name=theme]"));
+  sf.querySelector('[name=theme][value="neon"]').click();
+  sf.elements.status_text.value = "готовлюсь к ЕГЭ";
+  sf.dispatchEvent(new d.window.Event("input", { bubbles: true }));
+  check("настройки: превью обновилось", !!d.window.document.querySelector("#preview .theme-neon") && txt(d, "#preview").includes("готовлюсь к ЕГЭ"));
+  sf.dispatchEvent(new d.window.Event("submit", { cancelable: true })); await sleep(900);
+  d = await open("/u/dasha");
+  check("профиль: тема и статус применились", !!d.window.document.querySelector(".profile-skin.theme-neon") && txt(d, ".status-line") === "готовлюсь к ЕГЭ");
+  d = await open("/faq");
+  const fq = d.window.document.querySelector("#faq-search");
+  check("FAQ: есть вопросы", d.window.document.querySelectorAll(".faq-item").length > 2);
+  fq.value = "zzzнетничего"; fq.dispatchEvent(new d.window.Event("input"));
+  check("FAQ: поиск прячет всё и показывает заглушку", !d.window.document.querySelector("#faq-empty").hidden);
+
   // 4. Даша — автор вопроса 1: видит кнопки +5/−1
   d = await open("/q/1");
   check("хедер: имя пользователя", txt(d, "#me-name") === "dasha");

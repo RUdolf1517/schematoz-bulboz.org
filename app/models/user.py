@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, SmallInteger, String, Table, Text, func, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin
@@ -58,6 +59,9 @@ class User(TimestampMixin, Base):
     # Рейтинг юзера (формула в services/rating.py). rating_tier: 2 — админ (∞), 1 — модер (∞, но ниже админа), 0 — все
     rating: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     rating_tier: Mapped[int] = mapped_column(SmallInteger, default=0, server_default="0")
+    # Кастомизация профиля: обложка + JSON с настройками (схема и валидация — services/profile_custom.py)
+    banner_url: Mapped[str | None] = mapped_column(String(128))
+    profile: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
 
     roles: Mapped[list[Role]] = relationship(
         secondary="user_roles",

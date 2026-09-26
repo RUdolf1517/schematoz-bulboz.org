@@ -119,7 +119,7 @@ function ratingChip(u) {
 
 function userLink(u) {
   if (!u) return "";
-  return `<a href="/u/${encodeURIComponent(u.username)}"><span class="avatar">${initial(u.username)}</span>@${esc(u.username)}</a>${ratingChip(u)}`;
+  return `<a href="/u/${encodeURIComponent(u.username)}">${avatarHTML(u)}@${esc(u.username)}${u.status_emoji ? ` <span class="status-emoji sm">${esc(u.status_emoji)}</span>` : ""}</a>${ratingChip(u)}`;
 }
 
 // ---------------------------------------------------------------- картинки и markdown
@@ -601,6 +601,68 @@ async function pageRoom() {
 }
 
 // ---------------------------------------------------------------- profile
+function avatarHTML(u, size = "") {
+  const inner = u.avatar_url ? `<img src="${esc(u.avatar_url)}" alt="">` : initial(u.username);
+  const frame = u.avatar_frame && u.avatar_frame !== "none" ? ` frame-${esc(u.avatar_frame)}` : "";
+  return `<span class="avatar ${size}${frame}">${inner}</span>`;
+}
+
+// классы/переменные темы профиля — только из белых списков (сервер валидирует тоже)
+function profileSkin(c) {
+  const cls = [`theme-${c.theme}`, `font-${c.font}`, `cards-${c.card_style}`, `layout-${c.layout}`].map((x) => x.replace(/[^\w-]/g, "")).join(" ");
+  const style = c.accent && /^#[0-9a-f]{6}$/i.test(c.accent) ? `--accent:${c.accent};--accent2:${c.accent};` : "";
+  return { cls, style };
+}
+
+function profileHTML(d, { preview = false } = {}) {
+  const u = d.user, c = d.custom, st = d.stats || {};
+  const hidden = new Set(d.is_owner || preview ? [] : c.hidden_sections);
+  const ownHidden = new Set(c.hidden_sections || []);
+  const tag = (sec) => (d.is_owner || preview) && ownHidden.has(sec) ? ` <span class="hidden-tag" title="Этот раздел видишь только ты">🙈 скрыто</span>` : "";
+  const ST = { expert: "⚡ Эксперт", connoisseur: "Знаток", newbie: "Новичок" };
+  const statsParts = [];
+  if (u.streak_days != null && !hidden.has("streak")) statsParts.push(`<div class="stat"><b>🔥 ${u.streak_days}</b><span>дней стрик</span></div>`);
+  statsParts.push(`<div class="stat" title="${u.rating_tier ? "У админов и модераторов рейтинг бесконечный" : "Бульбоз-индекс: активность, ответы, их оценки, «Схемы», вопросы и комментарии"}"><b>★ ${esc(u.rating_display)}</b><span>рейтинг${u.rating_tier === 2 ? " · админ" : u.rating_tier === 1 ? " · модер" : ""}</span></div>`);
+  statsParts.push(`<div class="stat"><b>${u.reputation}</b><span>репутация</span></div>`);
+  if (st.schemes != null) statsParts.push(`<div class="stat"><b>${st.schemes}</b><span>схем</span></div>`);
+  if (st.answers != null) statsParts.push(`<div class="stat"><b>${st.answers}</b><span>ответов</span></div>`);
+  const showcase = (d.badges || []).filter((b) => b.showcase);
+  const meta = [c.pronouns && esc(c.pronouns), c.city && `📍 ${esc(c.city)}`, u.created_at && `с нами с ${new Date(u.created_at).toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}`].filter(Boolean);
+  return `<div class="profile-skin ${profileSkin(c).cls}" style="${profileSkin(c).style}">
+    <div class="panel profile-card">
+      ${c.banner_url ? `<div class="profile-banner" style="background-image:url('${esc(c.banner_url)}')"></div>` : `<div class="profile-banner empty"></div>`}
+      <div class="profile-head">${avatarHTML(u, "lg")}
+        <div class="ph-main"><h1>${esc(u.display_name || u.username)} ${c.status_emoji ? `<span class="status-emoji">${esc(c.status_emoji)}</span>` : ""}</h1>
+          <div class="muted">@${esc(u.username)}${meta.length ? " · " + meta.join(" · ") : ""}</div>
+          <div class="level">Уровень ${u.level} · ${esc(u.level_name)}</div>
+          ${c.status_text ? `<div class="status-line">${esc(c.status_text)}</div>` : ""}
+          ${showcase.length ? `<div class="showcase">${showcase.map((b) => `<span class="sc-badge" title="${esc(b.title)}: ${esc(b.description)}">${esc(b.emoji)} ${esc(b.title)}</span>`).join("")}</div>` : ""}
+        </div></div>
+      ${u.bio ? `<p class="bio">${esc(u.bio)}</p>` : ""}
+      ${c.interests.length ? `<div class="interests">${c.interests.map((t) => `<a class="chip" href="/search?q=${encodeURIComponent(t)}">#${esc(t)}</a>`).join("")}</div>` : ""}
+      ${c.links.length ? `<div class="plinks">${c.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="nofollow noopener ugc">🔗 ${esc(l.title)}</a>`).join("")}</div>` : ""}
+      <div class="stats">${statsParts.join("")}</div>
+      ${u.streak_freeze_available && !hidden.has("streak") ? `<div class="freeze">❄️ Заморозка стрика доступна: если пропустишь один день на этой неделе, 🔥 не сгорит</div>` : ""}
+      <div class="follow-row">${st.followers != null ? `<span><b id="followers-n">${st.followers}</b> подписчиков</span><span><b>${st.following}</b> подписок</span>${tag("follows")}` : ""}
+        ${preview ? "" : d.i_follow == null ? "" : `<button class="btn btn-sm ${d.i_follow ? "btn-ghost" : "btn-accent"}" id="follow-btn">${d.i_follow ? "Отписаться" : "Подписаться"}</button>`}
+        ${!preview && !ME && d.i_follow == null ? `<a class="btn btn-sm btn-accent" href="/login?next=${encodeURIComponent(here())}">Подписаться</a>` : ""}</div>
+      ${preview ? "" : `<button class="btn btn-sm btn-ghost" id="share-profile">📤 Поделиться в сторис</button>${d.is_owner ? ` <a class="btn btn-sm btn-accent" href="/settings">🎨 Настроить профиль</a>` : ""}`}
+    </div>
+    ${d.about_html ? `<div class="panel"><h2 style="margin-top:0">О себе</h2><div class="md">${d.about_html}</div></div>` : ""}
+    ${d.pinned_answer ? `<a class="panel pinned" href="/q/${d.pinned_answer.question_id}#a${d.pinned_answer.answer_id}"><div class="kind">📌 Закреплённый ответ${d.pinned_answer.is_best ? " · 🔥 Схема" : ""}</div><b>${esc(d.pinned_answer.question_title)}</b><div class="md">${d.pinned_answer.body_html}</div></a>` : ""}
+    ${hidden.has("topics") ? "" : `<div class="panel"><h2 style="margin-top:0">За что репутация${tag("topics")}</h2>
+      ${d.topics.length ? d.topics.map((t) => `<div class="topic"><span class="st ${t.status}">${ST[t.status]}</span>
+        <div>${t.room_slug ? `<a href="/r/${encodeURIComponent(t.room_slug)}">#${esc(t.title)}</a>` : esc(t.title)}</div>
+        <div class="nums"><b>${t.schemes}</b> ${plural(t.schemes, "схема", "схемы", "схем")} · ${t.points} очк.<br>${t.plus} 👍 / ${t.minus} 👎</div></div>`).join("")
+        : `<p class="muted">Пока нет оценённых ответов.</p>`}
+      <p class="muted" style="font-size:13px">«Схема» — ответ, которому автор вопроса поставил +5. Эксперт в теме: 15+ схем и меньше 15% минусов.</p></div>`}
+    ${hidden.has("badges") ? "" : `<div class="panel"><h2 style="margin-top:0">Бейджи${tag("badges")}</h2>
+      ${d.badges.length ? `<div class="badges">${d.badges.map((b) => `<div class="badge${b.showcase ? " on-show" : ""}"><div class="e">${esc(b.emoji)}</div><b>${esc(b.title)}</b><span>${esc(b.description)}</span></div>`).join("")}</div>` : `<p class="muted">Пока нет. Ответь на пару вопросов 😉</p>`}</div>`}
+    ${hidden.has("best_answers") ? "" : `<div class="panel"><h2 style="margin-top:0">Лучшие ответы${tag("best_answers")}</h2>
+      ${d.best_answers.length ? d.best_answers.map((b) => `<a class="best-item" href="/q/${b.question_id}#a${b.answer_id}"><b>${esc(b.question_title)}</b><small>${esc(b.body)}</small></a>`).join("") : `<p class="muted">Схем пока нет.</p>`}</div>`}
+  </div>`;
+}
+
 async function pageProfile() {
   const root = $("#profile");
   const username = root.dataset.username;
@@ -608,54 +670,148 @@ async function pageProfile() {
   try { d = await api("GET", `/api/users/${encodeURIComponent(username)}`, undefined, { quiet: true }); }
   catch (_) { root.innerHTML = `<div class="panel"><h1>Пользователь не найден</h1></div>`; return; }
   const u = d.user;
-  document.title = `@${u.username} — schematoz-bulboz.org`;
-  const ST = { expert: "⚡ Эксперт", connoisseur: "Знаток", newbie: "Новичок" };
-  root.innerHTML = `
-    <div class="panel">
-      <div class="profile-head"><span class="avatar lg">${initial(u.username)}</span>
-        <div><h1>@${esc(u.username)}</h1><div class="level">Уровень ${u.level} · ${esc(u.level_name)}</div>${u.bio ? `<div class="muted">${esc(u.bio)}</div>` : ""}</div></div>
-      <div class="stats">
-        <div class="stat"><b>🔥 ${u.streak_days}</b><span>дней стрик</span></div>
-        <div class="stat" title="${u.rating_tier ? "У админов и модераторов рейтинг бесконечный" : "Бульбоз-индекс: активность, ответы, их оценки, «Схемы», вопросы и комментарии"}"><b>★ ${esc(u.rating_display)}</b><span>рейтинг${u.rating_tier === 2 ? " · админ" : u.rating_tier === 1 ? " · модер" : ""}</span></div>
-        <div class="stat"><b>${u.reputation}</b><span>репутация</span></div>
-        <div class="stat"><b>${d.stats.schemes}</b><span>схем</span></div>
-        <div class="stat"><b>${d.stats.answers}</b><span>ответов</span></div>
-      </div>
-      ${u.streak_freeze_available ? `<div class="freeze">❄️ Заморозка стрика доступна — пропуск одного дня на этой неделе не сбросит 🔥</div>` : ""}
-      <div class="follow-row"><span><b id="followers-n">${d.stats.followers}</b> подписчиков</span><span><b>${d.stats.following}</b> подписок</span>
-        ${d.i_follow === null || d.i_follow === undefined ? "" : `<button class="btn btn-sm ${d.i_follow ? "btn-ghost" : "btn-accent"}" id="follow-btn">${d.i_follow ? "Отписаться" : "Подписаться"}</button>`}
-        ${!ME && d.i_follow == null ? `<a class="btn btn-sm btn-accent" href="/login?next=${encodeURIComponent(here())}">Подписаться</a>` : ""}</div>
-      <button class="btn btn-sm btn-ghost" id="share-profile">📤 Поделиться в сторис</button>
-    </div>
-    <div class="panel"><h2 style="margin-top:0">За что репутация</h2>
-      ${d.topics.length ? d.topics.map((t) => `<div class="topic"><span class="st ${t.status}">${ST[t.status]}</span>
-        <div>${t.room_slug ? `<a href="/r/${encodeURIComponent(t.room_slug)}">#${esc(t.title)}</a>` : esc(t.title)}</div>
-        <div class="nums"><b>${t.schemes}</b> ${plural(t.schemes, "схема", "схемы", "схем")} · ${t.points} очк.<br>${t.plus} 👍 / ${t.minus} 👎</div></div>`).join("")
-        : `<p class="muted">Пока нет оценённых ответов.</p>`}
-      <p class="muted" style="font-size:13px">«Схема» — ответ, которому автор вопроса поставил +5. Эксперт в теме: 15+ схем и меньше 15% минусов.</p>
-    </div>
-    <div class="panel"><h2 style="margin-top:0">Бейджи</h2>
-      ${d.badges.length ? `<div class="badges">${d.badges.map((b) => `<div class="badge"><div class="e">${esc(b.emoji)}</div><b>${esc(b.title)}</b><span>${esc(b.description)}</span></div>`).join("")}</div>` : `<p class="muted">Пока нет — ответь на пару вопросов 😉</p>`}
-    </div>
-    <div class="panel"><h2 style="margin-top:0">Лучшие ответы</h2>
-      ${d.best_answers.length ? d.best_answers.map((b) => `<a class="best-item" href="/q/${b.question_id}#a${b.answer_id}"><b>${esc(b.question_title)}</b><small>${esc(b.body)}</small></a>`).join("") : `<p class="muted">Схем пока нет.</p>`}
-    </div>`;
+  document.title = `${u.display_name || "@" + u.username} — schematoz-bulboz.org`;
+  root.innerHTML = profileHTML(d);
   let following = d.i_follow;
   const fb = $("#follow-btn");
   if (fb) fb.onclick = async () => {
     try {
       const r = await api(following ? "DELETE" : "PUT", `/api/users/${encodeURIComponent(u.username)}/follow`);
       following = r.following;
-      $("#followers-n").textContent = r.followers;
+      const n = $("#followers-n"); if (n) n.textContent = r.followers;
       fb.textContent = following ? "Отписаться" : "Подписаться";
       fb.className = `btn btn-sm ${following ? "btn-ghost" : "btn-accent"}`;
     } catch (_) {}
   };
-  if (ME && ME.user.id === u.id) {
-    root.insertAdjacentHTML("beforeend", `<div class="panel" id="login-keys"></div>`);
-    loginKeysPanel($("#login-keys"));
-  }
   $("#share-profile").onclick = () => shareDialog(`/api/share/user/${encodeURIComponent(u.username)}.png`, `/u/${encodeURIComponent(u.username)}`);
+}
+
+// ---------------------------------------------------------------- настройки профиля
+async function pageSettings() {
+  const form = $("#settings-form");
+  let d;
+  try { d = await api("GET", "/api/me/profile"); } catch (_) { return; }
+  const O = d.options, L = O.limits;
+  const s = { ...d.settings, display_name: d.user.display_name || d.user.username, bio: d.user.bio || "" };
+  // для превью тянем свой публичный профиль (статы, бейджи), а оформление подставляем из формы
+  let base;
+  try { base = await api("GET", `/api/users/${encodeURIComponent(d.user.username)}`); } catch (_) { return; }
+  const opts = (obj, cur) => Object.entries(obj).map(([k, v]) => `<option value="${esc(k)}"${k === cur ? " selected" : ""}>${esc(v)}</option>`).join("");
+  const chips = (name, obj, cur) => Object.entries(obj).map(([k, v]) => `<label class="pick"><input type="radio" name="${name}" value="${esc(k)}"${k === cur ? " checked" : ""}><span class="swatch ${name}-${esc(k)}"></span>${esc(v)}</label>`).join("");
+  const lvl = d.user.level, unlimited = d.user.rating_tier > 0;
+  form.innerHTML = `
+    <section class="panel"><h2>👤 Основное</h2>
+      <label>Отображаемое имя<input class="input" name="display_name" maxlength="${L.display_name}" value="${esc(s.display_name)}"></label>
+      <label>Короткое био<textarea name="bio" rows="2" maxlength="${L.bio}">${esc(s.bio)}</textarea></label>
+      <div class="row2">
+        <label>Статус-эмодзи<input class="input" name="status_emoji" maxlength="8" placeholder="😎" value="${esc(s.status_emoji)}"></label>
+        <label>Статус<input class="input" name="status_text" maxlength="${L.status_text}" placeholder="готовлюсь к ЕГЭ 📚" value="${esc(s.status_text)}"></label>
+      </div>
+      <div class="row2">
+        <label>Город<input class="input" name="city" maxlength="${L.city}" value="${esc(s.city)}"></label>
+        <label>Местоимения<input class="input" name="pronouns" maxlength="${L.pronouns}" placeholder="он/его" value="${esc(s.pronouns)}"></label>
+      </div>
+      <label>О себе (markdown, до ${L.about} символов)<textarea name="about" rows="5" maxlength="${L.about}">${esc(s.about)}</textarea></label>
+    </section>
+    <section class="panel"><h2>🖼 Аватар и обложка</h2>
+      <div class="media-row"><div id="av-prev"></div>
+        <label class="btn btn-sm btn-ghost">Загрузить аватар<input type="file" accept="image/*" id="av-file" hidden></label>
+        <button type="button" class="btn btn-sm btn-ghost" id="av-clear">Убрать</button></div>
+      <div class="media-row"><div id="bn-prev" class="bn-prev"></div>
+        <label class="btn btn-sm btn-ghost">Загрузить обложку<input type="file" accept="image/*" id="bn-file" hidden></label>
+        <button type="button" class="btn btn-sm btn-ghost" id="bn-clear">Убрать</button></div>
+      <h3>Рамка аватара</h3>
+      <div class="picks">${Object.entries(O.frames).map(([k, f]) => { const locked = !unlimited && lvl < f.min_level;
+        return `<label class="pick${locked ? " locked" : ""}" title="${locked ? `Откроется на ${f.min_level} уровне` : ""}"><input type="radio" name="avatar_frame" value="${esc(k)}"${k === s.avatar_frame ? " checked" : ""}${locked ? " disabled" : ""}><span class="avatar frame-${esc(k)}">${initial(d.user.username)}</span>${esc(f.title)}${locked ? ` 🔒${f.min_level}` : ""}</label>`; }).join("")}</div>
+    </section>
+    <section class="panel"><h2>🎨 Оформление</h2>
+      <h3>Тема</h3><div class="picks">${chips("theme", O.themes, s.theme)}</div>
+      <div class="row2">
+        <label>Акцентный цвет<span class="accent-row"><input type="color" name="accent" value="${esc(s.accent || "#ff5a36")}"><label class="toggle-inline"><input type="checkbox" name="accent_on"${s.accent ? " checked" : ""}> свой цвет</label></span></label>
+        <label>Шрифт<select name="font">${opts(O.fonts, s.font)}</select></label>
+      </div>
+      <div class="row2">
+        <label>Карточки<select name="card_style">${opts(O.card_styles, s.card_style)}</select></label>
+        <label>Раскладка шапки<select name="layout">${opts(O.layouts, s.layout)}</select></label>
+      </div>
+    </section>
+    <section class="panel"><h2>🏷 Интересы и ссылки</h2>
+      <label>Интересы через запятую (до ${L.interests})<input class="input" name="interests" value="${esc(s.interests.join(", "))}" placeholder="аниме, физика, cs2"></label>
+      <div id="links"></div>
+      <button type="button" class="btn btn-sm btn-ghost" id="add-link">+ ссылка</button>
+    </section>
+    <section class="panel"><h2>🏆 Витрина и закреп</h2>
+      <p class="muted">Выбери до ${L.showcase_badges} бейджей, они будут в шапке профиля.</p>
+      <div class="picks">${d.badges.length ? d.badges.map((b) => `<label class="pick"><input type="checkbox" name="showcase" value="${esc(b.code)}"${s.showcase_badges.includes(b.code) ? " checked" : ""}>${esc(b.emoji)} ${esc(b.title)}</label>`).join("") : `<span class="muted">Бейджей пока нет</span>`}</div>
+      <label>Закреплённый ответ<select name="pinned_answer_id"><option value="">— не закреплять —</option>${d.answers.map((a) => `<option value="${a.id}"${a.id === s.pinned_answer_id ? " selected" : ""}>${esc(a.question_title.slice(0, 80))}</option>`).join("")}</select></label>
+    </section>
+    <section class="panel"><h2>🙈 Приватность разделов</h2>
+      <p class="muted">Отмеченные разделы увидишь только ты.</p>
+      <div class="picks">${Object.entries(O.sections).map(([k, v]) => `<label class="pick"><input type="checkbox" name="hidden" value="${esc(k)}"${s.hidden_sections.includes(k) ? " checked" : ""}>${esc(v)}</label>`).join("")}</div>
+    </section>
+    <div class="save-bar"><button class="btn btn-accent">Сохранить</button> <a class="btn btn-ghost" href="/u/${encodeURIComponent(d.user.username)}">Открыть профиль</a></div>`;
+
+  let links = [...s.links];
+  let avatar = s.avatar_url, banner = s.banner_url;
+  const renderLinks = () => {
+    $("#links").innerHTML = links.map((l, i) => `<div class="row2 link-row"><input class="input" data-i="${i}" data-k="title" placeholder="Название" maxlength="30" value="${esc(l.title)}"><input class="input" data-i="${i}" data-k="url" placeholder="https://…" value="${esc(l.url)}"><button type="button" class="btn btn-sm btn-ghost" data-del="${i}">✕</button></div>`).join("");
+    $("#add-link").hidden = links.length >= L.links;
+  };
+  $("#links").addEventListener("input", (e) => { const t = e.target; if (t.dataset.i) { links[+t.dataset.i][t.dataset.k] = t.value; preview(); } });
+  $("#links").addEventListener("click", (e) => { const b = e.target.closest("[data-del]"); if (b) { links.splice(+b.dataset.del, 1); renderLinks(); preview(); } });
+  $("#add-link").onclick = () => { links.push({ title: "", url: "" }); renderLinks(); };
+  renderLinks();
+
+  const collect = () => {
+    const f = form.elements, all = (n) => [...form.querySelectorAll(`[name=${n}]:checked`)].map((x) => x.value);
+    return {
+      display_name: f.display_name.value, bio: f.bio.value, status_emoji: f.status_emoji.value, status_text: f.status_text.value,
+      city: f.city.value, pronouns: f.pronouns.value, about: f.about.value,
+      theme: form.querySelector("[name=theme]:checked")?.value || "default",
+      avatar_frame: form.querySelector("[name=avatar_frame]:checked")?.value || "none",
+      accent: f.accent_on.checked ? f.accent.value : null, font: f.font.value, card_style: f.card_style.value, layout: f.layout.value,
+      interests: f.interests.value.split(",").map((x) => x.trim()).filter(Boolean),
+      links: links.filter((l) => l.url.trim()),
+      showcase_badges: all("showcase"), hidden_sections: all("hidden"),
+      pinned_answer_id: f.pinned_answer_id.value ? Number(f.pinned_answer_id.value) : null,
+      avatar_url: avatar || null, banner_url: banner || null,
+    };
+  };
+  const preview = () => {
+    const v = collect();
+    const user = { ...base.user, display_name: v.display_name, bio: v.bio, avatar_url: v.avatar_url, avatar_frame: v.avatar_frame };
+    const custom = { ...base.custom, ...v, links: v.links.map((l) => ({ ...l, title: l.title || l.url })), interests: v.interests.slice(0, L.interests) };
+    const badges = base.badges.map((b) => ({ ...b, showcase: v.showcase_badges.includes(b.code) }))
+      .sort((a, b) => (v.showcase_badges.indexOf(a.code) + 1 || 99) - (v.showcase_badges.indexOf(b.code) + 1 || 99));
+    const pin = v.pinned_answer_id ? (base.pinned_answer?.answer_id === v.pinned_answer_id ? base.pinned_answer
+      : { answer_id: v.pinned_answer_id, question_id: 0, question_title: d.answers.find((a) => a.id === v.pinned_answer_id)?.question_title || "", body_html: "<p class='muted'>текст появится после сохранения</p>" }) : null;
+    $("#preview").innerHTML = profileHTML({ ...base, user, custom, badges, pinned_answer: pin,
+      about_html: v.about ? `<p>${esc(v.about).replace(/\n/g, "<br>")}</p>` : "" }, { preview: true });
+    $("#av-prev").innerHTML = avatarHTML(user, "lg");
+    $("#bn-prev").style.backgroundImage = banner ? `url('${banner}')` : "";
+  };
+  form.addEventListener("input", preview);
+  form.addEventListener("change", preview);
+  const hook = (inputId, set) => {
+    $(inputId).onchange = async (e) => {
+      const file = e.target.files[0]; e.target.value = "";
+      if (!file) return;
+      try { const r = await uploadImage(file); set(r.url); preview(); toast("Загружено, не забудь сохранить"); } catch (_) {}
+    };
+  };
+  hook("#av-file", (u) => (avatar = u)); hook("#bn-file", (u) => (banner = u));
+  $("#av-clear").onclick = () => { avatar = null; preview(); };
+  $("#bn-clear").onclick = () => { banner = null; preview(); };
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api("PATCH", "/api/me/profile", collect());
+      base.user = { ...base.user, ...r.user }; base.custom = { ...base.custom, ...r.settings };
+      toast("Профиль сохранён ✨"); preview();
+    } catch (_) {}
+  };
+  preview();
+  loginKeysPanel($("#login-keys"));
 }
 
 // ---------------------------------------------------------------- auth
@@ -921,7 +1077,7 @@ async function pageAdmin() {
       }));
     },
     async legal(panel) {
-      const PAGES = { rules: "Правила сообщества", terms: "Пользовательское соглашение", privacy: "Политика конфиденциальности", requisites: "Реквизиты" };
+      const PAGES = { faq: "FAQ — частые вопросы", rules: "Правила сообщества", terms: "Пользовательское соглашение", privacy: "Политика конфиденциальности", requisites: "Реквизиты" };
       panel.innerHTML = `<select class="input" id="legal-slug">${Object.entries(PAGES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
         <div id="legal-editor" style="margin-top:12px"></div>`;
       const load = async () => {
@@ -929,6 +1085,7 @@ async function pageAdmin() {
         const [page, versions] = await Promise.all([api("GET", `/api/legal/${slug}`), api("GET", `/admin/legal/${slug}/versions`)]);
         $("#legal-editor").innerHTML = `<form class="form" id="legal-form">
           <label>Заголовок<input name="title" value="${esc(page.title)}"></label>
+          ${slug === "faq" ? `<p class="muted" style="font-size:13px">FAQ: каждый вопрос начинай строкой <code>## Вопрос?</code>, ниже — ответ (markdown). Текст до первого <code>##</code> — вступление. На сайте вопросы станут раскрывающимися пунктами с поиском.</p>` : ""}
           <label>Текст (Markdown) · редакция №${page.version}<textarea name="body_md" rows="16">${esc(page.body_md)}</textarea></label>
           <button class="btn btn-accent">Опубликовать новую редакцию</button> <a class="btn btn-ghost" href="/${slug}" target="_blank">Открыть страницу</a></form>
           <h3>История (${versions.items.length})</h3>
@@ -1011,10 +1168,26 @@ async function pageSearch() {
   if (form.elements.q.value) run(form.elements.q.value);
 }
 
+// ---------------------------------------------------------------- FAQ
+function pageFaq() {
+  const input = $("#faq-search");
+  if (!input) return;
+  const items = [...document.querySelectorAll(".faq-item")];
+  const open = () => { const el = location.hash && document.querySelector(location.hash); if (el?.tagName === "DETAILS") el.open = true; };
+  open(); window.addEventListener("hashchange", open);
+  input.oninput = () => {
+    const q = input.value.trim().toLowerCase();
+    let n = 0;
+    items.forEach((it) => { const hit = !q || it.textContent.toLowerCase().includes(q); it.hidden = !hit; if (hit) n++; if (q && hit) it.open = true; });
+    $("#faq-empty").hidden = n > 0;
+  };
+}
+
 // ---------------------------------------------------------------- boot
 const PAGES = {
   feed: () => initFeed(), room: pageRoom, question: pageQuestion, ask: pageAsk, rooms: pageRooms,
   profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, notifications: pageNotifications, search: pageSearch, mod: pageMod, admin: pageAdmin,
+  settings: pageSettings, faq: pageFaq,
 };
 
 (async function boot() {
