@@ -1,9 +1,12 @@
 """Цитаты для чайного гриба.
 
+Все цитаты — только на русском: ответ внешнего API принимается, лишь если в нём кириллица.
+
 * dubious() — «сомнительные личности»: жулики, прохвосты и мастера сомнительной мудрости.
-  Внешний источник по умолчанию — api.kanye.rest (цитаты Канье Уэста, на английском).
+  Звучит в облачке гриба и по кнопке «Погладить». Внешний источник по умолчанию не задан
+  (русскоязычного API таких цитат нет) — работает встроенный корпус; можно подключить свой URL.
 * philosophy() — «Поговорить с грибом»: реплики и диалоги из философских книг.
-  Внешний источник по умолчанию — stoic-quotes.com (цитаты стоиков, на английском).
+  Внешний источник по умолчанию — Forismatic (api.forismatic.com, lang=ru).
 
 Как работает внешний источник: запрос с таймаутом 1,5 с, удачные цитаты копятся в Redis (до 50 штук),
 после ошибки сервис не дёргается 10 минут. Всегда есть встроенный русский корпус, так что гриб не молчит,
@@ -106,11 +109,17 @@ def _parse(data) -> tuple[str, str] | None:
         data = data[0]
     if not isinstance(data, dict):
         return None
-    text = data.get("quote") or data.get("text") or data.get("content") or data.get("q")
-    author = data.get("author") or data.get("a") or ""
-    if isinstance(text, str) and 3 <= len(text) <= 400:
-        return text.strip(), str(author)[:80]
+    text = data.get("quoteText") or data.get("quote") or data.get("text") or data.get("content") or data.get("q")
+    author = data.get("quoteAuthor") or data.get("author") or data.get("a") or ""
+    if isinstance(text, str) and 3 <= len(text) <= 400 and is_russian(text):
+        return text.strip(), str(author).strip()[:80]
     return None
+
+
+def is_russian(text: str) -> bool:
+    """Хотя бы половина букв — кириллица."""
+    letters = [c for c in text if c.isalpha()]
+    return bool(letters) and sum("а" <= c.lower() <= "я" or c.lower() == "ё" for c in letters) * 2 >= len(letters)
 
 
 def _remote(kind: str, urls: str, default_author: str) -> dict | None:
@@ -136,18 +145,18 @@ def _remote(kind: str, urls: str, default_author: str) -> dict | None:
                 cached.insert(0, item)
             else:
                 r.set(f"{key}:backoff", 1, ex=BACKOFF)
+        cached = [c for c in cached if is_russian(json.loads(c).get("text", ""))]
         if cached:
             q = json.loads(rng.choice(cached))
-            return {"lines": [{"who": q["author"], "text": q["text"]}], "book": "в оригинале, через API",
-                    "remote": True}
+            return {"lines": [{"who": q["author"], "text": q["text"]}], "book": "через API", "remote": True}
     except Exception:  # noqa: BLE001
         return None
     return None
 
 
-def dubious() -> dict:
-    if rng.random() < REMOTE_SHARE:
-        q = _remote("dubious", current_app.config.get("QUOTES_DUBIOUS_URLS", ""), "Канье Уэст")
+def dubious(remote: bool = True) -> dict:
+    if remote and rng.random() < REMOTE_SHARE:
+        q = _remote("dubious", current_app.config.get("QUOTES_DUBIOUS_URLS", ""), "Неизвестный мудрец")
         if q:
             return q
     who, src, text = rng.choice(DUBIOUS)
@@ -156,12 +165,18 @@ def dubious() -> dict:
 
 def philosophy() -> dict:
     if rng.random() < REMOTE_SHARE:
-        q = _remote("philo", current_app.config.get("QUOTES_PHILO_URLS", ""), "Стоик")
+        q = _remote("philo", current_app.config.get("QUOTES_PHILO_URLS", ""), "Неизвестный философ")
         if q:
             return {**q, "intro": rng.choice(MUSH_INTRO)}
     book, lines = rng.choice(PHILO)
     return {"lines": [{"who": w, "text": t} for w, t in lines], "book": book, "remote": False,
             "intro": rng.choice(MUSH_INTRO)}
+
+
+def as_speech(q: dict) -> str:
+    """Для облачка: «Как говорил Остап Бендер: „…“»."""
+    line = q["lines"][0]
+    return f"Как говорил {line['who']}: «{line['text']}»"
 
 
 def as_text(q: dict) -> str:

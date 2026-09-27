@@ -301,21 +301,25 @@ def test_talk_and_pet_quotes(make_user, no_mutations):
 
 def test_quotes_remote_parser_and_fallback(app, monkeypatch):
     from app.services import quotes
-    assert quotes._parse({"quote": "I am a god"}) == ("I am a god", "")
-    assert quotes._parse([{"q": "Less is more", "a": "Someone"}]) == ("Less is more", "Someone")
+    assert quotes._parse({"quote": "I am a god"}) is None               # английское не берём
+    assert quotes._parse({"quoteText": "Терпение и труд всё перетрут", "quoteAuthor": "Пословица "}) == \
+        ("Терпение и труд всё перетрут", "Пословица")
+    assert quotes._parse([{"q": "Меньше — значит больше", "a": "Кто-то"}]) == ("Меньше — значит больше", "Кто-то")
     assert quotes._parse({"nope": 1}) is None
 
     class R:
         status_code = 200
         def json(self):
-            return {"quote": "Remote wisdom"}
+            return {"quoteText": "Удалённая мудрость"}
     import httpx
     monkeypatch.setattr(httpx, "get", lambda *a, **k: R())
     app.config["QUOTES_REMOTE"] = True
     try:
         with app.app_context():
-            q = quotes._remote("test", "https://example.invalid/q", "Канье Уэст")
-            assert q["remote"] and q["lines"][0] == {"who": "Канье Уэст", "text": "Remote wisdom"}
+            from app.extensions import get_redis
+            get_redis().delete("quotes:test", "quotes:test:backoff")
+            q = quotes._remote("test", "https://example.invalid/q", "Неизвестный мудрец")
+            assert q["remote"] and q["lines"][0] == {"who": "Неизвестный мудрец", "text": "Удалённая мудрость"}
             # сервис упал — кэш остаётся, а на 10 минут включается пауза
             monkeypatch.setattr(httpx, "get", lambda *a, **k: (_ for _ in ()).throw(httpx.ConnectError("down")))
             from app.extensions import get_redis
@@ -389,3 +393,42 @@ def test_feed_has_my_vote(qa):
     assert item["my_vote"] == 1
     anon = next(i for i in qa["author_c"].get("/api/feed?tab=new").get_json()["items"] if i["id"] == qid)
     assert anon["my_vote"] is None
+
+
+
+def test_all_quotes_are_russian():
+    from app.services import quotes
+    for who, src, text in quotes.DUBIOUS:
+        assert quotes.is_russian(text) and quotes.is_russian(who), text
+    for book, lines in quotes.PHILO:
+        for who, text in lines:
+            assert quotes.is_russian(text) and quotes.is_russian(who), text
+
+
+def test_bubble_quotes_unless_sugar_coma(app, make_user, no_mutations):
+    from app.services import quotes
+    c, _ = make_user()
+    kid = _first(c)["id"]
+    texts = {t for _, _, t in quotes.DUBIOUS}
+    for stats in ({}, {"sweet": 10.0}, {"clean": 10.0}):          # доволен, голоден, грязно — всё равно цитата
+        _edit(app, kid, **{"sweet": 70.0, "tea": 70.0, "clean": 90.0, "happy": 70.0, **stats})
+        ph = _first(c)["phrase"]
+        assert ph.startswith("Как говорил ") and any(t in ph for t in texts), ph
+    _edit(app, kid, sweet=99.0)
+    k = _first(c)
+    assert k["mood"] == "sticky" and not k["phrase"].startswith("Как говорил")
+    assert k["phrase"] in kb.TALK["sticky"]
+
+
+def test_sprout_only_on_last_stage(app, make_user, no_mutations):
+    c, u = make_user()
+    kid = _first(c)["id"]
+    _give_wood(app, u["id"], 1000)
+    c.post("/api/shop/jar", json={})
+    for stage_xp in (0, 150, 500, 1200, 2500, 3900):              # все стадии до «Легенды»
+        _edit(app, kid, xp=stage_xp, care_days=30, last_care_day=None)
+        r = c.post(f"/api/kombucha/{kid}/pet", json={}).get_json()
+        assert r["sprout"] is None and not r["kombucha"]["sprout_progress"]["legend"], stage_xp
+    _edit(app, kid, xp=4000, care_days=6, last_care_day=None)
+    r = c.post(f"/api/kombucha/{kid}/sugar", json={}).get_json()
+    assert r["sprout"] and r["sprout"]["planted"]

@@ -1265,6 +1265,13 @@ async function kombuchaCardModal(id) {
     <h3>История владельцев</h3>${d.owners.length ? `<ol class="kb-owners">${d.owners.map((o) => `<li>@${esc(o.username || "?")} — ${HOW[o.how] || esc(o.how)}${o.price ? ` за ${o.price} $₽` : ""} <small class="muted">${esc(fmtDate(o.at))}</small></li>`).join("")}</ol>` : `<p class="muted">Всю жизнь у одного хозяина — @${esc(d.owner)}</p>`}
     <div class="modal-actions"><button class="btn btn-ghost" data-close>Закрыть</button></div></div>`);
 }
+document.addEventListener("toggle", (e) => {
+  const d = e.target;
+  if (!d.dataset?.fold) return;
+  localStorage.setItem(`fold:${d.dataset.fold}`, d.open ? "1" : "0");
+  const hint = d.querySelector(".kb-fold-hint");
+  if (hint) hint.textContent = d.open ? "свернуть" : "развернуть";
+}, true);
 document.addEventListener("click", (e) => {
   const c = e.target.closest("[data-kcard]");
   if (c && !e.target.closest("button, a, .kb-pick")) kombuchaCardModal(c.dataset.kcard);
@@ -1276,6 +1283,12 @@ function kombuchaCard(k, extra = "") {
     ${k.mutations.length ? `<div class="kb-card-muts">${k.mutations.slice(0, 4).map(mutChip).join("")}${k.mutations.length > 4 ? `<span class="muted">+${k.mutations.length - 4}</span>` : ""}</div>` : `<small class="muted">без мутаций</small>`}
     ${extra}</div>`;
 }
+
+const KB_MOOD = {
+  happy: ["😊", "Доволен жизнью"], hungry: ["🥺", "Голодный — хочет сахара"], thirsty: ["🥵", "Хочет заварки"],
+  dirty: ["🤢", "Банка грязная"], sad: ["😢", "Грустит — погладь или поговори"], sticky: ["🥴", "Сахарная кома"],
+  moldy: ["🦠", "Заплесневел — нужна уксусная ванна"], dead: ["💀", "Закис"],
+};
 
 function kombuchaSVG(k, { small = false } = {}) {
   const st = k.stats, size = k.stage.size;
@@ -1314,7 +1327,8 @@ function kombuchaSVG(k, { small = false } = {}) {
     `<line x1="${-w + (i + 1) * (w / 3.5)}" y1="${-h}" x2="${-w + (i + 1) * (w / 3.5) - 8}" y2="${h}" stroke="#6b4a1e" stroke-width="3" opacity=".45"/>`).join("") : "";
   const crystal = has("crystal") ? `<path d="M${-w * 0.5},0 L${-w * 0.2},${-h * 0.6} L${w * 0.2},${-h * 0.2} L${w * 0.5},${-h * 0.5} M${-w * 0.2},${-h * 0.6} L0,${h * 0.5}" stroke="#fff" stroke-width="1.5" fill="none" opacity=".8"/>` : "";
   // аксессуары-эмодзи над грибом / вокруг банки
-  const faceY = -(h + 12);
+  const faceY = -(h + 12);                      // для аксессуаров над грибом
+  const faceK = Math.min(1.25, Math.max(0.75, h / 16));   // лицо масштабируется под толщину диска
   const acc = [];
   if (has("crown")) acc.push(`<text x="0" y="${faceY - 16}" class="kb-acc" font-size="22">👑</text>`);
   else if (has("scholar")) acc.push(`<text x="0" y="${faceY - 14}" class="kb-acc" font-size="20">🎓</text>`);
@@ -1347,7 +1361,7 @@ function kombuchaSVG(k, { small = false } = {}) {
           ${stripes}${dots}${crystal}
         </g>
         ${size >= 4 ? `<path d="M-${w * 0.7},${h * 0.6} q6,14 12,0 q6,14 12,0 M${w * 0.3},${h * 0.6} q6,14 12,0" class="kb-tendrils"/>` : ""}
-        <g class="kb-face" transform="translate(0,${faceY})">
+        <g class="kb-face" transform="translate(0,${(-h * 0.15).toFixed(1)}) scale(${faceK.toFixed(2)})">
           ${f.map((d) => `<path d="${d}"/>`).join("")}
           ${k.mood === "happy" || k.mood === "sticky" ? `<circle cx="-16" cy="4" r="3" class="kb-blush"/><circle cx="16" cy="4" r="3" class="kb-blush"/>` : ""}
         </g>
@@ -1359,6 +1373,7 @@ function kombuchaSVG(k, { small = false } = {}) {
     <path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z" class="kb-jar"/>
     <path d="M52,50 L50,190" class="kb-glare"/>${has("clean_freak") ? `<path d="M64,60 L63,110" class="kb-glare"/>` : ""}
     ${k.frozen ? `<path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z" class="kb-ice"/><text x="160" y="60" class="kb-acc" font-size="20">❄️</text>` : ""}
+    ${small ? "" : `<g class="kb-mood-badge"><circle cx="186" cy="30" r="17"/><text x="186" y="37" text-anchor="middle" font-size="20">${KB_MOOD[k.mood]?.[0] || "🙂"}</text></g>`}
     <text x="110" y="228" text-anchor="middle" class="kb-label">3 л</text>
   </svg>`;
 }
@@ -1410,6 +1425,7 @@ async function pageKombucha() {
     const pct = st.next_xp ? Math.round(((k.xp - st.from_xp) / (st.next_xp - st.from_xp)) * 100) : 100;
     const sp = k.sprout_progress;
     const sprout = k.sprout_pending ? `<div class="kb-note">🌱 Отросток готов и ждёт свободную банку. <button class="link-btn" data-buy>Купить банку за ${S.prices.jar} $₽</button></div>`
+      : !sp.legend ? `<div class="kb-note muted">🌱 Гриб делится только на последней стадии — «Легенда трёхлитровой банки». Сейчас: «${esc(st.title)}».</div>`
       : `<div class="kb-sprout" title="Легенда делится раз в неделю, если 7 дней за ней ухаживали и на ней нет плесени"><span>🌱 Деление${sp.count ? ` (было ${sp.count})` : ""}:</span>
           <span class="${sp.legend ? "ok" : ""}">${sp.legend ? "✅" : "⏳"} стадия «Легенда»</span>
           <span class="${sp.care_days >= sp.need_days ? "ok" : ""}">${sp.care_days >= sp.need_days ? "✅" : "⏳"} дней ухода ${sp.care_days}/${sp.need_days}</span>
@@ -1422,10 +1438,11 @@ async function pageKombucha() {
       </div>
       <div class="kb-info">
         <div class="kb-name"><h2>${esc(k.name)}</h2><button class="link-btn" data-rename title="Переименовать">✏️</button></div>
+        <div class="kb-mood mood-${k.mood}">${KB_MOOD[k.mood]?.[0] || ""} ${esc(KB_MOOD[k.mood]?.[1] || "")}</div>
         <div class="kb-stage">${esc(st.title)} · ${k.age_days} дн.${k.generation > 1 ? ` · поколение ${k.generation}` : ""}${k.is_sprout ? " · отросток" : ""}</div>
         <div class="kb-xp"><div class="kb-xp-bar"><span style="width:${pct}%"></span></div>
           <small>${k.xp} XP${st.next_xp ? ` · до стадии «${esc(st.next_title)}» ещё ${st.next_xp - k.xp}` : " · максимальная стадия 👑"} · рекорд ${k.best_xp}</small></div>
-        ${k.mutations.length ? `<div class="kb-muts">${k.mutations.map(mutChip).join("")}</div>` : ""}
+        ${k.mutations.length ? `<details class="kb-muts-box" data-fold="kb-muts"${localStorage.getItem("fold:kb-muts") === "0" ? "" : " open"}><summary>🧬 Мутации (${k.mutations.length})</summary><div class="kb-muts">${k.mutations.map(mutChip).join("")}</div></details>` : ""}
         ${k.dies_in != null && k.alive ? `<div class="kb-danger">⚠️ Гриб на грани! Закиснет через ${fmtLeft(k.dies_in)}, если не поднять показатель с нуля.</div>` : ""}
         <div class="kb-stats">${STAT.map(([key, label]) => { const v = k.stats[key];
           return `<div class="kb-stat"><span>${label}</span><div class="kb-bar ${v < 25 ? "low" : v > 90 && key === "sweet" ? "over" : ""}"><span style="width:${v}%"></span></div><b>${v}</b></div>`; }).join("")}</div>
@@ -1460,14 +1477,15 @@ async function pageKombucha() {
     S.catalog.forEach((m) => (byStage[m.stage] ||= []).push(m));
     const order = ["legendary", "epic", "rare", "common"];
     const cnt = (r) => S.catalog.filter((m) => m.rarity === r).length, got = (r) => S.catalog.filter((m) => m.rarity === r && found.has(m.code)).length;
-    $("#kb-codex").innerHTML = `<h2>🧬 Коллекция мутаций <span class="muted">${found.size}/${S.catalog.length}</span></h2>
-      <p class="muted kb-codex-lead">По 20 мутаций на каждую стадию. Каждый выпавший экземпляр получает номер на весь сайт — как подарки в Telegram: «#1» бывает только один.
+    const codexOpen = localStorage.getItem("fold:kb-codex") === "1";
+    $("#kb-codex").innerHTML = `<details class="kb-codex-box" data-fold="kb-codex"${codexOpen ? " open" : ""}><summary><h2>🧬 Коллекция мутаций <span class="muted">${found.size}/${S.catalog.length}</span></h2><span class="muted kb-fold-hint">${codexOpen ? "свернуть" : "развернуть"}</span></summary>
+      <p class="muted kb-codex-lead">По 40 мутаций на каждую стадию. Каждый выпавший экземпляр получает номер на весь сайт — как подарки в Telegram: «#1» бывает только один.
         Первая находка каждой мутации даёт +15 $₽. Шанс за подходящее действие: обычная 6%, редкая 2,5%, эпическая 1%, легендарная 0,4%.</p>
       <div class="kb-rar-legend">${order.map((r) => `<span class="kb-mut r-${r}">${RAR[r]} ${got(r)}/${cnt(r)}</span>`).join("")}</div>
       ${Object.entries(byStage).map(([st, list]) => `<h3 class="kb-cx-stage">Стадия ${st}: ${esc(list[0].stage_title)} <span class="muted">${list.filter((m) => found.has(m.code)).length}/${list.length}</span></h3>
       <div class="kb-codex">${list.slice().sort((x, y) => order.indexOf(x.rarity) - order.indexOf(y.rarity)).map((m) => { const f = found.get(m.code);
         return f ? `<div class="kb-cx found r-${m.rarity}" style="--mc:${m.color}"><span class="e">${esc(m.emoji)}</span><b>${esc(m.title)}</b><small>${RAR[m.rarity]}</small><small class="muted">у «${esc(f.kombucha_name || "?")}» · тираж ${m.issued}</small></div>`
-          : `<div class="kb-cx r-${m.rarity}"><span class="e">❓</span><b>???</b><small>${esc(m.hint)}</small><small class="muted">${RAR[m.rarity]} · тираж ${m.issued}</small></div>`; }).join("")}</div>`).join("")}`;
+          : `<div class="kb-cx r-${m.rarity}"><span class="e">❓</span><b>???</b><small>${esc(m.hint)}</small><small class="muted">${RAR[m.rarity]} · тираж ${m.issued}</small></div>`; }).join("")}</div>`).join("")}</details>`;
   };
 
   const render = () => {

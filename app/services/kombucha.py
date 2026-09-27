@@ -82,13 +82,14 @@ TALK = {
 
 
 def phrase(k: Kombucha) -> str:
-    """Реплика в пузыре: при хорошем настроении гриб любит цитировать сомнительных личностей
-    (только встроенный корпус — out() зовётся часто, внешние API дёргаем лишь по кнопкам)."""
+    """Реплика в облачке. В сахарной коме гриб только стонет, в остальное время цитирует
+    сомнительных личностей — тот же набор, что и по кнопке «Погладить»."""
     m = mood(k)
-    if m == "happy" and rng.random() < 0.6:
-        who, src, text = rng.choice(quotes.DUBIOUS)
-        return f"Как говорил {who}: «{text}»"
-    return rng.choice(TALK[m]) if m in TALK else "…"
+    if m == "dead":
+        return "…"
+    if m == "sticky":
+        return rng.choice(TALK["sticky"])
+    return quotes.as_speech(quotes.dubious(remote=False))
 
 
 # ---------------------------------------------------------------- мутации (каталог — kombucha_mutations.py)
@@ -380,7 +381,7 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
         if action == "pet":
             k.pet_count += 1
             quote = quotes.dubious()
-            msg = rng.choice(TALK.get(mood(k), TALK["happy"])) + " А вообще, как говорил " + quotes.as_text(quote)
+            msg = rng.choice(TALK["sticky"]) if mood(k) == "sticky" else quotes.as_speech(quote)
         elif action == "talk":
             quote = quotes.philosophy()
             msg = quote["intro"] + " " + quotes.as_text(quote)

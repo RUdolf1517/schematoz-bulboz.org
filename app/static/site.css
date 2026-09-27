@@ -698,3 +698,18 @@ main.main-wide { max-width: 1180px; }
 .task-sub { padding: 10px 0; border-top: 1px solid var(--line, rgba(255,255,255,.08)); }
 .task-sub.rejected { opacity: .6; }
 #sub-form textarea { width: 100%; margin-bottom: 8px; }
+
+/* ---------- эмоции гриба и сворачиваемые мутации ---------- */
+.kb-face path { stroke: #2b2118; stroke-width: 3.2; }
+.kb-mood-badge circle { fill: rgba(255,255,255,.92); stroke: rgba(0,0,0,.15); stroke-width: 1.5; }
+.kb-mood { display: inline-block; margin: 2px 0 6px; padding: 3px 10px; border-radius: 999px; font-weight: 600; font-size: 14px; background: rgba(62,207,90,.15); }
+.kb-mood.mood-hungry, .kb-mood.mood-thirsty, .kb-mood.mood-sad, .kb-mood.mood-dirty { background: rgba(255,180,0,.18); }
+.kb-mood.mood-sticky, .kb-mood.mood-moldy, .kb-mood.mood-dead { background: rgba(255,70,70,.18); }
+.kb-muts-box, .kb-codex-box { margin: 6px 0; }
+.kb-muts-box > summary, .kb-codex-box > summary { cursor: pointer; user-select: none; }
+.kb-muts-box > summary { font-weight: 600; font-size: 14px; }
+.kb-codex-box > summary { display: flex; align-items: baseline; gap: 10px; list-style: none; }
+.kb-codex-box > summary::-webkit-details-marker { display: none; }
+.kb-codex-box > summary h2 { margin: 0; }
+.kb-codex-box > summary h2::before { content: "▸ "; }
+.kb-codex-box[open] > summary h2::before { content: "▾ "; }
