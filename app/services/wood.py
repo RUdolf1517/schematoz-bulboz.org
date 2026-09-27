@@ -31,8 +31,12 @@ EARN = {
     "kombucha_care": (1, 10, "Уход за грибом"),
     "mutation": (15, None, "Новая мутация гриба"),
     "sprout": (50, None, "Гриб дал отросток"),
+    "wall_post": (1, 10, "Запись на стене"),
+    "sale": (0, None, "Продал гриб"),
 }
-SPEND_TITLES = {"buy_jar": "Купил банку", "revive": "Реанимация гриба"}
+SPEND_TITLES = {"buy_jar": "Купил банку", "revive": "Реанимация гриба", "buy_kombucha": "Купил гриб на рынке"}
+MARKET_FEE = 0.05          # комиссия рынка сгорает — борьба с инфляцией
+MIN_PRICE, MAX_PRICE = 10, 1_000_000
 PRICES = {"jar": 300, "revive": 150}
 MAX_JARS = 5
 
@@ -66,6 +70,9 @@ async def earn(s, user_id: int, reason: str, ref, amount: int | None = None) -> 
     bal = (await s.execute(update(User).where(User.id == user_id).values(wood=User.wood + amount)
                            .returning(User.wood))).scalar()
     await s.execute(update(WoodTx).where(WoodTx.id == tx_id).values(balance_after=bal))
+    if bal >= 1000:
+        from .kombucha_achievements import check_rich
+        await check_rich(s, user_id, bal)
     return amount
 
 
@@ -91,4 +98,4 @@ def title_for(reason: str) -> str:
 
 
 def rules() -> list[dict]:
-    return [{"reason": r, "amount": a, "daily_cap": c, "title": t} for r, (a, c, t) in EARN.items()]
+    return [{"reason": r, "amount": a, "daily_cap": c, "title": t} for r, (a, c, t) in EARN.items() if a > 0]

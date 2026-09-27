@@ -24,6 +24,7 @@ async function open(path, wait = 900) {
     },
   });
   dom.window.confirm = () => true;
+  dom.window.prompt = (_q, def) => (globalThis.PROMPT_ANSWER ?? def ?? "");
   dom.window.HTMLElement.prototype.scrollIntoView = function () {};
   await sleep(wait);
   return dom;
@@ -91,9 +92,29 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   check("гриб: банка нарисована", !!d.window.document.querySelector(".kb-main .kb-svg"));
   check("гриб: в шапке есть Холивары и Гриб", !!d.window.document.querySelector('.main-nav a[href="/debates"]') && !!d.window.document.querySelector('.main-nav a[href="/kombucha"].active'));
   d.window.document.querySelector('[data-act="tea"]').click(); await sleep(900);
-  check("гриб: заварка долита, кнопка на кулдауне", d.window.document.querySelector('[data-act="tea"]')?.disabled === true && txt(d, ".kb-stats").includes("100"));
-  check("гриб: банки, коллекция из 20 мутаций, таймер 12 ч", !!d.window.document.querySelector(".kb-jar-tab.active") && d.window.document.querySelectorAll(".kb-cx").length === 20 && txt(d, ".kb-next").includes("12 часов"));
+  check("гриб: заварка долита, кнопка на кулдауне", d.window.document.querySelector('[data-act="tea"]')?.disabled === true);
+  check("гриб: банки, коллекция из 120 мутаций по стадиям, таймер 12 ч", !!d.window.document.querySelector(".kb-jar-tab.active") && d.window.document.querySelectorAll(".kb-cx").length === 120 && d.window.document.querySelectorAll(".kb-cx-stage").length === 6 && txt(d, ".kb-next").includes("12 часов"));
   check("гриб: в шапке баланс $₽", !d.window.document.querySelector("#wood-chip").hidden && Number(txt(d, "#wood-balance")) > 0);
+  d.window.document.querySelector("[data-freeze]").click(); await sleep(1200);
+  check("гриб: заморожен, есть кнопки продать и обменять", !!d.window.document.querySelector(".kb-svg.frozen") && !!d.window.document.querySelector("[data-list]") && !!d.window.document.querySelector("[data-trade]"));
+  globalThis.PROMPT_ANSWER = "777";
+  d.window.document.querySelector("[data-list]").click(); await sleep(1200);
+  globalThis.PROMPT_ANSWER = undefined;
+  check("гриб: выставлен на продажу", txt(d, "[data-unlist]").includes("777"));
+  const meName = decodeURIComponent(d.window.document.querySelector("#me-profile").getAttribute("href").split("/u/")[1]);
+  d = await open("/market", 3000);
+  check("рынок: мой гриб на витрине", txt(d, "#mk-list").includes("777") && txt(d, "#mk-list").includes("твой") && txt(d, "#mk-trades").includes("Входящие"));
+  d = await open(`/u/${encodeURIComponent(meName)}`, 1800);
+  check("профиль: гриб на полке с ценой", d.window.document.querySelectorAll("#shelf-list .kb-card").length === 1 && txt(d, "#shelf-list").includes("777"));
+  check("профиль: бейджи-достижения гриба", txt(d, ".badges").includes("Грибовод") && txt(d, ".badges").includes("Морозилка"));
+  const wta = d.window.document.querySelector("#wall-form textarea");
+  wta.value = "Первая запись на стене 🍄";
+  d.window.document.querySelector("#wall-form form").dispatchEvent(new d.window.Event("submit", { cancelable: true })); await sleep(1200);
+  check("стена: запись появилась", txt(d, "#wall-list").includes("Первая запись на стене"));
+  d = await open("/kombucha", 1500);
+  d.window.document.querySelector("[data-unlist]").click(); await sleep(900);
+  d.window.document.querySelector("[data-unfreeze]").click(); await sleep(1200);
+  check("гриб: снят с продажи и разморожен", !d.window.document.querySelector(".kb-svg.frozen") && !!d.window.document.querySelector(".kb-actions"));
   d = await open("/wallet", 1500);
   check("кошелёк: баланс и история", txt(d, "#w-balance").endsWith("$₽") && d.window.document.querySelectorAll(".wallet-row").length > 0);
 

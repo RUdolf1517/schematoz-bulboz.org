@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from ..auth.rbac import login_required
 from ..db import session_scope
 from ..errors import ApiError
-from ..models import Kombucha, KombuchaCodex, User, WoodTx
+from ..models import Kombucha, KombuchaCodex, MutationCounter, User, WoodTx
 from ..services import kombucha as kb
 from ..services import wood
 from . import bp
@@ -40,7 +40,13 @@ async def _state(s, user: User) -> dict:
             "wood": await wood.balance(s, user.id), "prices": wood.PRICES,
             "codex": [{"code": c.code, "found_at": c.found_at.isoformat(), "kombucha_name": c.kombucha_name}
                       for c in codex],
-            "catalog": kb.catalog()}
+            "catalog": await _catalog(s)}
+
+
+async def _catalog(s) -> list[dict]:
+    """Каталог + сколько экземпляров каждой мутации уже выпало на сайте (тираж, как у подарков в TG)."""
+    issued = dict((await s.execute(select(MutationCounter.code, MutationCounter.issued))).all())
+    return [{**m, "issued": issued.get(m["code"], 0)} for m in kb.catalog()]
 
 
 @bp.get("/kombucha")

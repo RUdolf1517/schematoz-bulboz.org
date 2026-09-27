@@ -26,7 +26,8 @@ LAYOUTS = {"classic": "Классика", "centered": "По центру", "comp
 FRAMES = {"none": ("Без рамки", 1), "neon": ("Неон", 2), "fire": ("Огонь", 3), "gold": ("Золото", 5),
           "rainbow": ("Радуга", 8)}
 SECTIONS = {"streak": "Стрик", "badges": "Бейджи", "topics": "Репутация по темам",
-            "best_answers": "Лучшие ответы", "follows": "Подписчики и подписки", "stats": "Статистика"}
+            "best_answers": "Лучшие ответы", "follows": "Подписчики и подписки", "stats": "Статистика",
+            "shelf": "Полка с грибами", "wall": "Стена"}
 
 HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 MAX_LINKS, MAX_INTERESTS, MAX_SHOWCASE = 5, 10, 3
@@ -35,6 +36,7 @@ DEFAULTS = {
     "theme": "default", "accent": None, "font": "default", "card_style": "glass", "layout": "classic",
     "avatar_frame": "none", "status_emoji": "", "status_text": "", "about": "", "city": "", "pronouns": "",
     "links": [], "interests": [], "showcase_badges": [], "pinned_answer_id": None, "hidden_sections": [],
+    "wall_closed": False,
 }
 
 
@@ -164,6 +166,8 @@ async def apply_update(s, user: User, data: dict) -> None:
             raise ApiError(f"hidden_sections: из {', '.join(SECTIONS)}", 400, "validation_error",
                            field="hidden_sections")
         prof["hidden_sections"] = sorted(set(hs))
+    if "wall_closed" in data:
+        prof["wall_closed"] = bool(data["wall_closed"])
     user.profile = {k: v for k, v in prof.items() if v != DEFAULTS.get(k)}
 
 
@@ -172,5 +176,5 @@ def public_custom(u: User) -> dict:
     p = merged(u)
     return {k: p[k] for k in ("theme", "accent", "font", "card_style", "layout", "avatar_frame",
                               "status_emoji", "status_text", "about", "city", "pronouns", "links",
-                              "interests", "showcase_badges", "pinned_answer_id", "hidden_sections")} | {
+                              "interests", "showcase_badges", "pinned_answer_id", "hidden_sections", "wall_closed")} | {
         "banner_url": u.banner_url, "avatar_url": u.avatar_url}

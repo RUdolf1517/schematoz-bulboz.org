@@ -714,7 +714,8 @@ async function pageProfile() {
   catch (_) { root.innerHTML = `<div class="panel"><h1>Пользователь не найден</h1></div>`; return; }
   const u = d.user;
   document.title = `${u.display_name || "@" + u.username} — schematoz-bulboz.org`;
-  root.innerHTML = profileHTML(d);
+  root.innerHTML = profileHTML(d) + `<div id="profile-extras"></div>`;
+  profileExtras(d);
   let following = d.i_follow;
   const fb = $("#follow-btn");
   if (fb) fb.onclick = async () => {
@@ -808,6 +809,7 @@ async function pageSettings() {
 
     <section class="st-card" id="st-privacy"><h2>🙈 Приватность</h2>
       <p class="muted st-lead">Отмеченные разделы видишь только ты. Сервер не отдаёт их даже через API.</p>
+      <label class="st-check st-toggle"><input type="checkbox" name="wall_closed"${s.wall_closed ? " checked" : ""}> 🔒 Закрыть стену: писать могу только я</label>
       <div class="st-toggles">${Object.entries(O.sections).map(([k, v]) => `<label class="st-check st-toggle"><input type="checkbox" name="hidden" value="${esc(k)}"${s.hidden_sections.includes(k) ? " checked" : ""}> Скрыть: ${esc(v)}</label>`).join("")}</div>
     </section>
 
@@ -834,7 +836,7 @@ async function pageSettings() {
       accent: f.accent_on.checked ? f.accent.value : null, font: f.font.value, card_style: f.card_style.value, layout: f.layout.value,
       interests: f.interests.value.split(",").map((x) => x.trim()).filter(Boolean),
       links: links.filter((l) => l.url.trim()),
-      showcase_badges: all("showcase"), hidden_sections: all("hidden"),
+      showcase_badges: all("showcase"), hidden_sections: all("hidden"), wall_closed: f.wall_closed.checked,
       pinned_answer_id: f.pinned_answer_id.value ? Number(f.pinned_answer_id.value) : null,
       avatar_url: avatar || null, banner_url: banner || null,
     };
@@ -1197,6 +1199,9 @@ const NOTIF = {
   comment: (p) => ["💭", `@${esc(p.username)} прокомментировал(а) твой ответ в «${esc(p.question_title)}»`, `/q/${p.question_id}#a${p.answer_id}`],
   follow: (p) => ["👋", `@${esc(p.username)} подписался(ась) на тебя`, `/u/${encodeURIComponent(p.username)}`],
   ban: (p) => ["⛔", `Аккаунт заблокирован. Причина: ${esc(p.reason || "—")}`, "/banned"],
+  trade: (p) => [p.accepted ? "🤝" : p.gift ? "🎁" : "🔄", p.accepted ? `@${esc(p.username)} принял(а) твоё предложение обмена` : p.gift ? `@${esc(p.username)} дарит тебе чайный гриб` : `@${esc(p.username)} предлагает обмен грибами`, "/market#trades"],
+  sale: (p) => ["💰", `@${esc(p.username)} купил(а) твой гриб «${esc(p.kombucha_name)}» — +${p.amount} $₽`, "/wallet"],
+  wall: (p) => ["📝", `@${esc(p.username)} написал(а) у тебя на стене: «${esc(p.preview)}»`, ME ? `/u/${encodeURIComponent(ME.user.username)}#wall` : "#"],
   appeal: (p) => ["⚖️", p.decision === "accept" || p.decision === "approve" ? "Апелляцию приняли — блокировка снята" : `Апелляцию отклонили${p.comment ? ": " + esc(p.comment) : ""}`, "/banned"],
 };
 
@@ -1237,6 +1242,22 @@ const KB_DISC = [ // [мутация, заливка, обводка] — пер
   ["night", "#51639e", "#2c3866"], ["sweet_tooth", "#ffc2e0", "#e58db1"],
 ];
 
+function shade(hex, f = 0.6) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(v * f));
+  return `rgb(${c.join(",")})`;
+}
+const RAR = { legendary: "Легендарная", epic: "Эпическая", rare: "Редкая", common: "Обычная" };
+function mutChip(m) {
+  return `<span class="kb-mut r-${m.rarity}" title="${esc(RAR[m.rarity] || "")}: ${esc(m.title)}${m.inherited ? " (унаследована)" : ""}">${esc(m.emoji)} ${esc(m.title)}${m.serial ? ` <b class="kb-serial">#${m.serial}</b>` : ""}${m.inherited ? " 🧬" : ""}</span>`;
+}
+function kombuchaCard(k, extra = "") {
+  return `<div class="kb-card r-${k.mutations?.[0]?.rarity || "none"}"><div class="kb-card-svg">${kombuchaSVG(k, { small: true })}</div>
+    <b>${esc(k.name)}</b><small class="muted">${esc(k.stage.title)} · ${k.xp} XP${k.generation > 1 ? ` · пок. ${k.generation}` : ""}</small>
+    ${k.mutations.length ? `<div class="kb-card-muts">${k.mutations.slice(0, 4).map(mutChip).join("")}${k.mutations.length > 4 ? `<span class="muted">+${k.mutations.length - 4}</span>` : ""}</div>` : `<small class="muted">без мутаций</small>`}
+    ${extra}</div>`;
+}
+
 function kombuchaSVG(k, { small = false } = {}) {
   const st = k.stats, size = k.stage.size;
   const muts = new Set((k.mutations || []).map((m) => m.code));
@@ -1258,7 +1279,9 @@ function kombuchaSVG(k, { small = false } = {}) {
     dead: ["M-13,-4 L-7,0 M-13,0 L-7,-4", "M7,-4 L13,0 M7,0 L13,-4", "M-7,8 L7,8"],
   };
   const f = faces[k.mood] || faces.happy;
-  const disc = KB_DISC.find(([c]) => has(c));
+  const old = KB_DISC.find(([c]) => has(c));
+  const top1 = (k.mutations || []).find((m) => m.color);   // сервер сортирует от самой редкой
+  const disc = old || (top1 ? [top1.code, top1.color, shade(top1.color)] : null);
   const nb = has("bubbly") ? 12 : 6;
   const bubbles = k.alive ? Array.from({ length: nb }, (_, i) =>
     `<circle class="kb-bubble" cx="${50 + ((i * 23) % 120)}" cy="196" r="${2 + (i % 3)}" style="animation-delay:${(i * 0.53).toFixed(2)}s"/>`).join("") : "";
@@ -1282,8 +1305,13 @@ function kombuchaSVG(k, { small = false } = {}) {
   const outside = [];
   if (has("holivar")) outside.push(`<text x="196" y="120" class="kb-acc" font-size="20">⚔️</text>`);
   if (has("sparkle")) outside.push(...[[28, 60], [192, 80], [24, 170], [196, 190]].map(([x, y], i) => `<text x="${x}" y="${y}" class="kb-acc kb-twinkle" font-size="14" style="animation-delay:${i * 0.4}s">✨</text>`));
+  // эпические и легендарные — эмодзи на орбите вокруг банки
+  const SPECIAL = new Set(["crown", "scholar", "survivor", "phoenix", "chatty", "holivar", "sparkle"]);
+  const orbit = (k.mutations || []).filter((m) => (m.rarity === "epic" || m.rarity === "legendary") && !SPECIAL.has(m.code)).slice(0, 6);
+  const OP = [[20, 40], [200, 44], [14, 110], [206, 150], [22, 200], [198, 214]];
+  orbit.forEach((m, i) => outside.push(`<text x="${OP[i][0]}" y="${OP[i][1]}" class="kb-acc kb-orbit ${m.rarity}" font-size="${m.rarity === "legendary" ? 20 : 16}" style="animation-delay:${i * 0.5}s">${esc(m.emoji)}</text>`));
   if (has("early")) outside.unshift(`<circle cx="110" cy="120" r="108" fill="url(#kb-halo)"/>`);
-  const cls = ["kb-svg", `mood-${k.mood}`, ...[...muts].map((c) => `mut-${c}`), small ? "small" : ""].join(" ");
+  const cls = ["kb-svg", k.frozen ? "frozen" : "", `mood-${k.mood}`, ...[...muts].map((c) => `mut-${c}`), small ? "small" : ""].join(" ");
   return `<svg class="${cls}" viewBox="0 0 220 230" role="img" aria-label="Чайный гриб ${esc(k.name)}: ${esc(k.stage.title)}">
     <defs><clipPath id="kb-jar-${k.id || 0}"><path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z"/></clipPath>
       <radialGradient id="kb-halo"><stop offset="0%" stop-color="#ffb347" stop-opacity=".45"/><stop offset="100%" stop-color="#ffb347" stop-opacity="0"/></radialGradient></defs>
@@ -1310,6 +1338,7 @@ function kombuchaSVG(k, { small = false } = {}) {
     </g>
     <path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z" class="kb-jar"/>
     <path d="M52,50 L50,190" class="kb-glare"/>${has("clean_freak") ? `<path d="M64,60 L63,110" class="kb-glare"/>` : ""}
+    ${k.frozen ? `<path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z" class="kb-ice"/><text x="160" y="60" class="kb-acc" font-size="20">❄️</text>` : ""}
     <text x="110" y="228" text-anchor="middle" class="kb-label">3 л</text>
   </svg>`;
 }
@@ -1347,9 +1376,9 @@ async function pageKombucha() {
   };
 
   const renderJars = () => {
-    const tabs = S.items.map((k) => `<button class="kb-jar-tab ${k.id === cur()?.id ? "active" : ""} ${k.alive ? "" : "dead"}" data-sel="${k.id}">
+    const tabs = S.items.map((k) => `<button class="kb-jar-tab ${k.id === cur()?.id ? "active" : ""} ${k.alive ? "" : "dead"} ${k.frozen ? "frozen" : ""}" data-sel="${k.id}">
       <span class="kb-jar-mini">${kombuchaSVG(k, { small: true })}</span><span class="kb-jar-name">${esc(k.name)}</span>
-      <small>${k.alive ? esc(k.stage.title) : "закис 🪦"}${k.dies_in != null ? " · ⚠️" : ""}</small></button>`);
+      <small>${k.frozen ? (k.price != null ? `🏷 ${k.price} $₽` : "🧊 на полке") : k.alive ? esc(k.stage.title) : "закис 🪦"}${k.dies_in != null && !k.frozen ? " · ⚠️" : ""}</small></button>`);
     for (let i = 0; i < S.jars.free; i++) tabs.push(`<button class="kb-jar-tab empty" data-plant><span class="kb-jar-plus">＋</span><span class="kb-jar-name">Пустая банка</span><small>посадить гриб</small></button>`);
     if (S.jars.jars < S.jars.max) tabs.push(`<button class="kb-jar-tab shop" data-buy><span class="kb-jar-plus">🫙</span><span class="kb-jar-name">Купить банку</span><small>${S.prices.jar} $₽</small></button>`);
     return `<div class="kb-jars">${tabs.join("")}</div>`;
@@ -1375,15 +1404,22 @@ async function pageKombucha() {
         <div class="kb-stage">${esc(st.title)} · ${k.age_days} дн.${k.generation > 1 ? ` · поколение ${k.generation}` : ""}${k.is_sprout ? " · отросток" : ""}</div>
         <div class="kb-xp"><div class="kb-xp-bar"><span style="width:${pct}%"></span></div>
           <small>${k.xp} XP${st.next_xp ? ` · до стадии «${esc(st.next_title)}» ещё ${st.next_xp - k.xp}` : " · максимальная стадия 👑"} · рекорд ${k.best_xp}</small></div>
-        ${k.mutations.length ? `<div class="kb-muts">${k.mutations.map((m) => `<span class="kb-mut" title="${esc(m.title)}${m.inherited ? " (унаследована)" : ""}">${m.emoji} ${esc(m.title)}${m.inherited ? " 🧬" : ""}</span>`).join("")}</div>` : ""}
+        ${k.mutations.length ? `<div class="kb-muts">${k.mutations.map(mutChip).join("")}</div>` : ""}
         ${k.dies_in != null && k.alive ? `<div class="kb-danger">⚠️ Гриб на грани! Закиснет через ${fmtLeft(k.dies_in)}, если не поднять показатель с нуля.</div>` : ""}
         <div class="kb-stats">${STAT.map(([key, label]) => { const v = k.stats[key];
           return `<div class="kb-stat"><span>${label}</span><div class="kb-bar ${v < 25 ? "low" : v > 90 && key === "sweet" ? "over" : ""}"><span style="width:${v}%"></span></div><b>${v}</b></div>`; }).join("")}</div>
-        ${k.alive ? `<div class="kb-next muted">⏬ Показатели упадут через ${fmtLeft(k.next_drop_in)} (раз в 12 часов)</div>
+        ${k.frozen ? `<div class="kb-note kb-frozen-note">🧊 Гриб заморожен${k.frozen_at ? ` с ${esc(fmtDate(k.frozen_at))}` : ""}: показатели не падают, банку не занимает, стоит на полке в твоём профиле.
+            Продать или обменять можно только замороженный гриб.</div>
+          <div class="kb-dead-actions">
+            <button class="btn btn-accent" data-unfreeze>🔥 Разморозить</button>
+            ${k.price != null ? `<button class="btn btn-ghost" data-unlist>🏷 Снять с продажи (${k.price} $₽)</button>` : `<button class="btn btn-ghost" data-list>💰 Продать</button>`}
+            <button class="btn btn-ghost" data-trade>🔄 Обменять / подарить</button></div>`
+        : k.alive ? `<div class="kb-next muted">⏬ Показатели упадут через ${fmtLeft(k.next_drop_in)} (раз в 12 часов)</div>
           <div class="kb-actions">${BTN.map(([a, e, t]) => { const cd = k.cooldowns[a];
             return `<button class="btn kb-act" data-act="${a}"${cd ? " disabled" : ""}><span class="e">${e}</span><span>${t}</span>${cd ? `<small>через ${fmtLeft(cd)}</small>` : ""}</button>`; }).join("")}</div>
           <button class="btn btn-accent kb-daily" data-act="daily"${k.cooldowns.daily ? " disabled" : ""}>🏆 Схема дня${k.cooldowns.daily ? ` · через ${fmtLeft(k.cooldowns.daily)}` : ": забрать бонус за ответы"}</button>
-          ${sprout}`
+          ${sprout}
+          <button class="link-btn kb-freeze" data-freeze title="Заморозить: гриб перестанет требовать ухода и встанет на полку в профиле">🧊 Заморозить и поставить на полку</button>`
         : `<p>Прожил ${k.age_days} дн. и набрал ${k.xp} XP. Покойся с миром, ${esc(k.name)}.</p>
            <div class="kb-dead-actions">
              <button class="btn btn-accent" data-revive>💉 Реанимировать · ${S.prices.revive} $₽</button>
@@ -1395,11 +1431,18 @@ async function pageKombucha() {
 
   const renderCodex = () => {
     const found = new Map(S.codex.map((c) => [c.code, c]));
+    const byStage = {};
+    S.catalog.forEach((m) => (byStage[m.stage] ||= []).push(m));
+    const order = ["legendary", "epic", "rare", "common"];
+    const cnt = (r) => S.catalog.filter((m) => m.rarity === r).length, got = (r) => S.catalog.filter((m) => m.rarity === r && found.has(m.code)).length;
     $("#kb-codex").innerHTML = `<h2>🧬 Коллекция мутаций <span class="muted">${found.size}/${S.catalog.length}</span></h2>
-      <p class="muted kb-codex-lead">Мутации выпадают случайно во время ухода, у каждой своя стадия и условие. Первая находка каждой мутации даёт +15 $₽.</p>
-      <div class="kb-codex">${S.catalog.map((m) => { const f = found.get(m.code);
-        return f ? `<div class="kb-cx found" title="${esc(m.desc)}"><span class="e">${m.emoji}</span><b>${esc(m.title)}</b><small>${esc(m.desc)}</small><small class="muted">у «${esc(f.kombucha_name || "?")}»</small></div>`
-          : `<div class="kb-cx"><span class="e">❓</span><b>???</b><small>${esc(m.hint)}</small><small class="muted">с «${esc(m.stage_title)}»</small></div>`; }).join("")}</div>`;
+      <p class="muted kb-codex-lead">По 20 мутаций на каждую стадию. Каждый выпавший экземпляр получает номер на весь сайт — как подарки в Telegram: «#1» бывает только один.
+        Первая находка каждой мутации даёт +15 $₽. Шанс за подходящее действие: обычная 6%, редкая 2,5%, эпическая 1%, легендарная 0,4%.</p>
+      <div class="kb-rar-legend">${order.map((r) => `<span class="kb-mut r-${r}">${RAR[r]} ${got(r)}/${cnt(r)}</span>`).join("")}</div>
+      ${Object.entries(byStage).map(([st, list]) => `<h3 class="kb-cx-stage">Стадия ${st}: ${esc(list[0].stage_title)} <span class="muted">${list.filter((m) => found.has(m.code)).length}/${list.length}</span></h3>
+      <div class="kb-codex">${list.slice().sort((x, y) => order.indexOf(x.rarity) - order.indexOf(y.rarity)).map((m) => { const f = found.get(m.code);
+        return f ? `<div class="kb-cx found r-${m.rarity}" style="--mc:${m.color}"><span class="e">${esc(m.emoji)}</span><b>${esc(m.title)}</b><small>${RAR[m.rarity]}</small><small class="muted">у «${esc(f.kombucha_name || "?")}» · тираж ${m.issued}</small></div>`
+          : `<div class="kb-cx r-${m.rarity}"><span class="e">❓</span><b>???</b><small>${esc(m.hint)}</small><small class="muted">${RAR[m.rarity]} · тираж ${m.issued}</small></div>`; }).join("")}</div>`).join("")}`;
   };
 
   const render = () => {
@@ -1441,6 +1484,22 @@ async function pageKombucha() {
       if (name === null) return;
       if (await call("POST", `/api/kombucha/${k.id}/restart`, { name })) { await load(); say("Привет! Я новенький 🌱"); loadTop(); }
     };
+    if (btn("[data-freeze]")) btn("[data-freeze]").onclick = async () => {
+      if (!confirm("Заморозить гриб? Он перестанет требовать ухода, освободит банку и встанет на полку в профиле. Разморозить можно, когда есть свободная банка.")) return;
+      if (await call("POST", `/api/kombucha/${k.id}/freeze`)) { await load(); toast("🧊 Гриб на полке"); }
+    };
+    if (btn("[data-unfreeze]")) btn("[data-unfreeze]").onclick = async () => {
+      if (await call("POST", `/api/kombucha/${k.id}/unfreeze`)) { await load(); say("Брр… Спасибо, что разморозил! 🔥"); }
+    };
+    if (btn("[data-list]")) btn("[data-list]").onclick = async () => {
+      const v = ask("За сколько $₽ выставить на рынок? (от 10; 5% комиссии сгорает)", "300");
+      if (!v) return;
+      if (await call("POST", `/api/kombucha/${k.id}/list`, { price: Number(v) })) { await load(); toast("🏷 Гриб выставлен на рынок"); }
+    };
+    if (btn("[data-unlist]")) btn("[data-unlist]").onclick = async () => {
+      if (await call("DELETE", `/api/kombucha/${k.id}/list`)) { await load(); toast("Снят с продажи"); }
+    };
+    if (btn("[data-trade]")) btn("[data-trade]").onclick = () => tradeDialog(k, load);
     if (btn("[data-discard]")) btn("[data-discard]").onclick = async () => {
       if (!confirm("Выбросить закисший гриб? Банка освободится.")) return;
       if (await call("DELETE", `/api/kombucha/${k.id}`)) { sel = null; await load(); }
@@ -1452,7 +1511,8 @@ async function pageKombucha() {
     const r = await call("POST", `/api/kombucha/${k.id}/${action}`);
     if (!r) return;
     S = r; render(); say(r.message);
-    if (r.mutation) toast(`🧬 Мутация: ${r.mutation.emoji} «${r.mutation.title}»!${r.mutation.first_time ? " +15 $₽ за новую находку" : ""}`);
+    if (r.mutation) toast(`🧬 ${r.mutation.rarity_title} мутация: ${r.mutation.emoji} «${r.mutation.title}» #${r.mutation.serial}!${r.mutation.first_time ? " +15 $₽ за новую находку" : ""}`);
+    if (r.new_badges?.length) newBadgesToast(r.new_badges);
     if (r.stage_up) toast(`🎉 Гриб вырос: теперь это «${r.kombucha.stage.title}»!`);
     if (r.sprout) toast(r.sprout.planted ? `🌱 Гриб дал отросток «${r.sprout.name}»! +50 $₽` : "🌱 Гриб дал отросток, но банки нет — купи её в магазине. +50 $₽");
     if (action === "daily" || r.stage_up || r.sprout) loadTop();
@@ -1465,6 +1525,118 @@ async function pageKombucha() {
   timer = setInterval(load, 60000);
 }
 
+// ---------------------------------------------------------------- обмен, рынок
+async function tradeDialog(k, after) {
+  const M = modal(`<h2>🔄 Обмен или подарок</h2>
+    <p class="muted">Отдаёшь «${esc(k.name)}». Можно попросить взамен замороженный гриб с полки получателя, а можно просто подарить.</p>
+    <label>Кому <input class="input" id="tr-user" placeholder="username" autocomplete="off"></label>
+    <div id="tr-shelf" class="kb-shelf pick"></div>
+    <div class="modal-actions"><button class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-ghost" id="tr-gift">🎁 Подарить</button><button class="btn btn-accent" id="tr-send" disabled>🔄 Предложить обмен</button></div>`);
+  let want = null, timer;
+  const box = M.el.querySelector("#tr-shelf"), send = M.el.querySelector("#tr-send"), inp = M.el.querySelector("#tr-user");
+  inp.oninput = () => { clearTimeout(timer); timer = setTimeout(async () => {
+    want = null; send.disabled = true;
+    const u = inp.value.trim().replace(/^@/, "");
+    if (!u) { box.innerHTML = ""; return; }
+    try {
+      const d = await api("GET", `/api/users/${encodeURIComponent(u)}/shelf`, undefined, { quiet: true });
+      box.innerHTML = d.items.length ? `<p class="muted">Выбери, что хочешь взамен:</p>` + d.items.map((x) => `<button type="button" class="kb-pick" data-id="${x.id}">${kombuchaCard(x)}</button>`).join("") : `<p class="muted">На полке у @${esc(u)} пусто — можно только подарить.</p>`;
+      box.querySelectorAll("[data-id]").forEach((b) => (b.onclick = () => { box.querySelectorAll(".kb-pick").forEach((x) => x.classList.remove("on")); b.classList.add("on"); want = Number(b.dataset.id); send.disabled = false; }));
+    } catch (_) { box.innerHTML = `<p class="muted">Нет такого пользователя</p>`; }
+  }, 350); };
+  const go = async (wantId) => {
+    try {
+      await api("POST", "/api/trades", { to_username: inp.value.trim().replace(/^@/, ""), give_id: k.id, want_id: wantId });
+      toast(wantId ? "Предложение отправлено 🔄" : "Подарок отправлен — ждём, когда примут 🎁");
+      M.close(); after?.();
+    } catch (_) {}
+  };
+  M.el.querySelector("#tr-gift").onclick = () => { if (inp.value.trim() && confirm(`Подарить «${k.name}»?`)) go(null); };
+  send.onclick = () => go(want);
+}
+
+async function pageMarket() {
+  const list = $("#mk-list"), tr = $("#mk-trades");
+  let sort = "new", rarity = "";
+  const load = async () => {
+    const d = await api("GET", `/api/market?sort=${sort}${rarity ? `&rarity=${rarity}` : ""}`);
+    list.innerHTML = d.items.length ? d.items.map((k) => kombuchaCard(k, `<div class="kb-card-foot"><a href="/u/${encodeURIComponent(k.owner)}">@${esc(k.owner)}</a>
+      ${ME && ME.user.username === k.owner ? `<span class="muted">твой</span>` : `<button class="btn btn-accent btn-sm" data-buy="${k.id}" data-price="${k.price}">Купить · ${k.price} $₽</button>`}</div>`)).join("")
+      : `<p class="muted">На рынке пусто. Заморозь гриб и выстави его первым!</p>`;
+    list.querySelectorAll("[data-buy]").forEach((b) => (b.onclick = async () => {
+      if (!ME) { location.href = "/login?next=/market"; return; }
+      if (!confirm(`Купить гриб за ${b.dataset.price} $₽?`)) return;
+      try { const r = await api("POST", `/api/market/${b.dataset.buy}/buy`, { price: Number(b.dataset.price) }); setWood(r.wood); toast("🛒 Гриб твой! Он ждёт на полке — разморозь его на странице гриба."); load(); } catch (_) {}
+    }));
+  };
+  $$("[data-sort]").forEach((b) => (b.onclick = () => { sort = b.dataset.sort; $$("[data-sort]").forEach((x) => x.classList.toggle("active", x === b)); load(); }));
+  $("#mk-rarity").onchange = (e) => { rarity = e.target.value; load(); };
+  const loadTrades = async () => {
+    if (!ME) { tr.innerHTML = `<p class="muted"><a href="/login?next=/market">Войди</a>, чтобы меняться грибами.</p>`; return; }
+    const d = await api("GET", "/api/trades");
+    const row = (t, inc) => `<div class="trade ${t.status}"><div class="trade-side">${t.give ? kombuchaCard(t.give) : "—"}</div>
+      <div class="trade-mid">${t.gift ? "🎁" : "⇄"}<small>${inc ? `от @${esc(t.from)}` : `для @${esc(t.to)}`}</small>
+        ${t.status === "pending" ? (inc ? `<button class="btn btn-accent btn-sm" data-tr="${t.id}" data-op="accept">Принять</button><button class="btn btn-ghost btn-sm" data-tr="${t.id}" data-op="decline">Отклонить</button>`
+          : `<button class="btn btn-ghost btn-sm" data-tr="${t.id}" data-op="cancel">Отменить</button>`) : `<span class="muted">${{ accepted: "✅ принято", declined: "❌ отклонено", cancelled: "отменено" }[t.status]}</span>`}</div>
+      <div class="trade-side">${t.want ? kombuchaCard(t.want) : `<span class="muted">${t.gift ? "подарок" : "—"}</span>`}</div></div>`;
+    tr.innerHTML = `<h3>Входящие</h3>${d.incoming.map((t) => row(t, true)).join("") || `<p class="muted">Пусто</p>`}
+      <h3>Исходящие</h3>${d.outgoing.map((t) => row(t, false)).join("") || `<p class="muted">Пусто. Предложить обмен можно на странице гриба (сначала заморозь его).</p>`}`;
+    tr.querySelectorAll("[data-tr]").forEach((b) => (b.onclick = async () => {
+      try { await api("POST", `/api/trades/${b.dataset.tr}/${b.dataset.op}`, {}); toast(b.dataset.op === "accept" ? "🤝 Сделка! Новый гриб на полке" : "Готово"); loadTrades(); } catch (_) {}
+    }));
+  };
+  try { await Promise.all([load(), loadTrades()]); } catch (_) {}
+}
+
+// ---------------------------------------------------------------- полка и стена в профиле
+async function profileExtras(d) {
+  const u = d.user, hidden = new Set(d.is_owner ? [] : d.custom.hidden_sections);
+  const box = $("#profile-extras");
+  if (!box) return;
+  const parts = [];
+  if (!hidden.has("shelf")) parts.push(`<div class="panel" id="shelf"><h2 style="margin-top:0">🧊 Полка с грибами</h2><div class="kb-shelf" id="shelf-list"><p class="muted">Загружаем…</p></div></div>`);
+  if (!hidden.has("wall")) parts.push(`<div class="panel" id="wall"><h2 style="margin-top:0">📝 Стена</h2><div id="wall-form"></div><div id="wall-list"></div><button class="btn btn-ghost btn-sm" id="wall-more" hidden>Ещё</button></div>`);
+  box.innerHTML = parts.join("");
+  if (!hidden.has("shelf")) {
+    try {
+      const s = await api("GET", `/api/users/${encodeURIComponent(u.username)}/shelf`, undefined, { quiet: true });
+      $("#shelf-list").innerHTML = s.items.length ? s.items.map((k) => kombuchaCard(k, k.price != null ? `<a class="btn btn-sm btn-accent" href="/market">🏷 ${k.price} $₽</a>` : "")).join("")
+        : `<p class="muted">${d.is_owner ? "Пусто. Заморозь гриб на <a href=\"/kombucha\">странице гриба</a> — и он встанет сюда." : "Пока пусто."}</p>`;
+    } catch (_) {}
+  }
+  if (hidden.has("wall")) return;
+  let before = null;
+  const list = $("#wall-list");
+  const post = (p) => `<div class="wall-post" data-id="${p.id}">${avatarHTML(p.author)}<div class="wp-body"><div class="wp-head">${userLink(p.author)} <small class="muted">${esc(fmtDate(p.created_at))}</small>
+      ${p.can_delete ? `<button class="link-btn wp-del" data-del="${p.id}" title="Удалить">✕</button>` : ""}</div><div class="md">${p.body_html}</div></div></div>`;
+  const load = async (more = false) => {
+    const w = await api("GET", `/api/users/${encodeURIComponent(u.username)}/wall${before ? `?before=${before}` : ""}`, undefined, { quiet: true });
+    if (!more) $("#wall-form").innerHTML = w.can_post ? `<form class="wall-form"><textarea class="input" maxlength="500" rows="2" placeholder="Напиши что-нибудь на стене @${esc(u.username)}…"></textarea><div class="wall-form-foot"><small class="muted"><span id="wall-n">0</span>/500</small><button class="btn btn-accent btn-sm">Отправить</button></div></form>`
+      : w.closed ? `<p class="muted">🔒 Хозяин закрыл стену.</p>` : ME ? "" : `<p class="muted"><a href="/login?next=${encodeURIComponent(here())}">Войди</a>, чтобы написать на стене.</p>`;
+    const html = w.items.map(post).join("");
+    if (more) list.insertAdjacentHTML("beforeend", html); else list.innerHTML = html || `<p class="muted">Здесь пока тихо. Будь первым!</p>`;
+    before = w.next_before; $("#wall-more").hidden = !before;
+    const f = $("#wall-form form");
+    if (f && !more) {
+      const ta = f.querySelector("textarea");
+      ta.oninput = () => ($("#wall-n").textContent = ta.value.length);
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        if (!ta.value.trim()) return;
+        try { await api("POST", `/api/users/${encodeURIComponent(u.username)}/wall`, { body: ta.value.trim() }); ta.value = ""; before = null; load(); } catch (_) {}
+      };
+    }
+  };
+  list.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-del]");
+    if (!b || !confirm("Удалить запись?")) return;
+    try { await api("DELETE", `/api/wall/${b.dataset.del}`); b.closest(".wall-post").remove(); } catch (_) {}
+  });
+  $("#wall-more").onclick = () => load(true);
+  try { await load(); } catch (_) {}
+  if (location.hash === "#wall") $("#wall")?.scrollIntoView();
+}
+
 // ---------------------------------------------------------------- «Деревянные» ($₽)
 async function pageWallet() {
   let before = null;
@@ -1474,7 +1646,7 @@ async function pageWallet() {
     $("#w-balance").textContent = `${d.balance} $₽`;
     setWood(d.balance);
     if (!more) $("#w-rules").innerHTML = d.rules.map((r) => `<div class="wallet-rule"><b class="plus">+${r.amount} $₽</b><span>${esc(r.title)}${r.reason === "daily_login" ? " (+ до 10 $₽ за стрик)" : ""}</span>${r.daily_cap ? `<small class="muted">до ${r.daily_cap} раз в день</small>` : ""}</div>`).join("")
-      + `<p class="muted">Потратить: банка для гриба — ${d.prices.jar} $₽, реанимация гриба — ${d.prices.revive} $₽.</p>`;
+      + `<p class="muted">Потратить: банка для гриба — ${d.prices.jar} $₽, реанимация гриба — ${d.prices.revive} $₽, грибы на <a href="/market">рынке</a>. Продажа на рынке: тебе 95%, 5% сгорает.</p>`;
     const rows = d.items.map((t) => `<div class="wallet-row"><span class="${t.delta > 0 ? "plus" : "minus"}">${t.delta > 0 ? "+" : ""}${t.delta} $₽</span><span>${esc(t.title)}</span><small class="muted">${esc(fmtDate(t.created_at))} · баланс ${t.balance_after}</small></div>`).join("");
     if (more) hist.insertAdjacentHTML("beforeend", rows);
     else hist.innerHTML = rows || `<p class="muted">Пока пусто. Ответь на вопрос — и первые деревянные твои.</p>`;
@@ -1502,7 +1674,7 @@ function pageFaq() {
 
 // ---------------------------------------------------------------- boot
 const PAGES = {
-  feed: () => initFeed(), debates: () => initFeed(), kombucha: pageKombucha, wallet: pageWallet, room: pageRoom, question: pageQuestion, ask: pageAsk, rooms: pageRooms,
+  feed: () => initFeed(), debates: () => initFeed(), kombucha: pageKombucha, market: pageMarket, wallet: pageWallet, room: pageRoom, question: pageQuestion, ask: pageAsk, rooms: pageRooms,
   profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, notifications: pageNotifications, search: pageSearch, mod: pageMod, admin: pageAdmin,
   settings: pageSettings, faq: pageFaq,
 };

@@ -41,6 +41,9 @@ BADGES: dict[str, Badge] = {b.code: b for b in [
     Badge("night_watch", "Ночной дозор", "🌙", "Ответил между 2 и 5 ночи по Москве"),
     Badge("debater", "В бой!", "⚔️", "Впервые занял сторону в холиваре"),
 ]}
+# достижения мини-игры «Чайный гриб»
+from .kombucha_achievements import KB_BADGES as _KB  # noqa: E402
+BADGES.update({c: Badge(c, t, e, d) for c, t, e, d in _KB})
 
 LEVEL_NAMES = [
     (1, "Нуб"), (5, "Шарящий"), (10, "Мудрец с подъезда"), (20, "Легенда форума"),

@@ -73,6 +73,11 @@ def kombucha():
     return page("kombucha.html", "kombucha")
 
 
+@bp.get("/market")
+def market():
+    return page("market.html", "market")
+
+
 @bp.get("/wallet")
 def wallet():
     if not current_user_id():

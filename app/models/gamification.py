@@ -58,6 +58,11 @@ class Kombucha(Base):
     pet_count: Mapped[int] = mapped_column(default=0, server_default="0")
     sprouted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     sprout_pending: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # заморозка: не убывает, не занимает банку, стоит на полке в профиле; продавать/менять можно только замороженных
+    frozen: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    frozen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    price: Mapped[int | None]                     # выставлен на рынок за столько $₽
+    listed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     born_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     died_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -84,4 +89,39 @@ class WoodTx(Base):
     reason: Mapped[str] = mapped_column(String(32))
     ref: Mapped[str] = mapped_column(String(64))
     balance_after: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MutationCounter(Base):
+    """Сколько экземпляров каждой мутации выпало на сайте — даёт номер «#17» как у подарков в Telegram."""
+    __tablename__ = "mutation_counters"
+    code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    issued: Mapped[int] = mapped_column(default=0, server_default="0")
+
+
+class KombuchaTrade(Base):
+    """Предложение обмена: отдаю give_id, хочу want_id (или ничего — это подарок).
+    status: pending | accepted | declined | cancelled."""
+    __tablename__ = "kombucha_trades"
+    __table_args__ = (Index("ix_kombucha_trades_to", "to_user_id", "status"),
+                      Index("ix_kombucha_trades_from", "from_user_id", "status"))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    from_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    to_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    give_id: Mapped[int] = mapped_column(ForeignKey("kombuchas.id", ondelete="CASCADE"))
+    want_id: Mapped[int | None] = mapped_column(ForeignKey("kombuchas.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WallPost(Base):
+    """Запись на стене профиля. Писать может любой вошедший; удалить — автор, хозяин стены или модератор."""
+    __tablename__ = "wall_posts"
+    __table_args__ = (Index("ix_wall_posts_owner", "owner_id", text("id DESC")),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    body: Mapped[str] = mapped_column(String(500))
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -17,16 +17,16 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Callable
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from ..errors import ApiError
-from ..models import Answer, ContentStatus, DebateVote, Kombucha, KombuchaCodex, User
+from ..models import Answer, ContentStatus, DebateVote, Kombucha, KombuchaCodex, KombuchaTrade, MutationCounter, User
+from . import kombucha_achievements as kb_achievements
 from . import wood
+from .kombucha_mutations import MUT_BY_CODE, MUTATIONS, RARITY, RARITY_ORDER, Ctx, Mutation
 
 MSK = timezone(timedelta(hours=3))
 rng = random.Random()          # в тестах подменяется, чтобы мутации были детерминированы
@@ -38,10 +38,10 @@ DEATH_AFTER = timedelta(hours=24)
 
 # действие: (показатель, прирост, кулдаун, опыт, фраза)
 ACTIONS = {
-    "sugar": ("sweet", 35, timedelta(hours=6), 5, "Хрум-хрум, сахарок 🍬"),
-    "tea": ("tea", 40, timedelta(hours=6), 5, "Свежая заварка, как у бабушки ☕"),
-    "clean": ("clean", 60, timedelta(hours=12), 8, "Банка сияет ✨"),
-    "pet": ("happy", 10, timedelta(hours=1), 1, "Гриб довольно булькает 🫧"),
+    "sugar": ("sweet", 15, timedelta(hours=6), 5, "Хрум-хрум, сахарок 🍬"),
+    "tea": ("tea", 15, timedelta(hours=6), 5, "Свежая заварка, как у бабушки ☕"),
+    "clean": ("clean", 25, timedelta(hours=12), 8, "Банка сияет ✨"),
+    "pet": ("happy", 5, timedelta(hours=1), 1, "Гриб довольно булькает 🫧"),
 }
 DAILY_COOLDOWN = timedelta(hours=20)
 SPROUT_CARE_DAYS = 7
@@ -65,79 +65,11 @@ TALK = {
 }
 
 
-# ---------------------------------------------------------------- мутации
-@dataclass(frozen=True)
-class Ctx:
-    action: str
-    k: Kombucha
-    hour: int                 # час по Москве
-    answers_24h: int = 0
-    debate_24h: int = 0
-    was_in_danger: bool = False
-
-
-@dataclass(frozen=True)
-class Mutation:
-    code: str
-    title: str
-    emoji: str
-    desc: str          # подсказка, как получить (видна в коллекции после открытия)
-    hint: str          # намёк до открытия
-    stage: int         # минимальная стадия (1..6)
-    chance: float      # шанс за подходящее действие
-    cond: Callable[[Ctx], bool] = lambda c: True
-
-
-def _night(c: Ctx) -> bool:
-    return 0 <= c.hour < 5
-
-
-MUTATIONS: list[Mutation] = [
-    # Спора
-    Mutation("sparkle", "Искристый", "✨", "Иногда просто везёт: любое действие.", "Просто ухаживай", 1, 0.03),
-    Mutation("night", "Ночной", "🌙", "Уход за грибом с 0 до 5 утра.", "Совы поймут", 1, 0.25, _night),
-    Mutation("sweet_tooth", "Сладкоежка", "🍭", "Сахар, когда гриб и так сладкий (больше 80).",
-             "Слишком сладко", 1, 0.15, lambda c: c.action == "sugar" and c.k.sweet > 80),
-    # Плёночка
-    Mutation("striped", "Полосатый", "🦓", "Случайно на стадии «Плёночка» и дальше.", "Случайность", 2, 0.04),
-    Mutation("bubbly", "Газировка", "🫧", "Заварка, когда её почти не осталось (меньше 30).",
-             "Жажда", 2, 0.2, lambda c: c.action == "tea" and c.k.tea < 30),
-    Mutation("clean_freak", "Чистюля", "🧼", "Мыть банку, когда она и так чистая (больше 70).",
-             "Перфекционизм", 2, 0.1, lambda c: c.action == "clean" and c.k.clean > 70),
-    Mutation("early", "Жаворонок", "🌅", "Уход за грибом с 5 до 8 утра.", "Ранний подъём", 2, 0.2,
-             lambda c: 5 <= c.hour < 8),
-    # Блинчик
-    Mutation("golden", "Золотой", "🥇", "Редкая удача на стадии «Блинчик» и выше.", "Очень редкая", 3, 0.015),
-    Mutation("spotted", "Мухоморный", "🍄", "Случайно на стадии «Блинчик» и выше.", "Случайность", 3, 0.04),
-    Mutation("chatty", "Болтун", "🗣️", "Поболтать с грибом 50+ раз.", "Много разговоров", 3, 0.3,
-             lambda c: c.action == "pet" and c.k.pet_count >= 50),
-    Mutation("survivor", "Выживший", "🩹", "Спасти гриб, когда показатель был на нуле.", "На грани", 3, 0.5,
-             lambda c: c.was_in_danger),
-    # Медуза
-    Mutation("glow", "Светящийся", "💡", "Случайно на стадии «Медуза» и выше.", "Случайность", 4, 0.03),
-    Mutation("jelly", "Желейный", "🍮", "Случайно на стадии «Медуза» и выше.", "Случайность", 4, 0.04),
-    Mutation("scholar", "Ботаник", "🎓", "«Схема дня», если за сутки ты дал 3+ ответа.", "Учёба", 4, 0.35,
-             lambda c: c.action == "daily" and c.answers_24h >= 3),
-    Mutation("holivar", "Холиварщик", "⚔️", "«Схема дня», если за сутки голосовал в холиваре.", "Споры",
-             4, 0.3, lambda c: c.action == "daily" and c.debate_24h >= 1),
-    # Гриб-гигант
-    Mutation("rainbow", "Радужный", "🌈", "Редкость на стадии «Гриб-гигант».", "Редкая", 5, 0.02),
-    Mutation("crystal", "Кристальный", "💎", "Действие, когда все показатели 80+.", "Идеальный уход", 5, 0.1,
-             lambda c: all(getattr(c.k, s) >= 80 for s in STATS)),
-    Mutation("cosmic", "Космический", "🪐", "Ночью на стадии «Гриб-гигант». Очень редко.", "Звёзды", 5, 0.05,
-             _night),
-    # Легенда
-    Mutation("crown", "Коронованный", "👑", "Уход за Легендой трёхлитровой банки.", "Только для легенд", 6, 0.2),
-    Mutation("phoenix", "Феникс", "🔥", "Гриб второго+ поколения дорос до «Медузы».", "Перерождение", 4, 0.25,
-             lambda c: c.k.generation >= 2),
-]
-MUT_BY_CODE = {m.code: m for m in MUTATIONS}
-assert len(MUTATIONS) == 20
-
-
+# ---------------------------------------------------------------- мутации (каталог — kombucha_mutations.py)
 def catalog() -> list[dict]:
-    return [{"code": m.code, "title": m.title, "emoji": m.emoji, "desc": m.desc, "hint": m.hint,
-             "stage": m.stage, "stage_title": STAGES[m.stage - 1][1]} for m in MUTATIONS]
+    return [{"code": m.code, "title": m.title, "emoji": m.emoji, "hint": m.hint, "stage": m.stage,
+             "stage_title": STAGES[m.stage - 1][1], "rarity": m.rarity, "rarity_title": RARITY[m.rarity][0],
+             "color": m.color} for m in MUTATIONS]
 
 
 def has_mut(k: Kombucha, code: str) -> bool:
@@ -145,22 +77,49 @@ def has_mut(k: Kombucha, code: str) -> bool:
 
 
 def roll_mutation(ctx: Ctx) -> Mutation | None:
-    """Максимум одна новая мутация за действие."""
+    """Максимум одна новая мутация за действие. Кандидаты перемешаны, чтобы порядок
+    в каталоге не давал преимущества; сначала бросаем редкие."""
     size = stage_for(ctx.k.xp)["size"]
-    for m in MUTATIONS:
-        if size >= m.stage and not has_mut(ctx.k, m.code) and m.cond(ctx) and rng.random() < m.chance:
+    cands = [m for m in MUTATIONS if m.stage <= size and not has_mut(ctx.k, m.code) and m.check(ctx)]
+    rng.shuffle(cands)
+    cands.sort(key=lambda m: RARITY_ORDER.index(m.rarity))
+    for m in cands:
+        if rng.random() < m.chance:
             return m
     return None
 
 
-async def add_mutation(s, k: Kombucha, m: Mutation, at: datetime) -> bool:
-    """Повесить мутацию на гриб и в коллекцию. True — если в коллекции её раньше не было."""
-    k.mutations = [*(k.mutations or []), {"code": m.code, "at": at.isoformat()}]
+async def next_serial(s, code: str) -> int:
+    """Порядковый номер экземпляра мутации на весь сайт (как у подарков в Telegram)."""
+    return (await s.execute(
+        insert(MutationCounter).values(code=code, issued=1)
+        .on_conflict_do_update(index_elements=["code"], set_={"issued": MutationCounter.issued + 1})
+        .returning(MutationCounter.issued))).scalar()
+
+
+async def add_mutation(s, k: Kombucha, m: Mutation, at: datetime, inherited: bool = False) -> dict:
+    """Повесить мутацию на гриб (с номером экземпляра) и в коллекцию юзера."""
+    serial = await next_serial(s, m.code)
+    entry = {"code": m.code, "at": at.isoformat(), "serial": serial}
+    if inherited:
+        entry["inherited"] = True
+    k.mutations = [*(k.mutations or []), entry]
     new = (await s.execute(insert(KombuchaCodex).values(user_id=k.user_id, code=m.code, kombucha_name=k.name)
                            .on_conflict_do_nothing().returning(KombuchaCodex.code))).scalar() is not None
-    if new:
+    if new and not inherited:
         await wood.earn(s, k.user_id, "mutation", m.code)
-    return new
+    await kb_achievements.after_mutation(s, k.user_id, m)
+    return {"code": m.code, "title": m.title, "emoji": m.emoji, "rarity": m.rarity,
+            "rarity_title": RARITY[m.rarity][0], "serial": serial, "first_time": new}
+
+
+def mut_out(x: dict) -> dict | None:
+    m = MUT_BY_CODE.get(x.get("code"))
+    if not m:
+        return None
+    return {"code": m.code, "title": m.title, "emoji": m.emoji, "rarity": m.rarity,
+            "rarity_title": RARITY[m.rarity][0], "color": m.color, "stage": m.stage,
+            "serial": x.get("serial"), "inherited": bool(x.get("inherited")), "at": x.get("at")}
 
 
 # ---------------------------------------------------------------- время и состояние
@@ -182,7 +141,7 @@ def tick(k: Kombucha, at: datetime | None = None) -> None:
     """Применить все прошедшие 12-часовые ступеньки убывания и проверить, не закис ли гриб.
     updated_at — якорь ступенек: сдвигается только на целое число периодов."""
     at = at or now()
-    if not k.alive:
+    if not k.alive or k.frozen:
         return
     steps = int((at - k.updated_at) / PERIOD) if at > k.updated_at else 0
     for i in range(steps):
@@ -269,6 +228,7 @@ async def ensure_first(s, user: User) -> list[Kombucha]:
         user.profile = {**(user.profile or {}), "kombucha_started": True}
         s.add(_new(user_id, await free_name(s)))
         await s.flush()
+        await kb_achievements.after_plant(s, user_id)
         items = await list_for(s, user_id, lock=True)
     return items
 
@@ -282,7 +242,8 @@ async def get_own(s, user_id: int, kid: int) -> Kombucha:
 
 
 async def jars_info(s, user: User) -> dict:
-    used = await s.scalar(select(func.count(Kombucha.id)).where(Kombucha.user_id == user.id)) or 0
+    used = await s.scalar(select(func.count(Kombucha.id)).where(Kombucha.user_id == user.id,
+                                                                  Kombucha.frozen.is_(False))) or 0
     return {"jars": user.jars, "used": used, "free": max(user.jars - used, 0), "max": wood.MAX_JARS}
 
 
@@ -295,12 +256,14 @@ async def plant(s, user: User, name: str | None = None, parent: Kombucha | None 
     else:
         name = await free_name(s, f"{parent.name[:20]} мл." if parent else None)
     k = _new(user.id, name, parent)
-    if parent and parent.mutations:
-        # наследственность: одна случайная мутация родителя
-        inherited = rng.choice(parent.mutations)
-        k.mutations = [{"code": inherited["code"], "at": now().isoformat(), "inherited": True}]
     s.add(k)
     await s.flush()
+    if parent and parent.mutations:
+        # наследственность: новый экземпляр одной случайной мутации родителя
+        m = MUT_BY_CODE.get(rng.choice(parent.mutations).get("code"))
+        if m:
+            await add_mutation(s, k, m, now(), inherited=True)
+    await kb_achievements.after_plant(s, user.id)
     return k
 
 
@@ -323,6 +286,8 @@ async def buy_jar(s, user: User) -> dict:
     await wood.spend(s, user.id, wood.PRICES["jar"], "buy_jar", f"jar{user.jars + 1}")
     user.jars += 1
     await s.flush()
+    if user.jars >= wood.MAX_JARS:
+        await kb_achievements.award(s, user.id, "kb_jars")
     return {"sprouts": [k.name for k in await place_pending_sprouts(s, user)]}
 
 
@@ -350,6 +315,8 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
     at = now()
     if not k.alive:
         raise ApiError("Гриб закис 😢 Перезаведи или реанимируй", 409, "kombucha_dead")
+    if k.frozen:
+        raise ApiError("Гриб заморожен 🧊 Разморозь, чтобы ухаживать", 409, "kombucha_frozen")
     in_danger = k.zero_since is not None
     answers_24h = debate_24h = 0
     if action == "daily":
@@ -393,16 +360,19 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
     earned = await wood.earn(s, user.id, "kombucha_care", f"{k.id}:{action}:{at.isoformat()}")
 
     res: dict = {"message": msg, "mutation": None, "sprout": None, "wood": earned}
-    m = roll_mutation(Ctx(action=action, k=k, hour=at.astimezone(MSK).hour, answers_24h=answers_24h,
-                          debate_24h=debate_24h, was_in_danger=rescued))
+    msk = at.astimezone(MSK)
+    m = roll_mutation(Ctx(action=action, k=k, hour=msk.hour, weekday=msk.weekday(), answers_24h=answers_24h,
+                          debate_24h=debate_24h, was_in_danger=rescued, streak_days=user.streak_days))
     if m:
-        first = await add_mutation(s, k, m, at)
-        res["mutation"] = {"code": m.code, "title": m.title, "emoji": m.emoji, "first_time": first}
+        res["mutation"] = await add_mutation(s, k, m, at)
+    if stage_for(k.xp)["size"] == 6:
+        await kb_achievements.award(s, user.id, "kb_legend")
 
     # отросток: легенда + неделя ухода
     if not k.sprouted and stage_for(k.xp)["size"] == 6 and k.care_days >= SPROUT_CARE_DAYS:
         k.sprouted = True
         await wood.earn(s, user.id, "sprout", k.id)
+        await kb_achievements.award(s, user.id, "kb_split")
         if (await jars_info(s, user))["free"] > 0:
             child = await plant(s, user, parent=k)
             res["sprout"] = {"planted": True, "name": child.name}
@@ -432,6 +402,7 @@ async def revive(s, user: User, k: Kombucha) -> None:
     if k.alive:
         raise ApiError("Гриб и так жив", 409, "kombucha_alive")
     await wood.spend(s, user.id, wood.PRICES["revive"], "revive", f"{k.id}:{k.died_at.isoformat()}")
+    await kb_achievements.award(s, user.id, "kb_revive")
     at = now()
     k.sweet = k.tea = k.clean = k.happy = 50.0
     k.alive, k.zero_since, k.died_at = True, None, None
@@ -446,9 +417,8 @@ def out(k: Kombucha) -> dict:
     danger = None
     if k.alive and k.zero_since:
         danger = max(int((k.zero_since + DEATH_AFTER - at).total_seconds()), 0)
-    muts = [{**{kk: v for kk, v in MUT_BY_CODE[x["code"]].__dict__.items() if kk in ("code", "title", "emoji")},
-             "inherited": bool(x.get("inherited")), "at": x.get("at")}
-            for x in (k.mutations or []) if x.get("code") in MUT_BY_CODE]
+    muts = [mo for mo in (mut_out(x) for x in (k.mutations or [])) if mo]
+    muts.sort(key=lambda x: RARITY_ORDER.index(x["rarity"]))
     st = stage_for(k.xp)
     return {
         "id": k.id, "name": k.name, "xp": k.xp, "best_xp": k.best_xp, "generation": k.generation, "alive": k.alive,
@@ -461,4 +431,51 @@ def out(k: Kombucha) -> dict:
         "sprout_progress": {"care_days": min(k.care_days, SPROUT_CARE_DAYS), "need_days": SPROUT_CARE_DAYS,
                             "legend": st["size"] == 6},
         "is_sprout": k.parent_id is not None,
+        "frozen": k.frozen, "frozen_at": k.frozen_at.isoformat() if k.frozen_at else None,
+        "price": k.price,
     }
+
+
+def public_out(k: Kombucha, owner: str | None = None) -> dict:
+    """Для профиля/рынка: без кулдаунов и таймеров."""
+    o = out(k)
+    for key in ("cooldowns", "next_drop_in", "dies_in", "phrase", "sprout_progress"):
+        o.pop(key, None)
+    if owner:
+        o["owner"] = owner
+    return o
+
+
+# ---------------------------------------------------------------- заморозка, продажа, обмен
+async def freeze(s, user: User, k: Kombucha) -> None:
+    if not k.alive:
+        raise ApiError("Закисший гриб не заморозить", 409, "kombucha_dead")
+    if k.frozen:
+        raise ApiError("Гриб уже заморожен", 409, "kombucha_frozen")
+    k.frozen, k.frozen_at = True, now()
+    await kb_achievements.award(s, user.id, "kb_freeze")
+
+
+async def unfreeze(s, user: User, k: Kombucha) -> None:
+    if not k.frozen:
+        raise ApiError("Гриб не заморожен", 409, "kombucha_not_frozen")
+    if k.price is not None:
+        raise ApiError("Сначала сними гриб с продажи", 409, "kombucha_listed")
+    if (await jars_info(s, user))["free"] <= 0:
+        raise ApiError("Нет свободной банки, чтобы разморозить", 409, "no_free_jar")
+    # время в морозилке не считается: сдвигаем якорь ступенек и «время на нуле»
+    pause = now() - k.frozen_at
+    k.updated_at += pause
+    if k.zero_since:
+        k.zero_since += pause
+    k.frozen, k.frozen_at = False, None
+
+
+async def transfer(s, k: Kombucha, to_user_id: int) -> None:
+    """Сменить владельца. Гриб остаётся замороженным (на полке нового владельца)."""
+    k.user_id = to_user_id
+    k.price = None
+    k.listed_at = None
+    await s.execute(update(KombuchaTrade).where(
+        KombuchaTrade.status == "pending",
+        (KombuchaTrade.give_id == k.id) | (KombuchaTrade.want_id == k.id)).values(status="cancelled"))

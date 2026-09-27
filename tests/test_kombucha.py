@@ -57,9 +57,9 @@ def test_create_and_actions(make_user, no_mutations):
     st = _state(c)
     k = st["items"][0]
     assert k["alive"] and k["stage"]["title"] == "Спора" and st["jars"] == {"jars": 1, "used": 1, "free": 0, "max": 5}
-    assert len(st["catalog"]) == 20
+    assert len(st["catalog"]) == 120
     r = c.post(f"/api/kombucha/{k['id']}/tea", json={})
-    assert r.status_code == 200 and r.get_json()["kombucha"]["stats"]["tea"] == 100
+    assert r.status_code == 200 and r.get_json()["kombucha"]["stats"]["tea"] == 85
     again = c.post(f"/api/kombucha/{k['id']}/tea", json={})
     assert again.status_code == 429 and again.get_json()["retry_after"] > 5 * 3600
     assert c.post(f"/api/kombucha/{k['id']}/hack", json={}).status_code == 404
@@ -152,9 +152,13 @@ def test_daily_bonus_counts_answers(qa, no_mutations):
 
 
 # ---------------------------------------------------------------- мутации
-def test_twenty_mutations_on_all_stages():
-    assert len(kb.MUTATIONS) == 20 and len(kb.MUT_BY_CODE) == 20
-    assert {m.stage for m in kb.MUTATIONS} == {1, 2, 3, 4, 5, 6}
+def test_120_mutations_20_per_stage():
+    from collections import Counter
+    assert len(kb.MUTATIONS) == 120 and len(kb.MUT_BY_CODE) == 120
+    assert Counter(m.stage for m in kb.MUTATIONS) == {i: 20 for i in range(1, 7)}
+    assert {m.rarity for m in kb.MUTATIONS} == set(kb.RARITY_ORDER)
+    for old in ("sparkle", "night", "sweet_tooth", "bubbly", "phoenix"):   # старые коды живы
+        assert old in kb.MUT_BY_CODE
 
 
 def test_mutation_is_saved_and_rewarded(app, make_user, monkeypatch):
@@ -163,37 +167,40 @@ def test_mutation_is_saved_and_rewarded(app, make_user, monkeypatch):
     monkeypatch.setattr(kb.rng, "random", lambda: 0.0)       # всё, что может выпасть, — выпадает
     wood0 = _state(c)["wood"]
     r = c.post(f"/api/kombucha/{kid}/pet", json={}).get_json()
-    assert r["mutation"]["code"] == "sparkle" and r["mutation"]["first_time"]
-    assert r["wood"] >= 1 and r["kombucha"]["mutations"][0]["code"] == "sparkle"
+    code = r["mutation"]["code"]
+    assert r["mutation"]["first_time"] and r["mutation"]["serial"] >= 1
+    assert r["kombucha"]["mutations"][0]["code"] == code and r["kombucha"]["mutations"][0]["serial"]
     st = _state(c)
     assert st["wood"] >= wood0 + 15 + 1
-    assert [x["code"] for x in st["codex"]] == ["sparkle"]
+    assert [x["code"] for x in st["codex"]] == [code]
     # мутация остаётся после смерти и перезапуска в коллекции
     _edit(app, kid, hours=24 * 5)
     c.post(f"/api/kombucha/{kid}/restart", json={})
     st = _state(c)
-    assert st["items"][0]["mutations"] == [] and [x["code"] for x in st["codex"]] == ["sparkle"]
+    assert st["items"][0]["mutations"] == [] and [x["code"] for x in st["codex"]] == [code]
 
 
 def test_mutation_conditions():
+    M = kb.MUT_BY_CODE
     k = Kombucha(xp=0, sweet=85.0, tea=10.0, clean=90.0, happy=50.0, mutations=[], pet_count=0, generation=1)
+    assert M["sweet_tooth"].check(kb.Ctx(action="sugar", k=k, hour=14))
+    assert not M["sweet_tooth"].check(kb.Ctx(action="tea", k=k, hour=14))
+    assert M["night"].check(kb.Ctx(action="tea", k=k, hour=3))
+    assert not M["night"].check(kb.Ctx(action="tea", k=k, hour=14))
+    assert M["bubbly"].check(kb.Ctx(action="tea", k=k, hour=14))
+    assert not M["phoenix"].check(kb.Ctx(action="pet", k=k, hour=14))
+    k.generation = 2
+    assert M["phoenix"].check(kb.Ctx(action="pet", k=k, hour=14))
+    # стадия ограничивает: споре не выпадет мутация 2+ стадии
     orig = kb.rng.random
     kb.rng.random = lambda: 0.0
     try:
-        # стадия 1: «сладкоежка» только при сахаре в сладкого, «ночной» — ночью
-        k.mutations = [{"code": "sparkle"}]
-        assert kb.roll_mutation(kb.Ctx(action="sugar", k=k, hour=14)).code == "sweet_tooth"
-        assert kb.roll_mutation(kb.Ctx(action="tea", k=k, hour=3)).code == "night"
-        assert kb.roll_mutation(kb.Ctx(action="tea", k=k, hour=14)) is None
-        # «газировка» — стадия 2+, заварка на исходе
-        k.xp, k.mutations = 60, [{"code": c} for c in ("sparkle", "striped")]
-        assert kb.roll_mutation(kb.Ctx(action="tea", k=k, hour=14)).code == "bubbly"
-        # «феникс» — только второе поколение
-        k.xp = 400
-        k.mutations = [{"code": m.code} for m in kb.MUTATIONS if m.code not in ("phoenix",)]
+        for _ in range(30):
+            m = kb.roll_mutation(kb.Ctx(action="pet", k=k, hour=14))
+            assert m is None or m.stage == 1
+        # уже имеющиеся не повторяются
+        k.mutations = [{"code": m.code} for m in kb.MUTATIONS if m.stage == 1]
         assert kb.roll_mutation(kb.Ctx(action="pet", k=k, hour=14)) is None
-        k.generation = 2
-        assert kb.roll_mutation(kb.Ctx(action="pet", k=k, hour=14)).code == "phoenix"
     finally:
         kb.rng.random = orig
 
