@@ -12,6 +12,8 @@
     <nav class="main-nav">
       <a href="/" class="{{ 'active' if page_name == 'feed' }}">Лента</a>
       <a href="/rooms" class="{{ 'active' if page_name in ('rooms', 'room') }}">Комнаты</a>
+      <a href="/debates" class="{{ 'active' if page_name == 'debates' }}">⚔️ Холивары</a>
+      <a href="/kombucha" class="{{ 'active' if page_name == 'kombucha' }}">🍄 Гриб</a>
     </nav>
     <div class="top-actions">
       <a class="btn btn-ghost btn-sm icon-btn" href="/search" aria-label="Поиск" title="Поиск">🔍</a>
@@ -25,6 +27,7 @@
           <div class="dropdown" id="user-dropdown" hidden>
             <a id="me-profile" href="#">Мой профиль</a>
             <a href="/settings">Настройки профиля</a>
+            <a href="/kombucha">🍄 Мой чайный гриб</a>
             <a id="me-mod" href="/mod" hidden>Модерация</a>
             <a id="me-admin" href="/admin" hidden>Админка</a>
             <button id="logout-btn" type="button">Выйти</button>

@@ -1193,6 +1193,129 @@ async function pageSearch() {
   if (form.elements.q.value) run(form.elements.q.value);
 }
 
+// ---------------------------------------------------------------- мини-игра «Чайный гриб»
+function kombuchaSVG(k) {
+  const st = k.stats, size = k.stage.size;
+  const level = k.alive ? 40 + st.tea * 0.9 : 60;                   // высота жидкости (из 170)
+  const top = 200 - level;
+  const tint = k.alive ? `hsl(${28 + (100 - st.tea) * 0.15}, ${45 + st.tea * 0.4}%, ${62 - st.tea * 0.22}%)` : "#6b6b4a";
+  const w = 34 + size * 11, h = 8 + size * 2.2;                    // диск гриба
+  const cx = 110, cy = top + 4;
+  const dirt = k.alive ? (100 - st.clean) / 100 : 0.8;
+  const faces = {
+    happy: ["M-10,-2 a3,3 0 1,0 0.1,0", "M10,-2 a3,3 0 1,0 0.1,0", "M-8,5 Q0,12 8,5"],
+    hungry: ["M-10,-2 a3,3 0 1,0 0.1,0", "M10,-2 a3,3 0 1,0 0.1,0", "M-5,7 a5,4 0 1,0 10,0 a5,4 0 1,0 -10,0"],
+    thirsty: ["M-13,-3 L-7,-1", "M13,-3 L7,-1", "M-7,8 Q0,4 7,8"],
+    dirty: ["M-13,-2 L-7,-2", "M7,-2 L13,-2", "M-6,7 L6,7"],
+    sad: ["M-10,-2 a3,3 0 1,0 0.1,0", "M10,-2 a3,3 0 1,0 0.1,0", "M-8,9 Q0,3 8,9"],
+    sticky: ["M-13,-4 L-7,0 M-13,0 L-7,-4", "M7,-4 L13,0 M7,0 L13,-4", "M-8,6 Q-4,10 0,6 Q4,10 8,6"],
+    dead: ["M-13,-4 L-7,0 M-13,0 L-7,-4", "M7,-4 L13,0 M7,0 L13,-4", "M-7,8 L7,8"],
+  };
+  const f = faces[k.mood] || faces.happy;
+  const bubbles = k.alive ? Array.from({ length: 6 }, (_, i) =>
+    `<circle class="kb-bubble" cx="${60 + i * 19}" cy="196" r="${2 + (i % 3)}" style="animation-delay:${i * 0.7}s"/>`).join("") : "";
+  const spots = Array.from({ length: 7 }, (_, i) =>
+    `<ellipse cx="${55 + ((i * 37) % 110)}" cy="${70 + ((i * 53) % 120)}" rx="${6 + (i % 3) * 3}" ry="${4 + (i % 2) * 3}" fill="#4a3b1c"/>`).join("");
+  return `<svg class="kb-svg mood-${k.mood}" viewBox="0 0 220 230" role="img" aria-label="Чайный гриб ${esc(k.name)}: ${esc(k.stage.title)}">
+    <defs><clipPath id="kb-jar"><path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z"/></clipPath></defs>
+    <rect x="60" y="6" width="100" height="22" rx="6" class="kb-lid"/>
+    <g clip-path="url(#kb-jar)">
+      <rect x="30" y="${top}" width="160" height="${230 - top}" fill="${tint}" class="kb-liquid"/>
+      <path d="M30,${top} Q70,${top - 4} 110,${top} T190,${top}" stroke="#ffffff55" stroke-width="2" fill="none"/>
+      ${bubbles}
+      <g class="${k.alive ? "kb-float" : ""}"><g class="kb-mush" transform="translate(${cx},${cy})">
+        <ellipse rx="${w}" ry="${h}" class="kb-disc"/>
+        <ellipse rx="${w * 0.8}" ry="${h * 0.5}" cy="-${h * 0.3}" class="kb-disc-hi"/>
+        ${size >= 4 ? `<path d="M-${w * 0.7},${h * 0.6} q6,14 12,0 q6,14 12,0 M${w * 0.3},${h * 0.6} q6,14 12,0" class="kb-tendrils"/>` : ""}
+        <g class="kb-face" transform="translate(0,-${h + 12})">
+          ${f.map((d) => `<path d="${d}"/>`).join("")}
+          ${k.mood === "happy" || k.mood === "sticky" ? `<circle cx="-16" cy="4" r="3" class="kb-blush"/><circle cx="16" cy="4" r="3" class="kb-blush"/>` : ""}
+        </g>
+      </g></g>
+      <g opacity="${dirt.toFixed(2)}">${spots}</g>
+    </g>
+    <path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z" class="kb-jar"/>
+    <path d="M52,50 L50,190" class="kb-glare"/>
+    <text x="110" y="228" text-anchor="middle" class="kb-label">3 л</text>
+  </svg>`;
+}
+
+function fmtLeft(sec) {
+  if (sec >= 3600) return `${Math.floor(sec / 3600)} ч ${Math.floor((sec % 3600) / 60)} мин`;
+  if (sec >= 60) return `${Math.ceil(sec / 60)} мин`;
+  return `${sec} с`;
+}
+
+async function pageKombucha() {
+  const root = $("#kb-root");
+  const loadTop = async () => {
+    try {
+      const t = await api("GET", "/api/kombucha/top", undefined, { quiet: true });
+      $("#kb-top").innerHTML = t.items.length ? t.items.map((x) => `<li><a href="/u/${encodeURIComponent(x.username)}">@${esc(x.username)}</a> — «${esc(x.name)}», ${esc(x.stage)} · <b>${x.xp}</b> XP${x.generation > 1 ? ` <span class="muted">(поколение ${x.generation})</span>` : ""}</li>`).join("") : `<li class="muted">Пока ни одного гриба. Будь первым!</li>`;
+    } catch (_) {}
+  };
+  loadTop();
+  if (!ME) {
+    root.innerHTML = `<div class="panel kb-guest">${kombuchaSVG({ name: "Гриша", mood: "happy", alive: true, stats: { tea: 70, clean: 100, sweet: 70, happy: 80 }, stage: { size: 3, title: "Блинчик" } })}
+      <p>Чтобы завести свой гриб, войди в аккаунт.</p><a class="btn btn-accent" href="/login?next=/kombucha">Войти</a></div>`;
+    return;
+  }
+  let k, timer;
+  const BTN = [["sugar", "🍬", "Сахар"], ["tea", "☕", "Заварка"], ["clean", "🧽", "Помыть банку"], ["pet", "💬", "Поболтать"]];
+  const STAT = [["sweet", "🍬 Сахар"], ["tea", "☕ Заварка"], ["clean", "🧽 Чистота"], ["happy", "😊 Настроение"]];
+  const say = (text) => { const b = $("#kb-say"); if (b) { b.textContent = text; b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop"); } };
+  const render = () => {
+    const st = k.stage;
+    const pct = st.next_xp ? Math.round(((k.xp - st.from_xp) / (st.next_xp - st.from_xp)) * 100) : 100;
+    root.innerHTML = `<div class="panel kb-main ${k.alive ? "" : "is-dead"}">
+      <div class="kb-scene">
+        <div class="kb-say" id="kb-say">${esc(k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
+        ${kombuchaSVG(k)}
+      </div>
+      <div class="kb-info">
+        <div class="kb-name"><h2 id="kb-name">${esc(k.name)}</h2><button class="link-btn" id="kb-rename" title="Переименовать">✏️</button></div>
+        <div class="kb-stage">${esc(st.title)} · ${k.age_days} дн.${k.generation > 1 ? ` · поколение ${k.generation}` : ""}</div>
+        <div class="kb-xp"><div class="kb-xp-bar"><span style="width:${pct}%"></span></div>
+          <small>${k.xp} XP${st.next_xp ? ` · до стадии «${esc(st.next_title)}» ещё ${st.next_xp - k.xp}` : " · максимальная стадия 👑"} · рекорд ${k.best_xp}</small></div>
+        ${k.dies_in != null && k.alive ? `<div class="kb-danger">⚠️ Гриб на грани! Закиснет через ${fmtLeft(k.dies_in)}, если не поднять показатель с нуля.</div>` : ""}
+        <div class="kb-stats">${STAT.map(([key, label]) => { const v = k.stats[key];
+          return `<div class="kb-stat"><span>${label}</span><div class="kb-bar ${v < 25 ? "low" : v > 90 && key === "sweet" ? "over" : ""}"><span style="width:${v}%"></span></div><b>${v}</b></div>`; }).join("")}</div>
+        ${k.alive ? `<div class="kb-actions">${BTN.map(([a, e, t]) => { const cd = k.cooldowns[a];
+            return `<button class="btn kb-act" data-act="${a}"${cd ? " disabled" : ""}><span class="e">${e}</span><span>${t}</span>${cd ? `<small>через ${fmtLeft(cd)}</small>` : ""}</button>`; }).join("")}</div>
+          <button class="btn btn-accent kb-daily" data-act="daily"${k.cooldowns.daily ? " disabled" : ""}>🏆 Схема дня${k.cooldowns.daily ? ` · через ${fmtLeft(k.cooldowns.daily)}` : ": забрать бонус за ответы"}</button>`
+        : `<p>Прожил ${k.age_days} дн. и набрал ${k.xp} XP. Покойся с миром, ${esc(k.name)}.</p>
+           <button class="btn btn-accent" id="kb-restart">🌱 Завести новый гриб</button>`}
+      </div></div>`;
+    $$("[data-act]", root).forEach((b) => (b.onclick = () => doAct(b.dataset.act)));
+    $("#kb-rename").onclick = async () => {
+      const name = prompt("Как назовём гриб?", k.name);
+      if (!name || name === k.name) return;
+      try { k = (await api("PATCH", "/api/kombucha", { name })).kombucha; render(); } catch (_) {}
+    };
+    const rs = $("#kb-restart");
+    if (rs) rs.onclick = async () => {
+      const name = prompt("Имя нового гриба:", k.name) || k.name;
+      try { k = (await api("POST", "/api/kombucha/restart", { name })).kombucha; render(); say("Привет! Я новенький 🌱"); loadTop(); } catch (_) {}
+    };
+  };
+  const doAct = async (action) => {
+    try {
+      const r = await api("POST", `/api/kombucha/${action}`, {}, { quiet: true });
+      k = r.kombucha; render(); say(r.message);
+      if (r.stage_up) toast(`🎉 Гриб вырос: теперь это «${k.stage.title}»!`);
+      if (action === "daily" || r.stage_up) loadTop();
+    } catch (err) {
+      toast(err.data?.message || "Не получилось", true);
+    }
+  };
+  const load = async () => {
+    try { k = (await api("GET", "/api/kombucha")).kombucha; render(); } catch (_) {}
+  };
+  await load();
+  clearInterval(timer);
+  timer = setInterval(load, 60000);  // раз в минуту подтягиваем убывание и кулдауны
+}
+
 // ---------------------------------------------------------------- FAQ
 function pageFaq() {
   const input = $("#faq-search");
@@ -1210,7 +1333,7 @@ function pageFaq() {
 
 // ---------------------------------------------------------------- boot
 const PAGES = {
-  feed: () => initFeed(), room: pageRoom, question: pageQuestion, ask: pageAsk, rooms: pageRooms,
+  feed: () => initFeed(), debates: () => initFeed(), kombucha: pageKombucha, room: pageRoom, question: pageQuestion, ask: pageAsk, rooms: pageRooms,
   profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, notifications: pageNotifications, search: pageSearch, mod: pageMod, admin: pageAdmin,
   settings: pageSettings, faq: pageFaq,
 };

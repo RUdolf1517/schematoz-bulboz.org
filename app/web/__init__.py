@@ -65,7 +65,12 @@ def media(name: str):
 
 @bp.get("/debates")
 def debates():
-    return page("feed.html", "feed", preset_tab="debates")
+    return page("feed.html", "debates", preset_tab="debates")
+
+
+@bp.get("/kombucha")
+def kombucha():
+    return page("kombucha.html", "kombucha")
 
 
 @bp.get("/settings")

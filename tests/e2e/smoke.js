@@ -77,6 +77,13 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   fq.value = "zzzнетничего"; fq.dispatchEvent(new d.window.Event("input"));
   check("FAQ: поиск прячет всё и показывает заглушку", !d.window.document.querySelector("#faq-empty").hidden);
 
+  // 3c. Чайный гриб
+  d = await open("/kombucha", 1500);
+  check("гриб: банка нарисована", !!d.window.document.querySelector(".kb-main .kb-svg"));
+  check("гриб: в шапке есть Холивары и Гриб", !!d.window.document.querySelector('.main-nav a[href="/debates"]') && !!d.window.document.querySelector('.main-nav a[href="/kombucha"].active'));
+  d.window.document.querySelector('[data-act="tea"]').click(); await sleep(900);
+  check("гриб: заварка долита, кнопка на кулдауне", d.window.document.querySelector('[data-act="tea"]')?.disabled === true && txt(d, ".kb-stats").includes("100"));
+
   // 4. Даша — автор вопроса 1: видит кнопки +5/−1
   d = await open("/q/1");
   check("хедер: имя пользователя", txt(d, "#me-name") === "dasha");
