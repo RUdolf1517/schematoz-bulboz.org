@@ -230,3 +230,99 @@ MUT_BY_CODE = {m.code: m for m in MUTATIONS}
 assert len(MUTATIONS) == 120 and len(MUT_BY_CODE) == 120
 assert all(sum(1 for m in MUTATIONS if m.stage == st) == 20 for st in range(1, 7))
 assert all(m.cond in CONDS and m.rarity in RARITY for m in MUTATIONS)
+
+
+# ---------------------------------------------------------------- вторая волна: ещё по 20 на стадию (итого 240)
+CONDS.update({
+    "talk": (lambda c: c.action == "talk", "Разговаривай с грибом о философии"),
+    "cure": (lambda c: c.action == "cure", "Вылечи гриб от плесени"),
+    "monday": (lambda c: c.weekday == 0, "По понедельникам (сочувствуем)"),
+    "noon": (lambda c: 12 <= c.hour < 14, "В обед, с 12 до 14"),
+    "balanced": (lambda c: max(_stats(c)) - min(_stats(c)) <= 10, "Все показатели почти равны (разброс ≤ 10)"),
+    "gen3": (lambda c: c.k.generation >= 3, "Гриб третьего поколения и старше"),
+    "traded": (lambda c: len(getattr(c.k, "owners", None) or []) >= 2, "Гриб, сменивший хозяина"),
+})
+
+_EXTRA = {
+    1: [
+        ("s1b_crumb", "Крошка", "🍪", "common", "sugar", "#e8c396"), ("s1b_puddle", "Лужица", "💦", "common", "tea", "#9fd8ff"),
+        ("s1b_soap", "Мыльный", "🧼", "common", "clean", "#e9f7ff"), ("s1b_yawn", "Зевака", "🥱", "common", "morning", "#f5e6c8"),
+        ("s1b_pixel", "Пиксельный", "👾", "common", "any", "#b58cff"), ("s1b_sock", "Носочный", "🧦", "common", "pet", "#ff9fb2"),
+        ("s1b_lunch", "Обеденный", "🥪", "common", "noon", "#f7d08a"), ("s1b_monday", "Понедельничный", "😩", "common", "monday", "#9aa5b1"),
+        ("s1b_think", "Задумчивый", "🤔", "common", "talk", "#ffe08a"), ("s1b_candy", "Леденец", "🍬", "common", "sweet_high", "#ff7eb6"),
+        ("s1b_owl", "Совёнок", "🦉", "rare", "night", "#8b6b4a"), ("s1b_zen", "Дзен", "🧘", "rare", "balanced", "#c9f2c7"),
+        ("s1b_pill", "Выздоравливающий", "💊", "rare", "cure", "#ffffff"), ("s1b_socr", "Сократик", "🏛️", "rare", "talk", "#e6dcc8"),
+        ("s1b_hand", "Передаренный", "🎁", "rare", "traded", "#ff6b6b"), ("s1b_ghost", "Призрак", "👻", "epic", "night", "#e8e8ff"),
+        ("s1b_ufo", "НЛО", "🛸", "epic", "weekend", "#7df9ff"), ("s1b_mirror", "Зеркальный", "🪞", "epic", "balanced", "#dfe9f5"),
+        ("s1b_oracle", "Оракул", "🔮", "legendary", "talk", "#9b5de5"), ("s1b_egg", "Пасхалка", "🥚", "legendary", "gen3", "#fff8e7"),
+    ],
+    2: [
+        ("s2b_foam", "Пенка", "🫧", "common", "tea", "#e0f4ff"), ("s2b_honey", "Медовый", "🍯", "common", "sugar", "#f2b134"),
+        ("s2b_broom", "Веник", "🧹", "common", "clean", "#c9a66b"), ("s2b_purr", "Мурчащий", "🐈", "common", "pet", "#f0c27b"),
+        ("s2b_sun", "Солнечный", "🌤️", "common", "morning", "#ffe27a"), ("s2b_moon", "Лунатик", "🌛", "common", "evening", "#c5cae9"),
+        ("s2b_soup", "Супчик", "🍲", "common", "noon", "#e07a5f"), ("s2b_coffee", "Кофеман", "☕", "common", "monday", "#6f4e37"),
+        ("s2b_book", "Книжный", "📚", "common", "talk", "#a1887f"), ("s2b_dust", "Пыльный", "🌫️", "common", "low", "#b0a99f"),
+        ("s2b_scale", "Весы", "⚖️", "rare", "balanced", "#d4af37"), ("s2b_bandage", "Пластырь", "🩹", "rare", "cure", "#f8c9a0"),
+        ("s2b_plato", "Платоник", "📜", "rare", "talk", "#efe3c2"), ("s2b_dj", "Диджей", "🎧", "rare", "weekend", "#ff4fd8"),
+        ("s2b_barter", "Бартерный", "🔄", "rare", "traded", "#4ecdc4"), ("s2b_vamp", "Вампирчик", "🧛", "epic", "night", "#8b0000"),
+        ("s2b_rain", "Радужный дождь", "🌦️", "epic", "all_high", "#7fd1ff"), ("s2b_ninja", "Ниндзя", "🥷", "epic", "gen2", "#2b2b2b"),
+        ("s2b_philo", "Философский камень", "💠", "legendary", "talk", "#00c2ff"), ("s2b_dragon", "Дракончик", "🐉", "legendary", "rescued", "#3ecf5a"),
+    ],
+    3: [
+        ("s3b_waffle", "Вафельный", "🧇", "common", "sugar", "#e3b04b"), ("s3b_kettle", "Чайник", "🫖", "common", "tea", "#7aa6c2"),
+        ("s3b_sponge", "Губка", "🧽", "common", "clean", "#ffe66d"), ("s3b_hug", "Обнимашка", "🤗", "common", "pet", "#ffb4a2"),
+        ("s3b_rooster", "Петушок", "🐓", "common", "morning", "#e63946"), ("s3b_neon", "Неоновый", "💡", "common", "evening", "#39ff14"),
+        ("s3b_pelmen", "Пельмешек", "🥟", "common", "noon", "#f1e3c6"), ("s3b_grumpy", "Ворчун", "😤", "common", "monday", "#c0392b"),
+        ("s3b_quote", "Цитатник", "💬", "common", "talk", "#ffffff"), ("s3b_toxic", "Токсичный", "☢️", "common", "low", "#b7ff00"),
+        ("s3b_yinyang", "Гармония", "🎐", "rare", "balanced", "#a8dadc"), ("s3b_doctor", "Доктор", "🩺", "rare", "cure", "#48cae4"),
+        ("s3b_stoic", "Стоик", "🗿", "rare", "talk", "#9e9e9e"), ("s3b_party", "Тусовщик", "🪩", "rare", "weekend", "#f72585"),
+        ("s3b_merchant", "Купеческий", "🪙", "rare", "traded", "#d4a017"), ("s3b_kraken", "Кракен", "🦑", "epic", "tea_low", "#6a0572"),
+        ("s3b_robot", "Робот", "🤖", "epic", "streak", "#adb5bd"), ("s3b_lava", "Лавовый", "🌋", "epic", "sweet_high", "#ff4800"),
+        ("s3b_diogenes", "Бочка Диогена", "🛢️", "legendary", "talk", "#8d6e63"), ("s3b_unicorn", "Единорог", "🦄", "legendary", "all_high", "#ffafcc"),
+    ],
+    4: [
+        ("s4b_jam", "Вареньевый", "🍓", "common", "sugar", "#d62828"), ("s4b_samovar", "Самоварный", "🏺", "common", "tea", "#b87333"),
+        ("s4b_shower", "Душевой", "🚿", "common", "clean", "#90e0ef"), ("s4b_tickle", "Щекотун", "🪶", "common", "pet", "#fefae0"),
+        ("s4b_jogger", "Бегун", "🏃", "common", "morning", "#06d6a0"), ("s4b_candle", "Свечной", "🕯️", "common", "evening", "#ffd166"),
+        ("s4b_borsch", "Борщевой", "🥣", "common", "noon", "#9d0208"), ("s4b_alarm", "Будильник", "⏰", "common", "monday", "#ef233c"),
+        ("s4b_owlbook", "Совиный том", "📖", "common", "talk", "#7f5539"), ("s4b_rust", "Ржавый", "🔩", "common", "low", "#a0522d"),
+        ("s4b_tao", "Дао", "🌀", "rare", "balanced", "#3a86ff"), ("s4b_herb", "Травник", "🌿", "rare", "cure", "#52b788"),
+        ("s4b_kant", "Категорический", "🎩", "rare", "talk", "#343a40"), ("s4b_karaoke", "Караоке", "🎤", "rare", "weekend", "#ff006e"),
+        ("s4b_auction", "Аукционный", "🔨", "rare", "traded", "#bc6c25"), ("s4b_cthulhu", "Ктулху", "🐙", "epic", "night", "#264653"),
+        ("s4b_phoenix2", "Пепельный", "🐦‍🔥", "epic", "rescued", "#ff7b00"), ("s4b_crystal2", "Аметист", "🔷", "epic", "clean_high", "#9966cc"),
+        ("s4b_zarathustra", "Заратустра", "🦅", "legendary", "talk", "#e9c46a"), ("s4b_hydra", "Гидра", "🐍", "legendary", "gen3", "#2a9d8f"),
+    ],
+    5: [
+        ("s5b_cake", "Тортик", "🎂", "common", "sugar", "#ffc8dd"), ("s5b_matcha", "Матча", "🍵", "common", "tea", "#88b04b"),
+        ("s5b_vacuum", "Пылесос", "🌪️", "common", "clean", "#adb5bd"), ("s5b_pat", "Поглаженный", "🖐️", "common", "pet", "#ffddd2"),
+        ("s5b_dawn", "Рассветный", "🌅", "common", "morning", "#ff9e00"), ("s5b_stars", "Звездочёт", "🔭", "common", "evening", "#14213d"),
+        ("s5b_canteen", "Столовский", "🍛", "common", "noon", "#dda15e"), ("s5b_meeting", "Планёрка", "📊", "common", "monday", "#577590"),
+        ("s5b_debater", "Спорщик", "🗣️", "common", "talk", "#f4a261"), ("s5b_swamp", "Болотный", "🐊", "common", "low", "#4f772d"),
+        ("s5b_equil", "Равновесие", "🪨", "rare", "balanced", "#8d99ae"), ("s5b_alch", "Алхимик", "⚗️", "rare", "cure", "#7209b7"),
+        ("s5b_seneca", "Сенека", "🍷", "rare", "talk", "#6d2e46"), ("s5b_rave", "Рейвер", "🎆", "rare", "weekend", "#00f5d4"),
+        ("s5b_nomad", "Кочевник", "🐫", "rare", "traded", "#c68b59"), ("s5b_titan", "Титан", "🗻", "epic", "all_high", "#6c757d"),
+        ("s5b_storm", "Шторм", "⛈️", "epic", "tea_low", "#1d3557"), ("s5b_king", "Король вечеринки", "🤴", "epic", "streak", "#ffd60a"),
+        ("s5b_marcus", "Марк Аврелий", "🏺", "legendary", "talk", "#c9a227"), ("s5b_leviathan", "Левиафан", "🐋", "legendary", "gen3", "#023e8a"),
+    ],
+    6: [
+        ("s6b_ambrosia", "Амброзия", "🍾", "common", "sugar", "#fff3b0"), ("s6b_elixir", "Эликсир", "🧃", "common", "tea", "#80ed99"),
+        ("s6b_diamond", "Бриллиантовый блеск", "💎", "common", "clean", "#caf0f8"), ("s6b_bff", "Лучший друг", "🫶", "common", "pet", "#ff8fab"),
+        ("s6b_aurora", "Аврора", "🌌", "common", "morning", "#72efdd"), ("s6b_eclipse", "Затмение", "🌑", "common", "evening", "#212529"),
+        ("s6b_feast", "Пир", "🍗", "common", "noon", "#e76f51"), ("s6b_survivor", "Переживший понедельник", "🧟", "common", "monday", "#6a994e"),
+        ("s6b_sage", "Мудрец", "🧓", "common", "talk", "#e9ecef"), ("s6b_abyss", "Бездна", "🕳️", "common", "low", "#000814"),
+        ("s6b_nirvana", "Нирвана", "🪷", "rare", "balanced", "#ffc6ff"), ("s6b_panacea", "Панацея", "⚕️", "rare", "cure", "#00b4d8"),
+        ("s6b_socrates", "Сократ", "🥛", "rare", "talk", "#f8f9fa"), ("s6b_festival", "Фестиваль", "🎪", "rare", "weekend", "#ff595e"),
+        ("s6b_heirloom", "Семейная реликвия", "📿", "rare", "traded", "#b08968"), ("s6b_cosmos", "Космос", "🪐", "epic", "night", "#3c096c"),
+        ("s6b_eternal", "Вечный", "♾️", "epic", "gen3", "#ffffff"), ("s6b_emperor", "Император", "🏯", "epic", "many_muts", "#9d0208"),
+        ("s6b_logos", "Логос", "📯", "legendary", "talk", "#ffba08"), ("s6b_bulboz", "Бульбоз Абсолютный", "🍄", "legendary", "all_high", "#ff006e"),
+    ],
+}
+
+MUTATIONS.extend(Mutation(code, title, emoji, stage, rarity, cond, color)
+                 for stage, rows in _EXTRA.items() for code, title, emoji, rarity, cond, color in rows)
+MUT_BY_CODE.update({m.code: m for m in MUTATIONS})
+PER_STAGE = 40
+
+assert len(MUTATIONS) == 240 and len(MUT_BY_CODE) == 240, len(MUT_BY_CODE)
+assert all(sum(1 for m in MUTATIONS if m.stage == st) == PER_STAGE for st in range(1, 7))
+assert all(m.cond in CONDS and m.rarity in RARITY for m in MUTATIONS)

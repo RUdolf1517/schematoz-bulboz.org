@@ -1201,6 +1201,9 @@ const NOTIF = {
   ban: (p) => ["⛔", `Аккаунт заблокирован. Причина: ${esc(p.reason || "—")}`, "/banned"],
   trade: (p) => [p.accepted ? "🤝" : p.gift ? "🎁" : "🔄", p.accepted ? `@${esc(p.username)} принял(а) твоё предложение обмена` : p.gift ? `@${esc(p.username)} дарит тебе чайный гриб` : `@${esc(p.username)} предлагает обмен грибами`, "/market#trades"],
   sale: (p) => ["💰", `@${esc(p.username)} купил(а) твой гриб «${esc(p.kombucha_name)}» — +${p.amount} $₽`, "/wallet"],
+  task: (p) => ({ new_submission: ["📋", `@${esc(p.username)} откликнулся на задание «${esc(p.title)}»`],
+    approved: ["✅", `Задание «${esc(p.title)}» засчитано: +${p.amount} $₽`], rejected: ["❌", `Отклик на «${esc(p.title)}» отклонён: ${esc(p.reason || "")}`],
+    dispute_lost: ["⚖️", `Модератор подтвердил отказ по заданию «${esc(p.title)}»`] }[p.result] || ["📋", esc(p.title)]).concat([`/tasks/${p.task_id}`]),
   wall: (p) => ["📝", `@${esc(p.username)} написал(а) у тебя на стене: «${esc(p.preview)}»`, ME ? `/u/${encodeURIComponent(ME.user.username)}#wall` : "#"],
   appeal: (p) => ["⚖️", p.decision === "accept" || p.decision === "approve" ? "Апелляцию приняли — блокировка снята" : `Апелляцию отклонили${p.comment ? ": " + esc(p.comment) : ""}`, "/banned"],
 };
@@ -1251,8 +1254,24 @@ const RAR = { legendary: "Легендарная", epic: "Эпическая", r
 function mutChip(m) {
   return `<span class="kb-mut r-${m.rarity}" title="${esc(RAR[m.rarity] || "")}: ${esc(m.title)}${m.inherited ? " (унаследована)" : ""}">${esc(m.emoji)} ${esc(m.title)}${m.serial ? ` <b class="kb-serial">#${m.serial}</b>` : ""}${m.inherited ? " 🧬" : ""}</span>`;
 }
+async function kombuchaCardModal(id) {
+  let d;
+  try { d = (await api("GET", `/api/kombucha/${id}/card`, undefined, { quiet: true })).kombucha; } catch (_) { return; }
+  const HOW = { grown: "вырастил(а)", gift: "получил(а) в подарок", trade: "выменял(а)", sale: "купил(а)" };
+  modal(`<div class="kb-cardm"><div class="kb-cardm-svg">${kombuchaSVG(d)}</div>
+    <h2>${esc(d.name)} ${d.frozen ? "🧊" : ""}</h2>
+    <div class="muted">${esc(d.stage.title)} · ${d.xp} XP · поколение ${d.generation} · владелец <a href="/u/${encodeURIComponent(d.owner)}">@${esc(d.owner)}</a>${d.price != null ? ` · 🏷 ${d.price} $₽` : ""}</div>
+    <h3>Мутации</h3>${d.mutations.length ? `<table class="kb-cardm-t">${d.mutations.map((m) => `<tr><td>${esc(m.emoji)} ${esc(m.title)}</td><td>${esc(RAR[m.rarity])}</td><td><b>#${m.serial ?? "?"}</b> из ${m.issued}</td></tr>`).join("")}</table>` : `<p class="muted">Без мутаций</p>`}
+    <h3>История владельцев</h3>${d.owners.length ? `<ol class="kb-owners">${d.owners.map((o) => `<li>@${esc(o.username || "?")} — ${HOW[o.how] || esc(o.how)}${o.price ? ` за ${o.price} $₽` : ""} <small class="muted">${esc(fmtDate(o.at))}</small></li>`).join("")}</ol>` : `<p class="muted">Всю жизнь у одного хозяина — @${esc(d.owner)}</p>`}
+    <div class="modal-actions"><button class="btn btn-ghost" data-close>Закрыть</button></div></div>`);
+}
+document.addEventListener("click", (e) => {
+  const c = e.target.closest("[data-kcard]");
+  if (c && !e.target.closest("button, a, .kb-pick")) kombuchaCardModal(c.dataset.kcard);
+});
+
 function kombuchaCard(k, extra = "") {
-  return `<div class="kb-card r-${k.mutations?.[0]?.rarity || "none"}"><div class="kb-card-svg">${kombuchaSVG(k, { small: true })}</div>
+  return `<div class="kb-card r-${k.mutations?.[0]?.rarity || "none"}" data-kcard="${k.id}" title="Открыть карточку гриба"><div class="kb-card-svg">${kombuchaSVG(k, { small: true })}</div>
     <b>${esc(k.name)}</b><small class="muted">${esc(k.stage.title)} · ${k.xp} XP${k.generation > 1 ? ` · пок. ${k.generation}` : ""}</small>
     ${k.mutations.length ? `<div class="kb-card-muts">${k.mutations.slice(0, 4).map(mutChip).join("")}${k.mutations.length > 4 ? `<span class="muted">+${k.mutations.length - 4}</span>` : ""}</div>` : `<small class="muted">без мутаций</small>`}
     ${extra}</div>`;
@@ -1335,6 +1354,7 @@ function kombuchaSVG(k, { small = false } = {}) {
         ${acc.join("")}
       </g></g>
       <g opacity="${dirt.toFixed(2)}">${spots}</g>
+      ${k.mold ? Array.from({ length: 9 }, (_, i) => `<circle cx="${cx + (((i * 37) % 80) - 40) * (w / 60)}" cy="${cy - h * 0.4 + ((i * 13) % 10) - 5}" r="${3 + (i % 3) * 2}" class="kb-moldspot"/>`).join("") : ""}
     </g>
     <path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z" class="kb-jar"/>
     <path d="M52,50 L50,190" class="kb-glare"/>${has("clean_freak") ? `<path d="M64,60 L63,110" class="kb-glare"/>` : ""}
@@ -1365,7 +1385,7 @@ async function pageKombucha() {
     return;
   }
   let S, sel = Number(localStorage.getItem("kb-sel")) || null, timer;
-  const BTN = [["sugar", "🍬", "Сахар"], ["tea", "☕", "Заварка"], ["clean", "🧽", "Помыть банку"], ["pet", "💬", "Поболтать"]];
+  const BTN = [["sugar", "🍬", "Сахар"], ["tea", "☕", "Заварка"], ["clean", "🧽", "Помыть банку"], ["pet", "🤚", "Погладить"]];
   const STAT = [["sweet", "🍬 Сахар"], ["tea", "☕ Заварка"], ["clean", "🧽 Чистота"], ["happy", "😊 Настроение"]];
   const say = (text) => { const b = $("#kb-say"); if (b) { b.textContent = text; b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop"); } };
   const cur = () => S.items.find((x) => x.id === sel) || S.items[0];
@@ -1390,10 +1410,11 @@ async function pageKombucha() {
     const pct = st.next_xp ? Math.round(((k.xp - st.from_xp) / (st.next_xp - st.from_xp)) * 100) : 100;
     const sp = k.sprout_progress;
     const sprout = k.sprout_pending ? `<div class="kb-note">🌱 Отросток готов и ждёт свободную банку. <button class="link-btn" data-buy>Купить банку за ${S.prices.jar} $₽</button></div>`
-      : k.sprouted ? `<div class="kb-note muted">🌱 Этот гриб уже дал отросток.</div>`
-      : `<div class="kb-sprout" title="На последней стадии, после 7 дней ухода, гриб даст отросток — новый гриб"><span>🌱 Отросток:</span>
+      : `<div class="kb-sprout" title="Легенда делится раз в неделю, если 7 дней за ней ухаживали и на ней нет плесени"><span>🌱 Деление${sp.count ? ` (было ${sp.count})` : ""}:</span>
           <span class="${sp.legend ? "ok" : ""}">${sp.legend ? "✅" : "⏳"} стадия «Легенда»</span>
-          <span class="${sp.care_days >= sp.need_days ? "ok" : ""}">${sp.care_days >= sp.need_days ? "✅" : "⏳"} дней ухода ${sp.care_days}/${sp.need_days}</span></div>`;
+          <span class="${sp.care_days >= sp.need_days ? "ok" : ""}">${sp.care_days >= sp.need_days ? "✅" : "⏳"} дней ухода ${sp.care_days}/${sp.need_days}</span>
+          <span class="${sp.next_in ? "" : "ok"}">${sp.next_in ? `⏳ следующее через ${fmtLeft(sp.next_in)}` : "✅ раз в неделю"}</span>
+          ${sp.healthy ? "" : `<span>🦠 сначала вылечи плесень</span>`}</div>`;
     return `<div class="panel kb-main ${k.alive ? "" : "is-dead"}">
       <div class="kb-scene">
         <div class="kb-say" id="kb-say">${esc(k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
@@ -1414,9 +1435,13 @@ async function pageKombucha() {
             <button class="btn btn-accent" data-unfreeze>🔥 Разморозить</button>
             ${k.price != null ? `<button class="btn btn-ghost" data-unlist>🏷 Снять с продажи (${k.price} $₽)</button>` : `<button class="btn btn-ghost" data-list>💰 Продать</button>`}
             <button class="btn btn-ghost" data-trade>🔄 Обменять / подарить</button></div>`
-        : k.alive ? `<div class="kb-next muted">⏬ Показатели упадут через ${fmtLeft(k.next_drop_in)} (раз в 12 часов)</div>
+        : k.alive ? `${k.mold ? `<div class="kb-danger kb-mold">🦠 Плесень! Гриб не растёт и не мутирует, чистота и настроение тают быстрее.
+            <button class="btn btn-accent btn-sm" data-act="cure"${k.cooldowns.cure ? " disabled" : ""}>🧪 Уксусная ванна${k.cooldowns.cure ? ` · через ${fmtLeft(k.cooldowns.cure)}` : ""}</button></div>` : ""}
+          <div class="kb-next muted">⏬ Показатели упадут через ${fmtLeft(k.next_drop_in)} (раз в 12 часов)${!k.mold && k.stats.clean < 35 ? " · ⚠️ банка грязная — может завестись плесень" : ""}</div>
           <div class="kb-actions">${BTN.map(([a, e, t]) => { const cd = k.cooldowns[a];
             return `<button class="btn kb-act" data-act="${a}"${cd ? " disabled" : ""}><span class="e">${e}</span><span>${t}</span>${cd ? `<small>через ${fmtLeft(cd)}</small>` : ""}</button>`; }).join("")}</div>
+          <button class="btn kb-talk" data-act="talk"${k.cooldowns.talk ? " disabled" : ""}>💭 Поговорить с грибом${k.cooldowns.talk ? ` · через ${fmtLeft(k.cooldowns.talk)}` : " — о философии"}</button>
+          <div id="kb-quote"></div>
           <button class="btn btn-accent kb-daily" data-act="daily"${k.cooldowns.daily ? " disabled" : ""}>🏆 Схема дня${k.cooldowns.daily ? ` · через ${fmtLeft(k.cooldowns.daily)}` : ": забрать бонус за ответы"}</button>
           ${sprout}
           <button class="link-btn kb-freeze" data-freeze title="Заморозить: гриб перестанет требовать ухода и встанет на полку в профиле">🧊 Заморозить и поставить на полку</button>`
@@ -1511,6 +1536,11 @@ async function pageKombucha() {
     const r = await call("POST", `/api/kombucha/${k.id}/${action}`);
     if (!r) return;
     S = r; render(); say(r.message);
+    if (r.quote) {
+      const q = r.quote, box = $("#kb-quote");
+      if (box) box.innerHTML = `<blockquote class="kb-quote ${action === "talk" ? "philo" : "dubious"}">${q.intro ? `<div class="muted">${esc(q.intro)}</div>` : ""}
+        ${q.lines.map((l) => `<p><b>${esc(l.who)}:</b> ${esc(l.text)}</p>`).join("")}<cite>${esc(q.book || "")}${q.remote ? " 🌐" : ""}</cite></blockquote>`;
+    }
     if (r.mutation) toast(`🧬 ${r.mutation.rarity_title} мутация: ${r.mutation.emoji} «${r.mutation.title}» #${r.mutation.serial}!${r.mutation.first_time ? " +15 $₽ за новую находку" : ""}`);
     if (r.new_badges?.length) newBadgesToast(r.new_badges);
     if (r.stage_up) toast(`🎉 Гриб вырос: теперь это «${r.kombucha.stage.title}»!`);
@@ -1530,6 +1560,7 @@ async function tradeDialog(k, after) {
   const M = modal(`<h2>🔄 Обмен или подарок</h2>
     <p class="muted">Отдаёшь «${esc(k.name)}». Можно попросить взамен замороженный гриб с полки получателя, а можно просто подарить.</p>
     <label>Кому <input class="input" id="tr-user" placeholder="username" autocomplete="off"></label>
+    <label>Подпись (необязательно) <input class="input" id="tr-msg" maxlength="140" placeholder="С днём варенья! 🎂"></label>
     <div id="tr-shelf" class="kb-shelf pick"></div>
     <div class="modal-actions"><button class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-ghost" id="tr-gift">🎁 Подарить</button><button class="btn btn-accent" id="tr-send" disabled>🔄 Предложить обмен</button></div>`);
   let want = null, timer;
@@ -1546,7 +1577,7 @@ async function tradeDialog(k, after) {
   }, 350); };
   const go = async (wantId) => {
     try {
-      await api("POST", "/api/trades", { to_username: inp.value.trim().replace(/^@/, ""), give_id: k.id, want_id: wantId });
+      await api("POST", "/api/trades", { to_username: inp.value.trim().replace(/^@/, ""), give_id: k.id, want_id: wantId, message: M.el.querySelector("#tr-msg").value.trim() || null });
       toast(wantId ? "Предложение отправлено 🔄" : "Подарок отправлен — ждём, когда примут 🎁");
       M.close(); after?.();
     } catch (_) {}
@@ -1575,7 +1606,7 @@ async function pageMarket() {
     if (!ME) { tr.innerHTML = `<p class="muted"><a href="/login?next=/market">Войди</a>, чтобы меняться грибами.</p>`; return; }
     const d = await api("GET", "/api/trades");
     const row = (t, inc) => `<div class="trade ${t.status}"><div class="trade-side">${t.give ? kombuchaCard(t.give) : "—"}</div>
-      <div class="trade-mid">${t.gift ? "🎁" : "⇄"}<small>${inc ? `от @${esc(t.from)}` : `для @${esc(t.to)}`}</small>
+      <div class="trade-mid">${t.gift ? "🎁" : "⇄"}<small>${inc ? `от @${esc(t.from)}` : `для @${esc(t.to)}`}</small>${t.message ? `<small class="trade-msg">«${esc(t.message)}»</small>` : ""}
         ${t.status === "pending" ? (inc ? `<button class="btn btn-accent btn-sm" data-tr="${t.id}" data-op="accept">Принять</button><button class="btn btn-ghost btn-sm" data-tr="${t.id}" data-op="decline">Отклонить</button>`
           : `<button class="btn btn-ghost btn-sm" data-tr="${t.id}" data-op="cancel">Отменить</button>`) : `<span class="muted">${{ accepted: "✅ принято", declined: "❌ отклонено", cancelled: "отменено" }[t.status]}</span>`}</div>
       <div class="trade-side">${t.want ? kombuchaCard(t.want) : `<span class="muted">${t.gift ? "подарок" : "—"}</span>`}</div></div>`;
@@ -1637,6 +1668,90 @@ async function profileExtras(d) {
   if (location.hash === "#wall") $("#wall")?.scrollIntoView();
 }
 
+// ---------------------------------------------------------------- задания за $₽
+const TASK_ST = { open: "🟢 открыто", done: "✅ все места заняты", closed: "⏹ закрыто автором", expired: "⌛ срок вышел", removed: "⛔ снято модератором" };
+const SUB_ST = { pending: "⏳ на проверке", approved: "✅ засчитано", rejected: "❌ отклонено", disputed: "⚖️ спор у модератора" };
+function taskCard(t) {
+  return `<a class="task-card panel" href="/tasks/${t.id}"><div class="task-top"><b class="task-reward">+${t.reward} $₽</b><span class="muted">${TASK_ST[t.status] || t.status}</span></div>
+    <h3>${esc(t.title)}</h3><div class="muted task-meta">от @${esc(t.author.username)} · мест ${t.slots_left}/${t.slots} · до ${esc(fmtDate(t.deadline))}${t.pending ? ` · на проверке ${t.pending}` : ""}</div>
+    ${t.my_submission ? `<div class="task-mine">${SUB_ST[t.my_submission.status]}</div>` : ""}</a>`;
+}
+async function pageTasks() {
+  const root = $("#tasks-root");
+  const id = root.dataset.taskId;
+  if (id) return pageTask(root, id);
+  let tab = "open", sort = "new", rules;
+  const load = async () => {
+    const d = await api("GET", `/api/tasks?tab=${tab}&sort=${sort}`);
+    rules = d.rules;
+    $("#tasks-list").innerHTML = d.items.map(taskCard).join("") || `<p class="muted panel">${tab === "open" ? "Открытых заданий нет. Создай первое!" : "Пусто."}</p>`;
+  };
+  $$("[data-ttab]").forEach((b) => (b.onclick = () => { tab = b.dataset.ttab; $$("[data-ttab]").forEach((x) => x.classList.toggle("active", x === b)); load(); }));
+  $("#tasks-sort").onchange = (e) => { sort = e.target.value; load(); };
+  const f = $("#task-form");
+  let upd = null;
+  if (f) {
+    upd = () => {
+      const r = Number(f.elements.reward.value) || 0, n = Number(f.elements.slots.value) || 0, base = r * n;
+      const fee = Math.max(1, Math.round(base * (rules?.fee ?? 0.1)));
+      $("#task-cost").textContent = base ? `Спишется ${base + fee} $₽: ${r} × ${n} мест + ${fee} комиссии` : "";
+    };
+    f.addEventListener("input", upd);
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const el = f.elements;
+      try {
+        const r = await api("POST", "/api/tasks", { title: el.title.value.trim(), body: el.body.value.trim(), proof: el.proof.value.trim(),
+          reward: Number(el.reward.value), slots: Number(el.slots.value), days: Number(el.days.value) });
+        setWood(r.wood); toast("📋 Задание опубликовано, $₽ в эскроу"); location.href = `/tasks/${r.task.id}`;
+      } catch (_) {}
+    };
+  }
+  if (ME?.permissions?.includes("content.hide")) $("#tasks-disputes-tab")?.removeAttribute("hidden");
+  $("#tasks-disputes-tab")?.addEventListener("click", async () => {
+    const d = await api("GET", "/api/mod/task-disputes");
+    $("#tasks-list").innerHTML = d.items.map((x) => `<div class="panel"><b>«${esc(x.task.title)}»</b> · ${x.task.reward} $₽ · исполнитель ${userLink(x.user)}
+      <div class="muted">Нужно прислать: ${esc(x.task.proof || "—")}</div><div class="md">${x.body_html}</div><div class="muted">Причина отказа: ${esc(x.reason || "—")}</div>
+      <button class="btn btn-accent btn-sm" data-dis="${x.id}" data-op="approve">Засчитать</button> <button class="btn btn-ghost btn-sm" data-dis="${x.id}" data-op="reject">Подтвердить отказ</button></div>`).join("") || `<p class="muted panel">Споров нет</p>`;
+    $$("[data-dis]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/mod/task-submissions/${b.dataset.dis}/${b.dataset.op}`, {}); b.closest(".panel").remove(); } catch (_) {} }));
+  });
+  try { await load(); upd?.(); } catch (_) {}
+}
+async function pageTask(root, id) {
+  const load = async () => {
+    let d;
+    try { d = await api("GET", `/api/tasks/${id}`, undefined, { quiet: true }); } catch (_) { root.innerHTML = `<div class="panel"><h1>Задание не найдено</h1><a href="/tasks">← Все задания</a></div>`; return; }
+    const t = d.task, mine = t.my_submission;
+    root.innerHTML = `<a href="/tasks" class="muted">← Все задания</a>
+      <article class="panel task-full"><div class="task-top"><b class="task-reward">+${t.reward} $₽</b><span>${TASK_ST[t.status]}</span></div>
+        <h1>${esc(t.title)}</h1><div class="muted">от ${userLink(t.author)} · мест ${t.slots_left}/${t.slots} · до ${esc(fmtDate(t.deadline))}</div>
+        <div class="md">${t.body_html}</div>${t.proof ? `<div class="task-proof">📎 Что прислать: ${esc(t.proof)}</div>` : ""}
+        ${d.is_author && t.status === "open" ? `<button class="btn btn-ghost btn-sm" id="task-close">⏹ Закрыть досрочно (вернуть остаток)</button>` : ""}
+        ${d.is_mod && t.status !== "removed" ? `<button class="btn btn-ghost btn-sm" id="task-remove">⛔ Снять (модератор)</button>` : ""}
+        ${t.refunded != null && d.is_author ? `<div class="muted">Возвращено тебе: ${t.refunded} $₽</div>` : ""}</article>
+      ${!ME ? `<p class="panel"><a href="/login?next=${encodeURIComponent(here())}">Войди</a>, чтобы выполнить задание.</p>`
+        : !d.is_author && !mine && t.status === "open" ? `<form class="panel" id="sub-form"><h2>Выполнить</h2><textarea class="input" name="body" rows="3" maxlength="1000" placeholder="Доказательство: ссылка, текст, описание…" required></textarea><button class="btn btn-accent">📤 Отправить на проверку</button>
+          <p class="muted">Автор проверит отклик. Если он не ответит за 72 часа, отклик засчитается сам. На отказ можно подать спор модератору.</p></form>` : ""}
+      ${mine ? `<div class="panel">Твой отклик: <b>${SUB_ST[mine.status]}</b>${mine.reason ? ` — ${esc(mine.reason)}` : ""} ${mine.status === "rejected" ? `<button class="btn btn-ghost btn-sm" data-sub="${mine.id}" data-op="dispute">⚖️ Оспорить</button>` : ""}</div>` : ""}
+      <section class="panel"><h2>${d.is_author ? "Отклики" : "Засчитанные"} (${d.submissions.length})</h2>
+        ${d.submissions.map((x) => `<div class="task-sub ${x.status}"><div>${userLink(x.user)} <span class="muted">${SUB_ST[x.status]} · ${esc(fmtDate(x.created_at))}</span></div><div class="md">${x.body_html}</div>
+          ${x.reason ? `<div class="muted">${esc(x.reason)}</div>` : ""}
+          ${d.is_author && x.status === "pending" ? `<button class="btn btn-accent btn-sm" data-sub="${x.id}" data-op="approve">✅ Засчитать (+${t.reward} $₽)</button> <button class="btn btn-ghost btn-sm" data-sub="${x.id}" data-op="reject">❌ Отклонить</button>` : ""}</div>`).join("") || `<p class="muted">Пока никого.</p>`}</section>`;
+    $("#sub-form")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try { await api("POST", `/api/tasks/${id}/submit`, { body: e.target.elements.body.value.trim() }); toast("📤 Отправлено на проверку"); load(); } catch (_) {}
+    });
+    $$("[data-sub]", root).forEach((b) => (b.onclick = async () => {
+      let reason = null;
+      if (b.dataset.op === "reject") { reason = prompt("Почему отклоняешь? Исполнитель сможет оспорить."); if (!reason) return; }
+      try { await api("POST", `/api/task-submissions/${b.dataset.sub}/${b.dataset.op}`, { reason }); load(); } catch (_) {}
+    }));
+    $("#task-close")?.addEventListener("click", async () => { if (confirm("Закрыть задание? Невыплаченный остаток вернётся (комиссия — нет).")) { try { await api("POST", `/api/tasks/${id}/close`, {}); load(); } catch (_) {} } });
+    $("#task-remove")?.addEventListener("click", async () => { const r = prompt("Причина снятия:", "нарушение правил"); if (r) { try { await api("POST", `/api/mod/tasks/${id}/remove`, { reason: r }); load(); } catch (_) {} } });
+  };
+  await load();
+}
+
 // ---------------------------------------------------------------- «Деревянные» ($₽)
 async function pageWallet() {
   let before = null;
@@ -1674,7 +1789,7 @@ function pageFaq() {
 
 // ---------------------------------------------------------------- boot
 const PAGES = {
-  feed: () => initFeed(), debates: () => initFeed(), kombucha: pageKombucha, market: pageMarket, wallet: pageWallet, room: pageRoom, question: pageQuestion, ask: pageAsk, rooms: pageRooms,
+  feed: () => initFeed(), debates: () => initFeed(), kombucha: pageKombucha, market: pageMarket, tasks: pageTasks, wallet: pageWallet, room: pageRoom, question: pageQuestion, ask: pageAsk, rooms: pageRooms,
   profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, notifications: pageNotifications, search: pageSearch, mod: pageMod, admin: pageAdmin,
   settings: pageSettings, faq: pageFaq,
 };

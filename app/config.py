@@ -36,6 +36,10 @@ class Config:
     SESSION_TTL_SECONDS = 30 * 24 * 3600
 
     # kremle-detect
+    # цитаты для гриба: внешние API (через запятую). Пусто — только встроенный корпус.
+    QUOTES_REMOTE = _bool("QUOTES_REMOTE", True)
+    QUOTES_DUBIOUS_URLS = os.environ.get("QUOTES_DUBIOUS_URLS", "https://api.kanye.rest/")
+    QUOTES_PHILO_URLS = os.environ.get("QUOTES_PHILO_URLS", "https://stoic-quotes.com/api/quote")
     KREMLE_AUTO_GUARD = _bool("KREMLE_AUTO_GUARD", True)  # детект спец. трафика на всех роутах
     KREMLE_CATEGORIES = ["math", "physics", "russian", "literature"]
     KREMLE_QUESTION_COUNT = int(os.environ.get("KREMLE_QUESTION_COUNT", "5"))

@@ -78,6 +78,16 @@ def market():
     return page("market.html", "market")
 
 
+@bp.get("/tasks")
+def tasks():
+    return page("tasks.html", "tasks", task_id=None)
+
+
+@bp.get("/tasks/<int:tid>")
+def task(tid: int):
+    return page("tasks.html", "tasks", task_id=tid)
+
+
 @bp.get("/wallet")
 def wallet():
     if not current_user_id():

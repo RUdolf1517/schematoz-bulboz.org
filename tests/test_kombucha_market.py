@@ -155,3 +155,19 @@ def test_first_kombucha_badge(make_user):
     c, u = make_user()
     _first(c)
     assert "kb_first" in _badges(c, u["username"])
+
+
+def test_gift_with_message_and_provenance(make_user):
+    c1, u1 = make_user()
+    c2, u2 = make_user()
+    k1 = _first(c1)["id"]
+    _freeze(c1, k1)
+    t = c1.post("/api/trades", json={"to_username": u2["username"], "give_id": k1, "message": "С днём варенья 🎂"}).get_json()["trade"]
+    inc = c2.get("/api/trades").get_json()["incoming"][0]
+    assert inc["gift"] and inc["message"] == "С днём варенья 🎂"
+    assert c2.post(f"/api/trades/{t['id']}/accept", json={}).status_code == 200
+    card = c1.get(f"/api/kombucha/{k1}/card").get_json()["kombucha"]
+    assert card["owner"] == u2["username"]
+    assert [o["username"] for o in card["owners"]] == [u1["username"], u2["username"]]
+    assert [o["how"] for o in card["owners"]] == ["grown", "gift"]
+    assert "kb_gift" in _badges(c1, u1["username"])

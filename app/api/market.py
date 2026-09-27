@@ -106,7 +106,7 @@ async def market_buy(kid: int):
         got = price - int(price * wood.MARKET_FEE)
         # sale не имеет суточного лимита, ref уникален на сделку
         await wood.earn(s, seller_id, "sale", f"{k.id}:{datetime.now(timezone.utc).timestamp()}", amount=got)
-        await kb.transfer(s, k, buyer.id)
+        await kb.transfer(s, k, buyer.id, "sale", price)
         await ach.award(s, seller_id, "kb_sale")
         await ach.award(s, buyer.id, "kb_buy")
         notify(s, seller_id, "sale", username=buyer.username, kombucha_name=k.name, amount=got)
@@ -119,7 +119,7 @@ def _trade_out(t: KombuchaTrade, users: dict, kombs: dict) -> dict:
     return {"id": t.id, "status": t.status, "created_at": t.created_at.isoformat(),
             "from": users.get(t.from_user_id), "to": users.get(t.to_user_id),
             "give": kombs.get(t.give_id), "want": kombs.get(t.want_id) if t.want_id else None,
-            "gift": t.want_id is None}
+            "gift": t.want_id is None, "message": t.message}
 
 
 @bp.get("/trades")
@@ -155,6 +155,7 @@ async def trade_create():
     data = json_body()
     uname = str(data.get("to_username") or "").strip().lstrip("@").lower()
     give_id, want_id = data.get("give_id"), data.get("want_id")
+    message = str(data.get("message") or "").strip()[:140] or None
     if not isinstance(give_id, int) or (want_id is not None and not isinstance(want_id, int)):
         raise ApiError("give_id и want_id — числа", 400, "validation_error")
     async with session_scope() as s:
@@ -171,7 +172,8 @@ async def trade_create():
             KombuchaTrade.from_user_id == g.user.id, KombuchaTrade.status == "pending"))
         if n >= MAX_PENDING_TRADES:
             raise ApiError(f"Не больше {MAX_PENDING_TRADES} активных предложений", 429, "too_many_trades")
-        t = KombuchaTrade(from_user_id=g.user.id, to_user_id=to.id, give_id=give_id, want_id=want_id)
+        t = KombuchaTrade(from_user_id=g.user.id, to_user_id=to.id, give_id=give_id, want_id=want_id,
+                          message=message)
         s.add(t)
         await s.flush()
         notify(s, to.id, "trade", trade_id=t.id, username=g.user.username, gift=want_id is None)
@@ -200,9 +202,11 @@ async def trade_decide(tid: int, op: str):
             select(Kombucha).where(Kombucha.id.in_(ids)).order_by(Kombucha.id).with_for_update())).all()}
         give = _tradable(locked.get(t.give_id), t.from_user_id, "Предлагаемый")
         want = _tradable(locked.get(t.want_id), t.to_user_id, "Запрошенный") if t.want_id else None
-        await kb.transfer(s, give, t.to_user_id)
+        await kb.transfer(s, give, t.to_user_id, "trade" if want else "gift")
         if want:
-            await kb.transfer(s, want, t.from_user_id)
+            await kb.transfer(s, want, t.from_user_id, "trade")
+        if not want:
+            await ach.award(s, t.from_user_id, "kb_gift")
         t.status = "accepted"
         await ach.award(s, t.from_user_id, "kb_trade")
         await ach.award(s, t.to_user_id, "kb_trade")
@@ -223,3 +227,24 @@ async def shelf(username: str):
         if "shelf" in ((u.profile or {}).get("hidden_sections") or []) and current_user_id() != u.id:
             rows = []
     return {"items": [kb.public_out(k, u.username) for k in rows]}
+
+
+@bp.get("/kombucha/<int:kid>/card")
+async def kombucha_card(kid: int):
+    """Публичная карточка гриба — как страница подарка в Telegram: мутации с номерами, тираж, история владельцев."""
+    from ..models import MutationCounter
+    async with session_scope() as s:
+        row = (await s.execute(select(Kombucha, User.username).join(User, User.id == Kombucha.user_id)
+                               .where(Kombucha.id == kid))).first()
+        if row is None:
+            raise ApiError("Гриб не найден", 404, "not_found")
+        k, owner = row
+        codes = [m.get("code") for m in (k.mutations or [])]
+        issued = dict((await s.execute(select(MutationCounter.code, MutationCounter.issued)
+                                       .where(MutationCounter.code.in_(codes or [""])))).all())
+    o = kb.public_out(k, owner)
+    for m in o["mutations"]:
+        m["issued"] = issued.get(m["code"], 0)
+    o["owners"] = [{"username": x.get("username"), "at": x.get("at"), "how": x.get("how"), "price": x.get("price")}
+                   for x in (k.owners or [])]
+    return {"kombucha": o}

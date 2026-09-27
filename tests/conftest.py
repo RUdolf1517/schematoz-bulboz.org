@@ -36,6 +36,7 @@ def app(database_url):
 
     application = create_app({
         "TESTING": True,
+        "QUOTES_REMOTE": False,
         "DATABASE_URL": database_url,
         "REDIS_CLIENT": fakeredis.FakeRedis(decode_responses=True),
         "KREMLE_AUTO_GUARD": False,

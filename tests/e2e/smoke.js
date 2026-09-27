@@ -93,7 +93,7 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   check("гриб: в шапке есть Холивары и Гриб", !!d.window.document.querySelector('.main-nav a[href="/debates"]') && !!d.window.document.querySelector('.main-nav a[href="/kombucha"].active'));
   d.window.document.querySelector('[data-act="tea"]').click(); await sleep(900);
   check("гриб: заварка долита, кнопка на кулдауне", d.window.document.querySelector('[data-act="tea"]')?.disabled === true);
-  check("гриб: банки, коллекция из 120 мутаций по стадиям, таймер 12 ч", !!d.window.document.querySelector(".kb-jar-tab.active") && d.window.document.querySelectorAll(".kb-cx").length === 120 && d.window.document.querySelectorAll(".kb-cx-stage").length === 6 && txt(d, ".kb-next").includes("12 часов"));
+  check("гриб: банки, коллекция из 240 мутаций по стадиям, таймер 12 ч", !!d.window.document.querySelector(".kb-jar-tab.active") && d.window.document.querySelectorAll(".kb-cx").length === 240 && d.window.document.querySelectorAll(".kb-cx-stage").length === 6 && txt(d, ".kb-next").includes("12 часов"));
   check("гриб: в шапке баланс $₽", !d.window.document.querySelector("#wood-chip").hidden && Number(txt(d, "#wood-balance")) > 0);
   d.window.document.querySelector("[data-freeze]").click(); await sleep(1200);
   check("гриб: заморожен, есть кнопки продать и обменять", !!d.window.document.querySelector(".kb-svg.frozen") && !!d.window.document.querySelector("[data-list]") && !!d.window.document.querySelector("[data-trade]"));

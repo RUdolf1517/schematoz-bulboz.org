@@ -74,6 +74,8 @@ async def wall_post(username: str):
         await s.refresh(p)
         if owner.id != g.user.id:
             await wood.earn(s, g.user.id, "wall_post", p.id)
+            from ..services.kombucha_achievements import award
+            await award(s, g.user.id, "wall_first")
             notify(s, owner.id, "wall", username=g.user.username, post_id=p.id, preview=body[:80])
         author = await s.get(User, g.user.id)
         return {"post": _out(p, author, g.user.id, owner.id)}, 201

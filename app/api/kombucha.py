@@ -58,7 +58,7 @@ async def kombucha_get():
         return await _state(s, user)
 
 
-@bp.post("/kombucha/<int:kid>/<any(sugar, tea, clean, pet, daily):action>")
+@bp.post("/kombucha/<int:kid>/<any(sugar, tea, clean, pet, talk, cure, daily):action>")
 @login_required
 async def kombucha_act(kid: int, action: str):
     async with session_scope() as s:

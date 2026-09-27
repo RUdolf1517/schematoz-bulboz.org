@@ -57,7 +57,7 @@ def test_create_and_actions(make_user, no_mutations):
     st = _state(c)
     k = st["items"][0]
     assert k["alive"] and k["stage"]["title"] == "Спора" and st["jars"] == {"jars": 1, "used": 1, "free": 0, "max": 5}
-    assert len(st["catalog"]) == 120
+    assert len(st["catalog"]) == 240
     r = c.post(f"/api/kombucha/{k['id']}/tea", json={})
     assert r.status_code == 200 and r.get_json()["kombucha"]["stats"]["tea"] == 85
     again = c.post(f"/api/kombucha/{k['id']}/tea", json={})
@@ -95,8 +95,8 @@ def test_decay_is_every_12_hours(app, make_user, no_mutations):
     assert 0 < k2["next_drop_in"] <= 3600
     _edit(app, k["id"], hours=1)
     k3 = _first(c)
-    assert k3["stats"]["sweet"] == k["stats"]["sweet"] - 30   # 12 ч — одна ступенька
-    assert k3["stats"]["tea"] == k["stats"]["tea"] - 25
+    assert k3["stats"]["sweet"] == k["stats"]["sweet"] - 35   # 12 ч — одна ступенька (хардкор)
+    assert k3["stats"]["tea"] == k["stats"]["tea"] - 30
     assert k3["next_drop_in"] > 11 * 3600
     # уход не сдвигает таймер ступенек
     c.post(f"/api/kombucha/{k['id']}/pet", json={})
@@ -140,22 +140,22 @@ def test_danger_timer(app, make_user, no_mutations):
     kid = _first(c)["id"]
     _edit(app, kid, hours=12, sweet=10.0)
     k = _first(c)
-    assert k["alive"] and k["stats"]["sweet"] == 0 and k["dies_in"] > 23 * 3600
+    assert k["alive"] and k["stats"]["sweet"] == 0 and 11 * 3600 < k["dies_in"] <= 12 * 3600   # закиснет через 12 ч
 
 
 def test_daily_bonus_counts_answers(qa, no_mutations):
     c = qa["answerer_c"]
     kid = _first(c)["id"]
     r = c.post(f"/api/kombucha/{kid}/daily", json={}).get_json()
-    assert r["kombucha"]["xp"] == 18   # 10 + 8 за один ответ
+    assert r["kombucha"]["xp"] == 10   # 5 + 5 за один ответ
     assert c.post(f"/api/kombucha/{kid}/daily", json={}).status_code == 429
 
 
 # ---------------------------------------------------------------- мутации
 def test_120_mutations_20_per_stage():
     from collections import Counter
-    assert len(kb.MUTATIONS) == 120 and len(kb.MUT_BY_CODE) == 120
-    assert Counter(m.stage for m in kb.MUTATIONS) == {i: 20 for i in range(1, 7)}
+    assert len(kb.MUTATIONS) == 240 and len(kb.MUT_BY_CODE) == 240
+    assert Counter(m.stage for m in kb.MUTATIONS) == {i: 40 for i in range(1, 7)}
     assert {m.rarity for m in kb.MUTATIONS} == set(kb.RARITY_ORDER)
     for old in ("sparkle", "night", "sweet_tooth", "bubbly", "phoenix"):   # старые коды живы
         assert old in kb.MUT_BY_CODE
@@ -224,7 +224,7 @@ def test_buy_jar_and_plant(app, make_user, no_mutations):
 def test_sprout_after_week_of_care_on_last_stage(app, make_user, no_mutations):
     c, u = make_user()
     kid = _first(c)["id"]
-    _edit(app, kid, xp=1000, care_days=6, mutations=[{"code": "golden", "at": "x"}])
+    _edit(app, kid, xp=4000, care_days=6, mutations=[{"code": "golden", "at": "x"}])
     r = c.post(f"/api/kombucha/{kid}/pet", json={}).get_json()
     assert r["sprout"] == {"planted": False}          # 7-й день ухода, но банки нет — отросток ждёт
     assert r["kombucha"]["sprout_pending"]
@@ -235,6 +235,95 @@ def test_sprout_after_week_of_care_on_last_stage(app, make_user, no_mutations):
     child = next(k for k in items if k["id"] != kid)
     assert child["is_sprout"] and child["mutations"][0]["code"] == "golden" and child["mutations"][0]["inherited"]
     assert not next(k for k in items if k["id"] == kid)["sprout_pending"]
+
+
+def test_sprout_every_week(app, make_user, no_mutations):
+    from datetime import timedelta as td
+    c, u = make_user()
+    kid = _first(c)["id"]
+    _give_wood(app, u["id"], 1000)
+    c.post("/api/shop/jar", json={})
+    c.post("/api/shop/jar", json={})
+    _edit(app, kid, xp=4000, care_days=6)
+    r = c.post(f"/api/kombucha/{kid}/pet", json={}).get_json()
+    assert r["sprout"]["planted"] and r["kombucha"]["sprout_progress"]["count"] == 1
+    assert r["kombucha"]["sprout_progress"]["next_in"] > 6 * 86400
+    # неделя ещё не прошла — даже с 7 днями ухода не делится
+    _edit(app, kid, care_days=6, last_care_day=None)
+    r = c.post(f"/api/kombucha/{kid}/sugar", json={}).get_json()
+    assert r["sprout"] is None
+
+    async def week_ago(s):
+        k = await s.get(Kombucha, kid)
+        k.last_sprout_at -= td(days=7)
+    _db(app, week_ago)
+    _edit(app, kid, care_days=6, last_care_day=None)
+    r = c.post(f"/api/kombucha/{kid}/tea", json={}).get_json()
+    assert r["sprout"]["planted"] and r["kombucha"]["sprout_progress"]["count"] == 2
+
+
+def test_mold_blocks_growth_and_cure(app, make_user, no_mutations):
+    c, u = make_user()
+    kid = _first(c)["id"]
+    assert c.post(f"/api/kombucha/{kid}/cure", json={}).get_json()["error"] == "not_moldy"
+    _edit(app, kid, mold=True)
+    k = _first(c)
+    assert k["mold"] and k["mood"] == "moldy"
+    xp0 = k["xp"]
+    r = c.post(f"/api/kombucha/{kid}/tea", json={}).get_json()
+    assert r["kombucha"]["xp"] == xp0                    # с плесенью не растёт
+    r = c.post(f"/api/kombucha/{kid}/cure", json={}).get_json()
+    assert not r["kombucha"]["mold"]
+    r = c.post(f"/api/kombucha/{kid}/clean", json={}).get_json()
+    assert r["kombucha"]["xp"] > xp0
+
+
+def test_mold_appears_in_dirty_jar(app, make_user, monkeypatch):
+    c, u = make_user()
+    kid = _first(c)["id"]
+    monkeypatch.setattr(kb.rng, "random", lambda: 0.0)
+    _edit(app, kid, hours=12, clean=20.0)
+    assert _first(c)["mold"]
+
+
+def test_talk_and_pet_quotes(make_user, no_mutations):
+    from app.services import quotes
+    c, _ = make_user()
+    kid = _first(c)["id"]
+    r = c.post(f"/api/kombucha/{kid}/talk", json={}).get_json()
+    q = r["quote"]
+    assert q["lines"] and q["book"] and not q["remote"]
+    assert any(q["book"] == b for b, _ in quotes.PHILO)
+    r = c.post(f"/api/kombucha/{kid}/pet", json={}).get_json()
+    assert r["quote"]["lines"][0]["who"] in {w for w, _, _ in quotes.DUBIOUS}
+    assert c.post(f"/api/kombucha/{kid}/talk", json={}).status_code == 429
+
+
+def test_quotes_remote_parser_and_fallback(app, monkeypatch):
+    from app.services import quotes
+    assert quotes._parse({"quote": "I am a god"}) == ("I am a god", "")
+    assert quotes._parse([{"q": "Less is more", "a": "Someone"}]) == ("Less is more", "Someone")
+    assert quotes._parse({"nope": 1}) is None
+
+    class R:
+        status_code = 200
+        def json(self):
+            return {"quote": "Remote wisdom"}
+    import httpx
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: R())
+    app.config["QUOTES_REMOTE"] = True
+    try:
+        with app.app_context():
+            q = quotes._remote("test", "https://example.invalid/q", "Канье Уэст")
+            assert q["remote"] and q["lines"][0] == {"who": "Канье Уэст", "text": "Remote wisdom"}
+            # сервис упал — кэш остаётся, а на 10 минут включается пауза
+            monkeypatch.setattr(httpx, "get", lambda *a, **k: (_ for _ in ()).throw(httpx.ConnectError("down")))
+            from app.extensions import get_redis
+            get_redis().delete("quotes:test2")
+            assert quotes._remote("test2", "https://example.invalid/q", "X") is None
+            assert get_redis().exists("quotes:test2:backoff")
+    finally:
+        app.config["QUOTES_REMOTE"] = False
 
 
 # ---------------------------------------------------------------- «Деревянные»

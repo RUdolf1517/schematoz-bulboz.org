@@ -1,4 +1,11 @@
-"""«Чайный гриб» — тамагочи в трёхлитровой банке.
+"""«Чайный гриб» — тамагочи в трёхлитровой банке. Режим «хардкор» (с 13-го захода):
+- показатели падают сильнее, закисает после 12 ч на нуле, опыта до стадий нужно в разы больше;
+- плесень: если банка грязная (чистота < 35), на каждой 12-часовой ступеньке может завестись плесень.
+  С плесенью гриб не растёт и не мутирует, а чистота и настроение падают быстрее. Лечится «уксусной ванной»;
+- если любой показатель ниже 30, опыт за уход режется вдвое;
+- отросток — раз в неделю на последней стадии (и после каждого деления снова нужно 7 дней ухода);
+- «Погладить» — гриб отвечает цитатой сомнительной личности, «Поговорить» — диалогом из философской книги.
+
 
 Правила (всё считает сервер, фронт только рисует):
 - 4 показателя 0..100: сахар, заварка, чистота, настроение. Падают ступенькой
@@ -25,7 +32,7 @@ from sqlalchemy.dialects.postgresql import insert
 from ..errors import ApiError
 from ..models import Answer, ContentStatus, DebateVote, Kombucha, KombuchaCodex, KombuchaTrade, MutationCounter, User
 from . import kombucha_achievements as kb_achievements
-from . import wood
+from . import quotes, wood
 from .kombucha_mutations import MUT_BY_CODE, MUTATIONS, RARITY, RARITY_ORDER, Ctx, Mutation
 
 MSK = timezone(timedelta(hours=3))
@@ -33,8 +40,13 @@ rng = random.Random()          # в тестах подменяется, что�
 
 STATS = ("sweet", "tea", "clean", "happy")
 PERIOD = timedelta(hours=12)
-DROP = {"sweet": 30.0, "tea": 25.0, "clean": 15.0, "happy": 25.0}  # за каждые 12 часов
-DEATH_AFTER = timedelta(hours=24)
+DROP = {"sweet": 35.0, "tea": 30.0, "clean": 20.0, "happy": 30.0}  # за каждые 12 часов
+DEATH_AFTER = timedelta(hours=12)
+MOLD_CLEAN_BELOW = 35.0      # ниже этой чистоты может завестись плесень
+MOLD_CHANCE = 0.4            # шанс на каждой ступеньке
+MOLD_EXTRA = {"clean": 10.0, "happy": 15.0}
+LOW_STAT = 30.0              # если хоть что-то ниже — опыт за уход /2
+STICKY_ABOVE = 85.0
 
 # действие: (показатель, прирост, кулдаун, опыт, фраза)
 ACTIONS = {
@@ -42,13 +54,16 @@ ACTIONS = {
     "tea": ("tea", 15, timedelta(hours=6), 5, "Свежая заварка, как у бабушки ☕"),
     "clean": ("clean", 25, timedelta(hours=12), 8, "Банка сияет ✨"),
     "pet": ("happy", 5, timedelta(hours=1), 1, "Гриб довольно булькает 🫧"),
+    "talk": ("happy", 3, timedelta(minutes=30), 2, "Гриб задумался 🤔"),
+    "cure": ("clean", 10, timedelta(hours=24), 0, "Уксусная ванна! Плесень побеждена 🧪"),
 }
 DAILY_COOLDOWN = timedelta(hours=20)
 SPROUT_CARE_DAYS = 7
+SPROUT_EVERY = timedelta(days=7)
 
 STAGES = [  # (с какого опыта, название, размер 1..6)
-    (0, "Спора", 1), (60, "Плёночка", 2), (180, "Блинчик", 3), (400, "Медуза", 4),
-    (700, "Гриб-гигант", 5), (1000, "Легенда трёхлитровой банки", 6),
+    (0, "Спора", 1), (150, "Плёночка", 2), (500, "Блинчик", 3), (1200, "Медуза", 4),
+    (2500, "Гриб-гигант", 5), (4000, "Легенда трёхлитровой банки", 6),
 ]
 
 NAMES = ["Гриша", "Бульбоз", "Кефирыч", "Чайнобой", "Медузий", "Шипучка", "Бражник", "Грибозавр",
@@ -62,7 +77,18 @@ TALK = {
     "dirty": ["Банка мутная, как объяснения у доски.", "Помой банку, пожалуйста. Мне неловко."],
     "sad": ["Со мной никто не разговаривает…", "Погладь, а?"],
     "sticky": ["Я слипся. Это был перебор с сахаром.", "Сахарная кома, не беспокоить."],
+    "moldy": ["Я весь в плесени 🦠 Уксусную ванну, срочно!", "Кажется, у меня завелись соседи. Зелёные и пушистые."],
 }
+
+
+def phrase(k: Kombucha) -> str:
+    """Реплика в пузыре: при хорошем настроении гриб любит цитировать сомнительных личностей
+    (только встроенный корпус — out() зовётся часто, внешние API дёргаем лишь по кнопкам)."""
+    m = mood(k)
+    if m == "happy" and rng.random() < 0.6:
+        who, src, text = rng.choice(quotes.DUBIOUS)
+        return f"Как говорил {who}: «{text}»"
+    return rng.choice(TALK[m]) if m in TALK else "…"
 
 
 # ---------------------------------------------------------------- мутации (каталог — kombucha_mutations.py)
@@ -148,8 +174,10 @@ def tick(k: Kombucha, at: datetime | None = None) -> None:
         step_at = k.updated_at + PERIOD * (i + 1)
         if k.zero_since and step_at - k.zero_since >= DEATH_AFTER:
             break
+        if not k.mold and k.clean < MOLD_CLEAN_BELOW and rng.random() < MOLD_CHANCE:
+            k.mold = True
         for s in STATS:
-            setattr(k, s, max(getattr(k, s) - DROP[s], 0.0))
+            setattr(k, s, max(getattr(k, s) - DROP[s] - (MOLD_EXTRA.get(s, 0.0) if k.mold else 0.0), 0.0))
         if k.zero_since is None and any(getattr(k, s) <= 0 for s in STATS):
             k.zero_since = step_at
     k.updated_at = k.updated_at + PERIOD * steps
@@ -161,6 +189,8 @@ def tick(k: Kombucha, at: datetime | None = None) -> None:
 def mood(k: Kombucha) -> str:
     if not k.alive:
         return "dead"
+    if k.mold:
+        return "moldy"
     if k.sweet > 95:
         return "sticky"
     low = min(STATS, key=lambda s: getattr(k, s))
@@ -206,7 +236,7 @@ def _new(user_id: int, name: str, parent: Kombucha | None = None) -> Kombucha:
     return Kombucha(user_id=user_id, name=name, xp=0, best_xp=0, generation=1, sweet=70.0, tea=70.0,
                     clean=90.0, happy=70.0, alive=True, cooldowns={}, mutations=[], care_days=0, pet_count=0,
                     sprouted=False, sprout_pending=False, parent_id=parent.id if parent else None,
-                    born_at=t, updated_at=t)
+                    born_at=t, updated_at=t, mold=False, owners=[])
 
 
 async def list_for(s, user_id: int, lock: bool = False) -> list[Kombucha]:
@@ -326,24 +356,44 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
         answers_24h = await answers_last_day(s, user.id)
         debate_24h = await debate_votes_last_day(s, user.id)
         n = min(answers_24h, 6)
-        gain = 10 + 8 * n
+        gain = 5 + 5 * n
+        if k.mold:
+            gain = 0
         k.xp += gain
         k.happy = min(k.happy + 10, 100.0)
         msg = (f"+{gain} опыта: ты дал {n} ответ(ов) за сутки, гриб гордится 🏆" if n
                else f"+{gain} опыта. Ответь на вопросы в ленте, завтра бонус будет больше 😉")
+        if k.mold:
+            msg = "С плесенью гриб не растёт 🦠 Сначала вылечи его уксусной ванной."
     elif action in ACTIONS:
         stat, add, cd, xp, msg = ACTIONS[action]
+        if action == "cure" and not k.mold:
+            raise ApiError("Гриб здоров, лечить нечего", 409, "not_moldy")
         left = _cd_left(k, action, cd, at)
         if left:
             raise ApiError("Рано, гриб ещё не соскучился", 429, "cooldown", retry_after=left)
-        if action == "sugar" and k.sweet > 90:
+        if action == "sugar" and k.sweet > STICKY_ABOVE:
             k.happy = max(k.happy - 10, 0.0)
             msg, xp = "Перебор! Гриб слипся 🥴 (−настроение)", 0
         setattr(k, stat, min(getattr(k, stat) + add, 100.0))
+        quote = None
         if action == "pet":
             k.pet_count += 1
-            m = mood(k)
-            msg = rng.choice(TALK.get(m, TALK["happy"]))
+            quote = quotes.dubious()
+            msg = rng.choice(TALK.get(mood(k), TALK["happy"])) + " А вообще, как говорил " + quotes.as_text(quote)
+        elif action == "talk":
+            quote = quotes.philosophy()
+            msg = quote["intro"] + " " + quotes.as_text(quote)
+            k.talk_count = (k.talk_count or 0) + 1
+            if k.talk_count >= 30:
+                await kb_achievements.award(s, user.id, "kb_philo")
+        elif action == "cure":
+            k.mold = False
+            await kb_achievements.award(s, user.id, "kb_mold")
+        if k.mold:
+            xp = 0
+        elif min(getattr(k, x) for x in STATS) < LOW_STAT:
+            xp //= 2
         k.xp += xp
     else:
         raise ApiError("Неизвестное действие", 400, "validation_error")
@@ -359,19 +409,25 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
         k.care_days += 1
     earned = await wood.earn(s, user.id, "kombucha_care", f"{k.id}:{action}:{at.isoformat()}")
 
-    res: dict = {"message": msg, "mutation": None, "sprout": None, "wood": earned}
+    res: dict = {"message": msg, "mutation": None, "sprout": None, "wood": earned,
+                 "quote": quote if action in ACTIONS else None}
     msk = at.astimezone(MSK)
-    m = roll_mutation(Ctx(action=action, k=k, hour=msk.hour, weekday=msk.weekday(), answers_24h=answers_24h,
+    m = None if k.mold else roll_mutation(Ctx(action=action, k=k, hour=msk.hour, weekday=msk.weekday(), answers_24h=answers_24h,
                           debate_24h=debate_24h, was_in_danger=rescued, streak_days=user.streak_days))
     if m:
         res["mutation"] = await add_mutation(s, k, m, at)
     if stage_for(k.xp)["size"] == 6:
         await kb_achievements.award(s, user.id, "kb_legend")
 
-    # отросток: легенда + неделя ухода
-    if not k.sprouted and stage_for(k.xp)["size"] == 6 and k.care_days >= SPROUT_CARE_DAYS:
+    # отросток: легенда делится раз в неделю, если 7 дней за ней ухаживали (счётчик обнуляется после деления)
+    if can_sprout(k, at):
         k.sprouted = True
-        await wood.earn(s, user.id, "sprout", k.id)
+        k.last_sprout_at = at
+        k.care_days = 0
+        k.sprout_count = (k.sprout_count or 0) + 1
+        await wood.earn(s, user.id, "sprout", f"{k.id}:{k.sprout_count}")
+        if k.sprout_count >= 4:
+            await kb_achievements.award(s, user.id, "kb_split4")
         await kb_achievements.award(s, user.id, "kb_split")
         if (await jars_info(s, user))["free"] > 0:
             child = await plant(s, user, parent=k)
@@ -380,6 +436,23 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
             k.sprout_pending = True
             res["sprout"] = {"planted": False}
     return res
+
+
+def can_sprout(k: Kombucha, at: datetime | None = None) -> bool:
+    at = at or now()
+    return (k.alive and not k.frozen and not k.mold and not k.sprout_pending
+            and stage_for(k.xp)["size"] == 6 and k.care_days >= SPROUT_CARE_DAYS
+            and (k.last_sprout_at is None or at - k.last_sprout_at >= SPROUT_EVERY))
+
+
+def sprout_progress(k: Kombucha, at: datetime | None = None) -> dict:
+    at = at or now()
+    wait = 0
+    if k.last_sprout_at:
+        wait = max(int((k.last_sprout_at + SPROUT_EVERY - at).total_seconds()), 0)
+    return {"care_days": min(k.care_days, SPROUT_CARE_DAYS), "need_days": SPROUT_CARE_DAYS,
+            "legend": stage_for(k.xp)["size"] == 6, "next_in": wait, "count": k.sprout_count or 0,
+            "healthy": not k.mold}
 
 
 async def restart(s, k: Kombucha, name: str | None = None) -> None:
@@ -393,6 +466,7 @@ async def restart(s, k: Kombucha, name: str | None = None) -> None:
     k.sweet, k.tea, k.clean, k.happy = 70.0, 70.0, 90.0, 70.0
     k.alive, k.zero_since, k.died_at, k.cooldowns = True, None, None, {}
     k.care_days, k.last_care_day, k.pet_count, k.sprouted, k.sprout_pending = 0, None, 0, False, False
+    k.mold, k.last_sprout_at, k.sprout_count = False, None, 0
     k.mutations = []  # в коллекции юзера мутации остаются навсегда
     k.born_at = k.updated_at = at
 
@@ -405,7 +479,7 @@ async def revive(s, user: User, k: Kombucha) -> None:
     await kb_achievements.award(s, user.id, "kb_revive")
     at = now()
     k.sweet = k.tea = k.clean = k.happy = 50.0
-    k.alive, k.zero_since, k.died_at = True, None, None
+    k.alive, k.zero_since, k.died_at, k.mold = True, None, None, False
     k.updated_at = at
 
 
@@ -423,13 +497,13 @@ def out(k: Kombucha) -> dict:
     return {
         "id": k.id, "name": k.name, "xp": k.xp, "best_xp": k.best_xp, "generation": k.generation, "alive": k.alive,
         "stats": {s: round(getattr(k, s)) for s in STATS}, "mood": m,
-        "phrase": rng.choice(TALK[m]) if m in TALK else "…",
+        "phrase": phrase(k),
         "stage": st, "cooldowns": cds, "dies_in": danger, "next_drop_in": next_drop_in(k, at) if k.alive else None,
         "age_days": (at - k.born_at).days, "born_at": k.born_at.isoformat(),
         "died_at": k.died_at.isoformat() if k.died_at else None,
         "mutations": muts, "care_days": k.care_days, "sprouted": k.sprouted, "sprout_pending": k.sprout_pending,
-        "sprout_progress": {"care_days": min(k.care_days, SPROUT_CARE_DAYS), "need_days": SPROUT_CARE_DAYS,
-                            "legend": st["size"] == 6},
+        "sprout_progress": sprout_progress(k, at), "mold": bool(k.mold),
+        "owners": [{"username": o.get("username"), "at": o.get("at"), "how": o.get("how")} for o in (k.owners or [])],
         "is_sprout": k.parent_id is not None,
         "frozen": k.frozen, "frozen_at": k.frozen_at.isoformat() if k.frozen_at else None,
         "price": k.price,
@@ -471,8 +545,17 @@ async def unfreeze(s, user: User, k: Kombucha) -> None:
     k.frozen, k.frozen_at = False, None
 
 
-async def transfer(s, k: Kombucha, to_user_id: int) -> None:
-    """Сменить владельца. Гриб остаётся замороженным (на полке нового владельца)."""
+async def transfer(s, k: Kombucha, to_user_id: int, how: str = "trade", price: int | None = None) -> None:
+    """Сменить владельца. Гриб остаётся замороженным (на полке нового владельца).
+    История владельцев копится в owners — как «провенанс» у подарков в Telegram."""
+    names = dict((await s.execute(select(User.id, User.username).where(User.id.in_([k.user_id, to_user_id])))).all())
+    hist = list(k.owners or [])
+    if not hist:
+        hist.append({"username": names.get(k.user_id), "at": k.born_at.isoformat(), "how": "grown"})
+    entry = {"username": names.get(to_user_id), "at": now().isoformat(), "how": how}
+    if price is not None:
+        entry["price"] = price
+    k.owners = [*hist, entry][-50:]
     k.user_id = to_user_id
     k.price = None
     k.listed_at = None

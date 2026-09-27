@@ -33,8 +33,11 @@ EARN = {
     "sprout": (50, None, "Гриб дал отросток"),
     "wall_post": (1, 10, "Запись на стене"),
     "sale": (0, None, "Продал гриб"),
+    "task_reward": (0, None, "Награда за задание"),
+    "task_refund": (0, None, "Возврат за задание"),
 }
-SPEND_TITLES = {"buy_jar": "Купил банку", "revive": "Реанимация гриба", "buy_kombucha": "Купил гриб на рынке"}
+SPEND_TITLES = {"buy_jar": "Купил банку", "revive": "Реанимация гриба", "buy_kombucha": "Купил гриб на рынке",
+                "task_create": "Создал задание (эскроу)"}
 MARKET_FEE = 0.05          # комиссия рынка сгорает — борьба с инфляцией
 MIN_PRICE, MAX_PRICE = 10, 1_000_000
 PRICES = {"jar": 300, "revive": 150}

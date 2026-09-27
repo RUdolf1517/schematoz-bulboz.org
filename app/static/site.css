@@ -671,3 +671,30 @@ main.main-wide { max-width: 1180px; }
 .wp-head { display: flex; gap: 8px; align-items: baseline; }
 .wp-del { margin-left: auto; }
 @media (max-width: 560px) { .trade { grid-template-columns: 1fr; } .kb-shelf { grid-template-columns: repeat(2, 1fr); } }
+
+/* ---------- хардкор-гриб, цитаты, карточка, задания ---------- */
+.kb-moldspot { fill: #7fbf3f; opacity: .85; filter: blur(.6px); }
+.kb-mold { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.kb-talk { width: 100%; margin-top: 8px; }
+.kb-quote { margin: 10px 0; padding: 10px 14px; border-left: 4px solid var(--accent, #ff5a1f); background: rgba(255,255,255,.04); border-radius: 10px; }
+.kb-quote.philo { border-left-color: #8a6bff; font-family: Georgia, serif; }
+.kb-quote p { margin: 4px 0; }
+.kb-quote cite { display: block; font-size: 12px; opacity: .7; margin-top: 4px; }
+.kb-card { cursor: pointer; }
+.kb-cardm-svg svg { width: 180px; height: 190px; display: block; margin: 0 auto; }
+.kb-cardm-t { width: 100%; border-collapse: collapse; font-size: 14px; }
+.kb-cardm-t td { padding: 4px 6px; border-bottom: 1px solid var(--line, rgba(255,255,255,.08)); }
+.kb-owners { padding-left: 20px; font-size: 14px; }
+.trade-msg { font-style: italic; max-width: 160px; text-align: center; }
+.tasks-list { display: grid; gap: 10px; }
+.task-card { display: block; color: inherit; text-decoration: none; }
+.task-card h3 { margin: 6px 0; }
+.task-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.task-reward { font-size: 18px; color: #3ecf5a; }
+.task-mine { margin-top: 6px; font-weight: 600; }
+.task-form label { display: block; margin-bottom: 10px; }
+.task-nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.task-proof { margin: 10px 0; padding: 8px 12px; background: rgba(255,255,255,.05); border-radius: 10px; }
+.task-sub { padding: 10px 0; border-top: 1px solid var(--line, rgba(255,255,255,.08)); }
+.task-sub.rejected { opacity: .6; }
+#sub-form textarea { width: 100%; margin-bottom: 8px; }
