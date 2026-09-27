@@ -88,3 +88,13 @@ def test_guest(app):
     assert cl.get("/kombucha").status_code == 200
     html = cl.get("/").get_data(as_text=True)
     assert 'href="/debates"' in html and 'href="/kombucha"' in html
+
+
+def test_feed_has_my_vote(qa):
+    qid = qa["q"]["id"]
+    c = qa["other_c"]
+    assert c.put(f"/api/questions/{qid}/vote", json={"value": 1}).status_code == 200
+    item = next(i for i in c.get("/api/feed?tab=new").get_json()["items"] if i["id"] == qid)
+    assert item["my_vote"] == 1
+    anon = next(i for i in qa["author_c"].get("/api/feed?tab=new").get_json()["items"] if i["id"] == qid)
+    assert anon["my_vote"] is None

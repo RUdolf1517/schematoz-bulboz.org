@@ -208,6 +208,16 @@ function shareDialog(imgUrl, pageUrl) {
 }
 
 // ---------------------------------------------------------------- feed (swipe)
+// голосование за вопрос/холивар прямо из ленты (своё — только смотреть)
+function cardVoteHtml(q) {
+  const own = ME && ME.user.id === q.author_id;
+  const t = own ? "Свой вопрос поднимать нельзя" : "";
+  return `<span class="card-vote" data-qid="${q.id}" data-my="${q.my_vote ?? 0}">
+    <button class="cv-btn ${q.my_vote === 1 ? "on-up" : ""}" data-cvote="1" aria-label="Поднять" title="${t || "Поднять"}"${own ? " disabled" : ""}>▲</button>
+    <b class="cv-score" title="Рейтинг: голоса + 2×ответы + 0.5×комментарии">${esc(q.rating)}</b>
+    <button class="cv-btn ${q.my_vote === -1 ? "on-down" : ""}" data-cvote="-1" aria-label="Опустить" title="${t || "Опустить"}"${own ? " disabled" : ""}>▼</button></span>`;
+}
+
 function feedCard(q) {
   const a = q.top_answer;
   const room = q.room ? `<a class="room-link" href="/r/${encodeURIComponent(q.room.slug)}">#${esc(q.room.title)}</a>` : "";
@@ -219,14 +229,14 @@ function feedCard(q) {
   }
   const cover = q.cover_url ? `<img class="card-cover" src="${esc(q.cover_url)}" alt="" loading="lazy">` : "";
   return `<article class="card ${q.cover_url ? "has-cover" : ""}" data-href="/q/${q.id}" tabindex="-1">
-    <div><span class="kind">${KIND[q.kind] || esc(q.kind)}</span>${room}<span class="q-rating" title="Рейтинг вопроса: голоса + ответы + комментарии">★ ${esc(q.rating)}</span></div>
+    <div><span class="kind">${KIND[q.kind] || esc(q.kind)}</span>${room}</div>
     <div class="card-main">
       ${cover}
       <h2>${esc(q.title)}</h2>
       ${q.body ? `<p class="card-desc">${esc(mdPlain(q.body))}</p>` : ""}
       ${preview}
     </div>
-    <div class="meta-row"><span>${answersWord(q.answers_count)}</span><span>@${esc(q.author?.username)}</span><span class="open-hint">Открыть →</span></div>
+    <div class="meta-row">${cardVoteHtml(q)}<span>${answersWord(q.answers_count)}</span><span>@${esc(q.author?.username)}</span><span class="open-hint">Открыть →</span></div>
   </article>`;
 }
 
@@ -252,8 +262,24 @@ function initFeed(extraParams = {}) {
   }
 
   // открыть вопрос по клику (но не по клику на ссылку внутри карточки)
-  feed.addEventListener("click", (e) => {
-    if (e.target.closest("a")) return;
+  feed.addEventListener("click", async (e) => {
+    const vb = e.target.closest("[data-cvote]");
+    if (vb) {
+      e.stopPropagation();
+      if (!requireLogin() || vb.disabled) return;
+      const box = vb.closest(".card-vote"), qid = box.dataset.qid, v = Number(vb.dataset.cvote), mine = Number(box.dataset.my);
+      $$(".cv-btn", box).forEach((b) => (b.disabled = true));
+      try {
+        const r = mine === v ? await api("DELETE", `/api/questions/${qid}/vote`) : await api("PUT", `/api/questions/${qid}/vote`, { value: v });
+        box.dataset.my = r.my_vote ?? 0;
+        $(".cv-score", box).textContent = r.rating;
+        $("[data-cvote='1']", box).classList.toggle("on-up", r.my_vote === 1);
+        $("[data-cvote='-1']", box).classList.toggle("on-down", r.my_vote === -1);
+        box.classList.remove("bump"); void box.offsetWidth; box.classList.add("bump");
+      } catch (_) {} finally { $$(".cv-btn", box).forEach((b) => (b.disabled = false)); }
+      return;
+    }
+    if (e.target.closest("a, button")) return;
     const card = e.target.closest(".card[data-href]");
     if (card) location.href = card.dataset.href;
   });

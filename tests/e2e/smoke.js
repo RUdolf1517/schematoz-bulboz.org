@@ -38,7 +38,7 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   check("лента: карточки есть", cards.length >= 5, cards.length + " шт.");
   check("хедер: кнопка «Войти»", txt(d, "#login-btn") === "Войти");
   check("карточка ведёт на вопрос", cards[0]?.dataset.href?.startsWith("/q/"), cards[0]?.dataset.href);
-  check("лента: у карточек рейтинг", txt(d, ".card .q-rating").startsWith("★"));
+  check("лента: у карточек рейтинг и кнопки голоса", !!d.window.document.querySelector(".card .card-vote .cv-score"));
   check("лента: обложка у вопроса", !!d.window.document.querySelector(".card-cover"));
   check("футер: ссылка на холивары после ленты", d.window.document.querySelector(".site-footer .footer-debates")?.getAttribute("href") === "/debates");
   check("футер", txt(d, ".credit").includes("разработано RUdolf1517 на основе технологий rudolfzinovev.xyz"));
@@ -76,6 +76,15 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   check("FAQ: есть вопросы", d.window.document.querySelectorAll(".faq-item").length > 2);
   fq.value = "zzzнетничего"; fq.dispatchEvent(new d.window.Event("input"));
   check("FAQ: поиск прячет всё и показывает заглушку", !d.window.document.querySelector("#faq-empty").hidden);
+
+  // 3d. Голосование прямо из ленты
+  d = await open("/", 1500);
+  const cv = [...d.window.document.querySelectorAll(".card .card-vote")].find((b) => !b.querySelector("[data-cvote='1']").disabled && b.dataset.my === "0" && b.dataset.qid !== "4");
+  const cvBefore = Number(cv.querySelector(".cv-score").textContent);
+  cv.querySelector("[data-cvote='1']").click(); await sleep(900);
+  check("лента: ▲ поднимает рейтинг без перехода в вопрос", d.window.location.pathname === "/" && cv.querySelector("[data-cvote='1']").classList.contains("on-up") && Number(cv.querySelector(".cv-score").textContent) > cvBefore);
+  d = await open("/", 1500);
+  check("лента: мой голос виден после перезагрузки", !!d.window.document.querySelector(`.card-vote[data-qid="${cv.dataset.qid}"] .on-up`));
 
   // 3c. Чайный гриб
   d = await open("/kombucha", 1500);

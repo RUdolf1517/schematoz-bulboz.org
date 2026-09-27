@@ -6,7 +6,7 @@ from sqlalchemy import select
 from ..auth.sessions import current_user_id
 from ..db import session_scope
 from ..errors import ApiError
-from ..models import Answer, ContentStatus, Follow, Question, QuestionKind, Room, RoomMember, User
+from ..models import Answer, ContentStatus, Follow, Question, QuestionKind, QuestionVote, Room, RoomMember, User
 from ..services.rating import answer_order
 from . import bp
 from .utils import answer_out, question_out
@@ -61,6 +61,11 @@ async def feed():
 
         room_ids = {q.room_id for q, _ in rows if q.room_id}
         rooms = {r.id: r for r in (await s.scalars(select(Room).where(Room.id.in_(room_ids))))} if room_ids else {}
+        # голоса текущего юзера за вопросы на странице — чтобы голосовать прямо из ленты
+        my_votes = {}
+        if uid and rows:
+            my_votes = dict((await s.execute(select(QuestionVote.question_id, QuestionVote.value).where(
+                QuestionVote.voter_id == uid, QuestionVote.question_id.in_([q.id for q, _ in rows])))).all())
         cards = []
         for q, author in rows:
             top = (await s.execute(
@@ -69,6 +74,6 @@ async def feed():
                 .order_by(*best_answer_order(q.best_answer_id)).limit(1)
             )).first()
             top_out = answer_out(top[0], top[1], is_best=top[0].id == q.best_answer_id) if top else None
-            cards.append(question_out(q, author, top_out, rooms.get(q.room_id)))
+            cards.append(question_out(q, author, top_out, rooms.get(q.room_id), my_vote=my_votes.get(q.id)))
     next_offset = offset + PAGE if len(rows) == PAGE else None
     return {"items": cards, "next_offset": next_offset}

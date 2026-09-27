@@ -221,7 +221,6 @@ table.list td, table.list th { padding: 8px 6px; border-bottom: 1px solid var(--
 .credit a { color: var(--fg); }
 
 @media (max-width: 560px) {
-  .main-nav { display: none; }
   .top { gap: 10px; }
   .logo { font-size: 16px; }
   main { padding: 12px; }
@@ -542,4 +541,25 @@ main.main-wide { max-width: 1180px; }
   .kb-scene { max-width: 240px; margin: 0 auto; width: 100%; }
   .kb-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kb-stat { grid-template-columns: 100px minmax(0, 1fr) 30px; }
+}
+
+/* голосование в карточке ленты */
+.card-vote { display: inline-flex; align-items: center; gap: 2px; background: #ffffff0f; border-radius: 999px; padding: 2px; }
+.cv-btn { width: 34px; height: 34px; border: 0; border-radius: 50%; background: none; color: var(--muted); font-size: 15px; cursor: pointer; }
+.cv-btn:hover:not(:disabled) { background: #ffffff14; color: var(--fg); }
+.cv-btn:disabled { opacity: .35; cursor: default; }
+.cv-btn.on-up { color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+.cv-btn.on-down { color: #fff; background: var(--blue); }
+.cv-score { min-width: 34px; text-align: center; color: var(--fg); font-variant-numeric: tabular-nums; }
+.card-vote.bump .cv-score { animation: kb-pop .3s ease; }
+.card .meta-row { flex-wrap: wrap; row-gap: 8px; }
+
+/* меню в шапке на узких экранах: вторая строка с горизонтальной прокруткой */
+@media (max-width: 760px) {
+  .top { flex-wrap: wrap; height: auto; min-height: var(--header-h); padding-top: 8px; row-gap: 6px; }
+  .top-actions { order: 2; }
+  .main-nav { order: 3; flex-basis: 100%; overflow-x: auto; scrollbar-width: none; padding-bottom: 8px; margin: 0 -16px; padding-inline: 16px; }
+  .main-nav::-webkit-scrollbar { display: none; }
+  .main-nav a { flex: none; font-size: 14px; background: #ffffff0a; }
+  .feed { height: calc(100dvh - var(--header-h) - 150px); }
 }
