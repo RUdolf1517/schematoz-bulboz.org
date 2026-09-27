@@ -92,6 +92,10 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   check("гриб: в шапке есть Холивары и Гриб", !!d.window.document.querySelector('.main-nav a[href="/debates"]') && !!d.window.document.querySelector('.main-nav a[href="/kombucha"].active'));
   d.window.document.querySelector('[data-act="tea"]').click(); await sleep(900);
   check("гриб: заварка долита, кнопка на кулдауне", d.window.document.querySelector('[data-act="tea"]')?.disabled === true && txt(d, ".kb-stats").includes("100"));
+  check("гриб: банки, коллекция из 20 мутаций, таймер 12 ч", !!d.window.document.querySelector(".kb-jar-tab.active") && d.window.document.querySelectorAll(".kb-cx").length === 20 && txt(d, ".kb-next").includes("12 часов"));
+  check("гриб: в шапке баланс $₽", !d.window.document.querySelector("#wood-chip").hidden && Number(txt(d, "#wood-balance")) > 0);
+  d = await open("/wallet", 1500);
+  check("кошелёк: баланс и история", txt(d, "#w-balance").endsWith("$₽") && d.window.document.querySelectorAll(".wallet-row").length > 0);
 
   // 4. Даша — автор вопроса 1: видит кнопки +5/−1
   d = await open("/q/1");

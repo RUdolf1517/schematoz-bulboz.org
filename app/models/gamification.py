@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, func, text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -32,12 +32,15 @@ class Notification(Base):
 
 
 class Kombucha(Base):
-    """Мини-игра «Чайный гриб»: один живой гриб на юзера.
-    Показатели хранятся «на момент updated_at», убывание со временем досчитывается
-    при чтении (app/services/kombucha.py) — никаких кронов."""
+    """Мини-игра «Чайный гриб». У юзера может быть несколько грибов — по одному на банку.
+    Показатели хранятся «на момент updated_at», убывание (шагами раз в 12 ч) досчитывается
+    при чтении (app/services/kombucha.py) — никаких кронов. Имя уникально на весь сайт."""
     __tablename__ = "kombuchas"
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    name: Mapped[str] = mapped_column(String(32), default="Гриша")
+    __table_args__ = (Index("uq_kombuchas_name_lower", text("lower(name)"), unique=True),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("kombuchas.id", ondelete="SET NULL"))
+    name: Mapped[str] = mapped_column(String(32))
     xp: Mapped[int] = mapped_column(default=0, server_default="0")
     best_xp: Mapped[int] = mapped_column(default=0, server_default="0")
     generation: Mapped[int] = mapped_column(default=1, server_default="1")
@@ -48,6 +51,37 @@ class Kombucha(Base):
     alive: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     zero_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cooldowns: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
+    # мутации этого гриба: [{"code": ..., "at": iso}]
+    mutations: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+    care_days: Mapped[int] = mapped_column(default=0, server_default="0")     # дней, когда за грибом ухаживали
+    last_care_day: Mapped[date | None]
+    pet_count: Mapped[int] = mapped_column(default=0, server_default="0")
+    sprouted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    sprout_pending: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     born_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     died_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class KombuchaCodex(Base):
+    """Коллекция открытых мутаций юзера — сохраняется навсегда, даже если гриб закис."""
+    __tablename__ = "kombucha_codex"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    kombucha_name: Mapped[str | None] = mapped_column(String(32))
+    found_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WoodTx(Base):
+    """Журнал «Деревянных» ($₽). ref — идемпотентность: одно и то же событие
+    (ответ №5, вход 2026-09-27…) не начислится дважды."""
+    __tablename__ = "wood_tx"
+    __table_args__ = (Index("uq_wood_tx_ref", "user_id", "reason", "ref", unique=True),
+                      Index("ix_wood_tx_user", "user_id", text("id DESC")))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    delta: Mapped[int]
+    reason: Mapped[str] = mapped_column(String(32))
+    ref: Mapped[str] = mapped_column(String(64))
+    balance_after: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

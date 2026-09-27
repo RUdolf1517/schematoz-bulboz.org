@@ -73,6 +73,13 @@ def kombucha():
     return page("kombucha.html", "kombucha")
 
 
+@bp.get("/wallet")
+def wallet():
+    if not current_user_id():
+        return redirect(url_for("web.login", next="/wallet"))
+    return page("wallet.html", "wallet")
+
+
 @bp.get("/settings")
 def settings():
     if not current_user_id():

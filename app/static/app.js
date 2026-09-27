@@ -68,6 +68,16 @@ async function api(method, url, body, { quiet = false } = {}) {
 
 // ---------------------------------------------------------------- header / session
 let ME = null;
+// «Деревянные» ($₽) в шапке
+function setWood(n) {
+  const chip = $("#wood-chip");
+  if (!chip || n == null) return;
+  chip.hidden = false;
+  const el = $("#wood-balance");
+  if (el.textContent !== String(n) && el.textContent !== "0") { chip.classList.remove("bump"); void chip.offsetWidth; chip.classList.add("bump"); }
+  el.textContent = n;
+}
+
 async function loadMe() {
   if (document.body.dataset.loggedIn !== "1") return null;
   try {
@@ -81,6 +91,8 @@ async function loadMe() {
   $("#me-mod").hidden = !ME.permissions.includes("report.review");
   $("#me-admin").hidden = !ME.permissions.includes("analytics.read");
   setBell(ME.unread_notifications || 0);
+  setWood(ME.wood);
+  if (ME.wood_daily > 0) setTimeout(() => toast(`+${ME.wood_daily} $₽ за заход сегодня 🪵`), 600);
   if (ME.ban && document.body.dataset.page !== "banned") {
     const b = $("#ban-banner");
     b.innerHTML = `Аккаунт заблокирован${ME.ban.ends_at ? " до " + esc(fmtDate(ME.ban.ends_at)) : " навсегда"}. <a href="/banned">Подробнее и апелляция →</a>`;
@@ -1220,12 +1232,20 @@ async function pageSearch() {
 }
 
 // ---------------------------------------------------------------- мини-игра «Чайный гриб»
-function kombuchaSVG(k) {
+const KB_DISC = [ // [мутация, заливка, обводка] — первая подходящая по приоритету
+  ["crystal", "#aef4ff", "#4fc3dc"], ["golden", "#ffd54a", "#b8860b"], ["spotted", "#e0442f", "#9c2414"],
+  ["night", "#51639e", "#2c3866"], ["sweet_tooth", "#ffc2e0", "#e58db1"],
+];
+
+function kombuchaSVG(k, { small = false } = {}) {
   const st = k.stats, size = k.stage.size;
-  const level = k.alive ? 40 + st.tea * 0.9 : 60;                   // высота жидкости (из 170)
+  const muts = new Set((k.mutations || []).map((m) => m.code));
+  const has = (c) => muts.has(c);
+  const level = k.alive ? 40 + st.tea * 0.9 : 60;
   const top = 200 - level;
-  const tint = k.alive ? `hsl(${28 + (100 - st.tea) * 0.15}, ${45 + st.tea * 0.4}%, ${62 - st.tea * 0.22}%)` : "#6b6b4a";
-  const w = 34 + size * 11, h = 8 + size * 2.2;                    // диск гриба
+  let tint = k.alive ? `hsl(${28 + (100 - st.tea) * 0.15}, ${45 + st.tea * 0.4}%, ${62 - st.tea * 0.22}%)` : "#6b6b4a";
+  if (has("cosmic") && k.alive) tint = "#2a1a4a";
+  const w = 34 + size * 11, h = 8 + size * 2.2;
   const cx = 110, cy = top + 4;
   const dirt = k.alive ? (100 - st.clean) / 100 : 0.8;
   const faces = {
@@ -1238,30 +1258,58 @@ function kombuchaSVG(k) {
     dead: ["M-13,-4 L-7,0 M-13,0 L-7,-4", "M7,-4 L13,0 M7,0 L13,-4", "M-7,8 L7,8"],
   };
   const f = faces[k.mood] || faces.happy;
-  const bubbles = k.alive ? Array.from({ length: 6 }, (_, i) =>
-    `<circle class="kb-bubble" cx="${60 + i * 19}" cy="196" r="${2 + (i % 3)}" style="animation-delay:${i * 0.7}s"/>`).join("") : "";
+  const disc = KB_DISC.find(([c]) => has(c));
+  const nb = has("bubbly") ? 12 : 6;
+  const bubbles = k.alive ? Array.from({ length: nb }, (_, i) =>
+    `<circle class="kb-bubble" cx="${50 + ((i * 23) % 120)}" cy="196" r="${2 + (i % 3)}" style="animation-delay:${(i * 0.53).toFixed(2)}s"/>`).join("") : "";
+  const stars = has("cosmic") ? Array.from({ length: 14 }, (_, i) =>
+    `<circle cx="${45 + ((i * 41) % 130)}" cy="${top + 12 + ((i * 29) % Math.max(level - 16, 10))}" r="${i % 3 ? 0.9 : 1.6}" fill="#fff" class="kb-star" style="animation-delay:${i * 0.3}s"/>`).join("") : "";
   const spots = Array.from({ length: 7 }, (_, i) =>
     `<ellipse cx="${55 + ((i * 37) % 110)}" cy="${70 + ((i * 53) % 120)}" rx="${6 + (i % 3) * 3}" ry="${4 + (i % 2) * 3}" fill="#4a3b1c"/>`).join("");
-  return `<svg class="kb-svg mood-${k.mood}" viewBox="0 0 220 230" role="img" aria-label="Чайный гриб ${esc(k.name)}: ${esc(k.stage.title)}">
-    <defs><clipPath id="kb-jar"><path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z"/></clipPath></defs>
+  const dots = has("spotted") ? [[-0.5, -0.2], [0.1, -0.35], [0.55, -0.1], [-0.15, 0.2], [0.35, 0.25]].map(([x, y]) =>
+    `<ellipse cx="${(x * w).toFixed(1)}" cy="${(y * h).toFixed(1)}" rx="${(w * 0.08).toFixed(1)}" ry="${(h * 0.22).toFixed(1)}" fill="#fff"/>`).join("") : "";
+  const stripes = has("striped") ? Array.from({ length: 6 }, (_, i) =>
+    `<line x1="${-w + (i + 1) * (w / 3.5)}" y1="${-h}" x2="${-w + (i + 1) * (w / 3.5) - 8}" y2="${h}" stroke="#6b4a1e" stroke-width="3" opacity=".45"/>`).join("") : "";
+  const crystal = has("crystal") ? `<path d="M${-w * 0.5},0 L${-w * 0.2},${-h * 0.6} L${w * 0.2},${-h * 0.2} L${w * 0.5},${-h * 0.5} M${-w * 0.2},${-h * 0.6} L0,${h * 0.5}" stroke="#fff" stroke-width="1.5" fill="none" opacity=".8"/>` : "";
+  // аксессуары-эмодзи над грибом / вокруг банки
+  const faceY = -(h + 12);
+  const acc = [];
+  if (has("crown")) acc.push(`<text x="0" y="${faceY - 16}" class="kb-acc" font-size="22">👑</text>`);
+  else if (has("scholar")) acc.push(`<text x="0" y="${faceY - 14}" class="kb-acc" font-size="20">🎓</text>`);
+  if (has("survivor")) acc.push(`<text x="${w * 0.55}" y="${4}" class="kb-acc" font-size="14">🩹</text>`);
+  if (has("phoenix")) acc.push(`<text x="${-w * 0.7}" y="${faceY + 4}" class="kb-acc kb-flick" font-size="16">🔥</text>`);
+  if (has("chatty")) acc.push(`<text x="${w * 0.6}" y="${faceY}" class="kb-acc" font-size="14">💬</text>`);
+  const outside = [];
+  if (has("holivar")) outside.push(`<text x="196" y="120" class="kb-acc" font-size="20">⚔️</text>`);
+  if (has("sparkle")) outside.push(...[[28, 60], [192, 80], [24, 170], [196, 190]].map(([x, y], i) => `<text x="${x}" y="${y}" class="kb-acc kb-twinkle" font-size="14" style="animation-delay:${i * 0.4}s">✨</text>`));
+  if (has("early")) outside.unshift(`<circle cx="110" cy="120" r="108" fill="url(#kb-halo)"/>`);
+  const cls = ["kb-svg", `mood-${k.mood}`, ...[...muts].map((c) => `mut-${c}`), small ? "small" : ""].join(" ");
+  return `<svg class="${cls}" viewBox="0 0 220 230" role="img" aria-label="Чайный гриб ${esc(k.name)}: ${esc(k.stage.title)}">
+    <defs><clipPath id="kb-jar-${k.id || 0}"><path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z"/></clipPath>
+      <radialGradient id="kb-halo"><stop offset="0%" stop-color="#ffb347" stop-opacity=".45"/><stop offset="100%" stop-color="#ffb347" stop-opacity="0"/></radialGradient></defs>
+    ${outside.join("")}
     <rect x="60" y="6" width="100" height="22" rx="6" class="kb-lid"/>
-    <g clip-path="url(#kb-jar)">
+    <g clip-path="url(#kb-jar-${k.id || 0})">
       <rect x="30" y="${top}" width="160" height="${230 - top}" fill="${tint}" class="kb-liquid"/>
       <path d="M30,${top} Q70,${top - 4} 110,${top} T190,${top}" stroke="#ffffff55" stroke-width="2" fill="none"/>
-      ${bubbles}
+      ${stars}${bubbles}
       <g class="${k.alive ? "kb-float" : ""}"><g class="kb-mush" transform="translate(${cx},${cy})">
-        <ellipse rx="${w}" ry="${h}" class="kb-disc"/>
-        <ellipse rx="${w * 0.8}" ry="${h * 0.5}" cy="-${h * 0.3}" class="kb-disc-hi"/>
+        <g class="kb-disc-wrap">
+          <ellipse rx="${w}" ry="${h}" class="kb-disc" ${disc ? `style="fill:${disc[1]};stroke:${disc[2]}"` : ""}/>
+          <ellipse rx="${w * 0.8}" ry="${h * 0.5}" cy="-${h * 0.3}" class="kb-disc-hi"/>
+          ${stripes}${dots}${crystal}
+        </g>
         ${size >= 4 ? `<path d="M-${w * 0.7},${h * 0.6} q6,14 12,0 q6,14 12,0 M${w * 0.3},${h * 0.6} q6,14 12,0" class="kb-tendrils"/>` : ""}
-        <g class="kb-face" transform="translate(0,-${h + 12})">
+        <g class="kb-face" transform="translate(0,${faceY})">
           ${f.map((d) => `<path d="${d}"/>`).join("")}
           ${k.mood === "happy" || k.mood === "sticky" ? `<circle cx="-16" cy="4" r="3" class="kb-blush"/><circle cx="16" cy="4" r="3" class="kb-blush"/>` : ""}
         </g>
+        ${acc.join("")}
       </g></g>
       <g opacity="${dirt.toFixed(2)}">${spots}</g>
     </g>
     <path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z" class="kb-jar"/>
-    <path d="M52,50 L50,190" class="kb-glare"/>
+    <path d="M52,50 L50,190" class="kb-glare"/>${has("clean_freak") ? `<path d="M64,60 L63,110" class="kb-glare"/>` : ""}
     <text x="110" y="228" text-anchor="middle" class="kb-label">3 л</text>
   </svg>`;
 }
@@ -1277,69 +1325,164 @@ async function pageKombucha() {
   const loadTop = async () => {
     try {
       const t = await api("GET", "/api/kombucha/top", undefined, { quiet: true });
-      $("#kb-top").innerHTML = t.items.length ? t.items.map((x) => `<li><a href="/u/${encodeURIComponent(x.username)}">@${esc(x.username)}</a> — «${esc(x.name)}», ${esc(x.stage)} · <b>${x.xp}</b> XP${x.generation > 1 ? ` <span class="muted">(поколение ${x.generation})</span>` : ""}</li>`).join("") : `<li class="muted">Пока ни одного гриба. Будь первым!</li>`;
+      $("#kb-top").innerHTML = t.items.length ? t.items.map((x) => `<li><a href="/u/${encodeURIComponent(x.username)}">@${esc(x.username)}</a> — «${esc(x.name)}», ${esc(x.stage)} · <b>${x.xp}</b> XP${x.mutations ? ` · 🧬 ${x.mutations}` : ""}${x.generation > 1 ? ` <span class="muted">(поколение ${x.generation})</span>` : ""}</li>`).join("") : `<li class="muted">Пока ни одного гриба. Будь первым!</li>`;
     } catch (_) {}
   };
   loadTop();
   if (!ME) {
-    root.innerHTML = `<div class="panel kb-guest">${kombuchaSVG({ name: "Гриша", mood: "happy", alive: true, stats: { tea: 70, clean: 100, sweet: 70, happy: 80 }, stage: { size: 3, title: "Блинчик" } })}
+    root.innerHTML = `<div class="panel kb-guest">${kombuchaSVG({ name: "Гриша", mood: "happy", alive: true, stats: { tea: 70, clean: 100, sweet: 70, happy: 80 }, stage: { size: 3, title: "Блинчик" }, mutations: [{ code: "sparkle" }] })}
       <p>Чтобы завести свой гриб, войди в аккаунт.</p><a class="btn btn-accent" href="/login?next=/kombucha">Войти</a></div>`;
+    $("#kb-codex").innerHTML = "";
     return;
   }
-  let k, timer;
+  let S, sel = Number(localStorage.getItem("kb-sel")) || null, timer;
   const BTN = [["sugar", "🍬", "Сахар"], ["tea", "☕", "Заварка"], ["clean", "🧽", "Помыть банку"], ["pet", "💬", "Поболтать"]];
   const STAT = [["sweet", "🍬 Сахар"], ["tea", "☕ Заварка"], ["clean", "🧽 Чистота"], ["happy", "😊 Настроение"]];
   const say = (text) => { const b = $("#kb-say"); if (b) { b.textContent = text; b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop"); } };
-  const render = () => {
+  const cur = () => S.items.find((x) => x.id === sel) || S.items[0];
+  const ask = (text, def = "") => { const v = prompt(text, def); return v == null ? null : v.trim(); };
+  const call = async (method, url, body) => {
+    try { return await api(method, url, body ?? {}, { quiet: true }); }
+    catch (err) { toast(err.data?.message || "Не получилось", true); return null; }
+  };
+
+  const renderJars = () => {
+    const tabs = S.items.map((k) => `<button class="kb-jar-tab ${k.id === cur()?.id ? "active" : ""} ${k.alive ? "" : "dead"}" data-sel="${k.id}">
+      <span class="kb-jar-mini">${kombuchaSVG(k, { small: true })}</span><span class="kb-jar-name">${esc(k.name)}</span>
+      <small>${k.alive ? esc(k.stage.title) : "закис 🪦"}${k.dies_in != null ? " · ⚠️" : ""}</small></button>`);
+    for (let i = 0; i < S.jars.free; i++) tabs.push(`<button class="kb-jar-tab empty" data-plant><span class="kb-jar-plus">＋</span><span class="kb-jar-name">Пустая банка</span><small>посадить гриб</small></button>`);
+    if (S.jars.jars < S.jars.max) tabs.push(`<button class="kb-jar-tab shop" data-buy><span class="kb-jar-plus">🫙</span><span class="kb-jar-name">Купить банку</span><small>${S.prices.jar} $₽</small></button>`);
+    return `<div class="kb-jars">${tabs.join("")}</div>`;
+  };
+
+  const renderMain = (k) => {
+    if (!k) return `<div class="panel kb-empty"><p>Банка пустая. Посади новый гриб!</p><button class="btn btn-accent" data-plant>🌱 Посадить гриб</button></div>`;
     const st = k.stage;
     const pct = st.next_xp ? Math.round(((k.xp - st.from_xp) / (st.next_xp - st.from_xp)) * 100) : 100;
-    root.innerHTML = `<div class="panel kb-main ${k.alive ? "" : "is-dead"}">
+    const sp = k.sprout_progress;
+    const sprout = k.sprout_pending ? `<div class="kb-note">🌱 Отросток готов и ждёт свободную банку. <button class="link-btn" data-buy>Купить банку за ${S.prices.jar} $₽</button></div>`
+      : k.sprouted ? `<div class="kb-note muted">🌱 Этот гриб уже дал отросток.</div>`
+      : `<div class="kb-sprout" title="На последней стадии, после 7 дней ухода, гриб даст отросток — новый гриб"><span>🌱 Отросток:</span>
+          <span class="${sp.legend ? "ok" : ""}">${sp.legend ? "✅" : "⏳"} стадия «Легенда»</span>
+          <span class="${sp.care_days >= sp.need_days ? "ok" : ""}">${sp.care_days >= sp.need_days ? "✅" : "⏳"} дней ухода ${sp.care_days}/${sp.need_days}</span></div>`;
+    return `<div class="panel kb-main ${k.alive ? "" : "is-dead"}">
       <div class="kb-scene">
         <div class="kb-say" id="kb-say">${esc(k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
         ${kombuchaSVG(k)}
       </div>
       <div class="kb-info">
-        <div class="kb-name"><h2 id="kb-name">${esc(k.name)}</h2><button class="link-btn" id="kb-rename" title="Переименовать">✏️</button></div>
-        <div class="kb-stage">${esc(st.title)} · ${k.age_days} дн.${k.generation > 1 ? ` · поколение ${k.generation}` : ""}</div>
+        <div class="kb-name"><h2>${esc(k.name)}</h2><button class="link-btn" data-rename title="Переименовать">✏️</button></div>
+        <div class="kb-stage">${esc(st.title)} · ${k.age_days} дн.${k.generation > 1 ? ` · поколение ${k.generation}` : ""}${k.is_sprout ? " · отросток" : ""}</div>
         <div class="kb-xp"><div class="kb-xp-bar"><span style="width:${pct}%"></span></div>
           <small>${k.xp} XP${st.next_xp ? ` · до стадии «${esc(st.next_title)}» ещё ${st.next_xp - k.xp}` : " · максимальная стадия 👑"} · рекорд ${k.best_xp}</small></div>
+        ${k.mutations.length ? `<div class="kb-muts">${k.mutations.map((m) => `<span class="kb-mut" title="${esc(m.title)}${m.inherited ? " (унаследована)" : ""}">${m.emoji} ${esc(m.title)}${m.inherited ? " 🧬" : ""}</span>`).join("")}</div>` : ""}
         ${k.dies_in != null && k.alive ? `<div class="kb-danger">⚠️ Гриб на грани! Закиснет через ${fmtLeft(k.dies_in)}, если не поднять показатель с нуля.</div>` : ""}
         <div class="kb-stats">${STAT.map(([key, label]) => { const v = k.stats[key];
           return `<div class="kb-stat"><span>${label}</span><div class="kb-bar ${v < 25 ? "low" : v > 90 && key === "sweet" ? "over" : ""}"><span style="width:${v}%"></span></div><b>${v}</b></div>`; }).join("")}</div>
-        ${k.alive ? `<div class="kb-actions">${BTN.map(([a, e, t]) => { const cd = k.cooldowns[a];
+        ${k.alive ? `<div class="kb-next muted">⏬ Показатели упадут через ${fmtLeft(k.next_drop_in)} (раз в 12 часов)</div>
+          <div class="kb-actions">${BTN.map(([a, e, t]) => { const cd = k.cooldowns[a];
             return `<button class="btn kb-act" data-act="${a}"${cd ? " disabled" : ""}><span class="e">${e}</span><span>${t}</span>${cd ? `<small>через ${fmtLeft(cd)}</small>` : ""}</button>`; }).join("")}</div>
-          <button class="btn btn-accent kb-daily" data-act="daily"${k.cooldowns.daily ? " disabled" : ""}>🏆 Схема дня${k.cooldowns.daily ? ` · через ${fmtLeft(k.cooldowns.daily)}` : ": забрать бонус за ответы"}</button>`
+          <button class="btn btn-accent kb-daily" data-act="daily"${k.cooldowns.daily ? " disabled" : ""}>🏆 Схема дня${k.cooldowns.daily ? ` · через ${fmtLeft(k.cooldowns.daily)}` : ": забрать бонус за ответы"}</button>
+          ${sprout}`
         : `<p>Прожил ${k.age_days} дн. и набрал ${k.xp} XP. Покойся с миром, ${esc(k.name)}.</p>
-           <button class="btn btn-accent" id="kb-restart">🌱 Завести новый гриб</button>`}
+           <div class="kb-dead-actions">
+             <button class="btn btn-accent" data-revive>💉 Реанимировать · ${S.prices.revive} $₽</button>
+             <button class="btn btn-ghost" data-restart>🌱 Завести заново</button>
+             <button class="btn btn-ghost" data-discard>🗑 Выбросить</button></div>
+           <small class="muted">Реанимация сохраняет опыт и мутации. «Заново» — поколение +1, опыт с нуля, мутации остаются в коллекции.</small>`}
       </div></div>`;
+  };
+
+  const renderCodex = () => {
+    const found = new Map(S.codex.map((c) => [c.code, c]));
+    $("#kb-codex").innerHTML = `<h2>🧬 Коллекция мутаций <span class="muted">${found.size}/${S.catalog.length}</span></h2>
+      <p class="muted kb-codex-lead">Мутации выпадают случайно во время ухода, у каждой своя стадия и условие. Первая находка каждой мутации даёт +15 $₽.</p>
+      <div class="kb-codex">${S.catalog.map((m) => { const f = found.get(m.code);
+        return f ? `<div class="kb-cx found" title="${esc(m.desc)}"><span class="e">${m.emoji}</span><b>${esc(m.title)}</b><small>${esc(m.desc)}</small><small class="muted">у «${esc(f.kombucha_name || "?")}»</small></div>`
+          : `<div class="kb-cx"><span class="e">❓</span><b>???</b><small>${esc(m.hint)}</small><small class="muted">с «${esc(m.stage_title)}»</small></div>`; }).join("")}</div>`;
+  };
+
+  const render = () => {
+    if (!cur() && S.items.length) sel = S.items[0].id;
+    const k = cur();
+    if (k) { sel = k.id; localStorage.setItem("kb-sel", sel); }
+    root.innerHTML = `<div class="kb-bar-top"><span>🫙 Банки: <b>${S.jars.used}/${S.jars.jars}</b></span><span>Баланс: <a href="/wallet"><b>${S.wood} $₽</b></a></span></div>
+      ${renderJars()}${renderMain(k)}`;
+    renderCodex();
+    setWood(S.wood);
+    $$("[data-sel]", root).forEach((b) => (b.onclick = () => { sel = Number(b.dataset.sel); render(); }));
     $$("[data-act]", root).forEach((b) => (b.onclick = () => doAct(b.dataset.act)));
-    $("#kb-rename").onclick = async () => {
-      const name = prompt("Как назовём гриб?", k.name);
+    $$("[data-buy]", root).forEach((b) => (b.onclick = async () => {
+      if (!confirm(`Купить банку за ${S.prices.jar} $₽?`)) return;
+      const r = await call("POST", "/api/shop/jar");
+      if (!r) return;
+      toast(r.sprouts.length ? `🫙 Банка куплена, в неё сел отросток «${r.sprouts[0]}» 🌱` : "🫙 Банка куплена — посади в неё гриб!");
+      await load();
+    }));
+    $$("[data-plant]", root).forEach((b) => (b.onclick = async () => {
+      const name = ask("Имя нового гриба (уникальное на весь сайт). Оставь пустым — придумаем сами:");
+      if (name === null) return;
+      const r = await call("POST", "/api/kombucha/plant", { name });
+      if (r) { sel = r.kombucha.id; await load(); say("Привет! Я новенький 🌱"); }
+    }));
+    const btn = (sel_) => $(sel_, root);
+    if (btn("[data-rename]")) btn("[data-rename]").onclick = async () => {
+      const name = ask("Как назовём гриб? Имя должно быть уникальным на весь сайт.", k.name);
       if (!name || name === k.name) return;
-      try { k = (await api("PATCH", "/api/kombucha", { name })).kombucha; render(); } catch (_) {}
+      const r = await call("PATCH", `/api/kombucha/${k.id}`, { name });
+      if (r) { await load(); toast(`Теперь его зовут «${r.kombucha.name}»`); }
     };
-    const rs = $("#kb-restart");
-    if (rs) rs.onclick = async () => {
-      const name = prompt("Имя нового гриба:", k.name) || k.name;
-      try { k = (await api("POST", "/api/kombucha/restart", { name })).kombucha; render(); say("Привет! Я новенький 🌱"); loadTop(); } catch (_) {}
+    if (btn("[data-revive]")) btn("[data-revive]").onclick = async () => {
+      if (!confirm(`Реанимировать за ${S.prices.revive} $₽?`)) return;
+      if (await call("POST", `/api/kombucha/${k.id}/revive`)) { await load(); say("Я… я живой! 💉"); }
+    };
+    if (btn("[data-restart]")) btn("[data-restart]").onclick = async () => {
+      const name = ask("Имя для нового поколения (пусто — оставить прежнее):", "");
+      if (name === null) return;
+      if (await call("POST", `/api/kombucha/${k.id}/restart`, { name })) { await load(); say("Привет! Я новенький 🌱"); loadTop(); }
+    };
+    if (btn("[data-discard]")) btn("[data-discard]").onclick = async () => {
+      if (!confirm("Выбросить закисший гриб? Банка освободится.")) return;
+      if (await call("DELETE", `/api/kombucha/${k.id}`)) { sel = null; await load(); }
     };
   };
+
   const doAct = async (action) => {
-    try {
-      const r = await api("POST", `/api/kombucha/${action}`, {}, { quiet: true });
-      k = r.kombucha; render(); say(r.message);
-      if (r.stage_up) toast(`🎉 Гриб вырос: теперь это «${k.stage.title}»!`);
-      if (action === "daily" || r.stage_up) loadTop();
-    } catch (err) {
-      toast(err.data?.message || "Не получилось", true);
-    }
+    const k = cur();
+    const r = await call("POST", `/api/kombucha/${k.id}/${action}`);
+    if (!r) return;
+    S = r; render(); say(r.message);
+    if (r.mutation) toast(`🧬 Мутация: ${r.mutation.emoji} «${r.mutation.title}»!${r.mutation.first_time ? " +15 $₽ за новую находку" : ""}`);
+    if (r.stage_up) toast(`🎉 Гриб вырос: теперь это «${r.kombucha.stage.title}»!`);
+    if (r.sprout) toast(r.sprout.planted ? `🌱 Гриб дал отросток «${r.sprout.name}»! +50 $₽` : "🌱 Гриб дал отросток, но банки нет — купи её в магазине. +50 $₽");
+    if (action === "daily" || r.stage_up || r.sprout) loadTop();
   };
   const load = async () => {
-    try { k = (await api("GET", "/api/kombucha")).kombucha; render(); } catch (_) {}
+    try { S = await api("GET", "/api/kombucha"); render(); } catch (_) {}
   };
   await load();
   clearInterval(timer);
-  timer = setInterval(load, 60000);  // раз в минуту подтягиваем убывание и кулдауны
+  timer = setInterval(load, 60000);
+}
+
+// ---------------------------------------------------------------- «Деревянные» ($₽)
+async function pageWallet() {
+  let before = null;
+  const hist = $("#w-history");
+  const load = async (more = false) => {
+    const d = await api("GET", `/api/wallet${before ? `?before=${before}` : ""}`);
+    $("#w-balance").textContent = `${d.balance} $₽`;
+    setWood(d.balance);
+    if (!more) $("#w-rules").innerHTML = d.rules.map((r) => `<div class="wallet-rule"><b class="plus">+${r.amount} $₽</b><span>${esc(r.title)}${r.reason === "daily_login" ? " (+ до 10 $₽ за стрик)" : ""}</span>${r.daily_cap ? `<small class="muted">до ${r.daily_cap} раз в день</small>` : ""}</div>`).join("")
+      + `<p class="muted">Потратить: банка для гриба — ${d.prices.jar} $₽, реанимация гриба — ${d.prices.revive} $₽.</p>`;
+    const rows = d.items.map((t) => `<div class="wallet-row"><span class="${t.delta > 0 ? "plus" : "minus"}">${t.delta > 0 ? "+" : ""}${t.delta} $₽</span><span>${esc(t.title)}</span><small class="muted">${esc(fmtDate(t.created_at))} · баланс ${t.balance_after}</small></div>`).join("");
+    if (more) hist.insertAdjacentHTML("beforeend", rows);
+    else hist.innerHTML = rows || `<p class="muted">Пока пусто. Ответь на вопрос — и первые деревянные твои.</p>`;
+    before = d.next_before;
+    $("#w-more").hidden = !before;
+  };
+  $("#w-more").onclick = () => load(true);
+  try { await load(); } catch (_) {}
 }
 
 // ---------------------------------------------------------------- FAQ
@@ -1359,7 +1502,7 @@ function pageFaq() {
 
 // ---------------------------------------------------------------- boot
 const PAGES = {
-  feed: () => initFeed(), debates: () => initFeed(), kombucha: pageKombucha, room: pageRoom, question: pageQuestion, ask: pageAsk, rooms: pageRooms,
+  feed: () => initFeed(), debates: () => initFeed(), kombucha: pageKombucha, wallet: pageWallet, room: pageRoom, question: pageQuestion, ask: pageAsk, rooms: pageRooms,
   profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, notifications: pageNotifications, search: pageSearch, mod: pageMod, admin: pageAdmin,
   settings: pageSettings, faq: pageFaq,
 };

@@ -8,6 +8,7 @@ from ..auth.rbac import require_perm
 from ..db import session_scope
 from ..errors import ApiError
 from ..models import ContentStatus, DebateSide, DebateVote, Question, QuestionKind
+from ..services import wood
 from . import bp
 
 
@@ -40,5 +41,6 @@ async def debate_vote(qid: int):
         await s.execute(insert(DebateVote).values(question_id=qid, user_id=g.user.id, side=side)
                         .on_conflict_do_update(index_elements=["question_id", "user_id"],
                                                set_={"side": side}))
+        await wood.earn(s, g.user.id, "debate_vote", qid)  # один раз за холивар, смена стороны не фармит
         counts = await debate_counts(s, qid)
     return {"my_side": side.value, **counts}

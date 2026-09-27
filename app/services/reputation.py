@@ -123,6 +123,8 @@ async def cast_vote(s: AsyncSession, voter: User, answer_id: int, value: int) ->
             notify(s, answer.author_id, "scheme", question_id=question.id, answer_id=answer.id,
                    question_title=question.title[:120])
             new_badges = await on_scheme(s, answer.author_id)  # бейджи получает автор ответа
+            from . import wood
+            await wood.earn(s, answer.author_id, "scheme", answer.id)
 
     if is_author:
         if value == BEST_ANSWER_VALUE:

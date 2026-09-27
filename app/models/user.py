@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, SmallInteger, String, Table, Text, func, text
+from sqlalchemy import BigInteger, Column, DateTime, Float, ForeignKey, Index, SmallInteger, String, Table, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -52,6 +52,8 @@ class User(TimestampMixin, Base):
     reputation: Mapped[int] = mapped_column(default=0, server_default="0")
     level: Mapped[int] = mapped_column(SmallInteger, default=1, server_default="1")
     streak_days: Mapped[int] = mapped_column(default=0, server_default="0")
+    wood: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")   # «Деревянные», $₽
+    jars: Mapped[int] = mapped_column(SmallInteger, default=1, server_default="1")  # банок для грибов
     streak_last_date: Mapped[date | None]
     # ISO-неделя последней использованной заморозки стрика, например "2026-W39"
     streak_freeze_week: Mapped[str | None] = mapped_column(String(8))

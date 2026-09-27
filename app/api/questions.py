@@ -16,6 +16,7 @@ from ..services import antispam
 from ..services.captcha import captcha_required
 from ..services.gamification import on_question_created
 from ..auth.sessions import current_user_id
+from ..services import wood
 from . import bp
 from .utils import account_age_hours, answer_out, comment_out, json_body, question_out, req_str
 
@@ -55,6 +56,7 @@ async def create_question():
         await s.flush()
         await s.refresh(q)
         new_badges = await on_question_created(s, g.user.id)
+        await wood.earn(s, g.user.id, "question", q.id)
         await recompute_user(s, g.user.id)
         await refresh_question(s, q)
     return {"question": question_out(q, g.user), "new_badges": new_badges}, 201

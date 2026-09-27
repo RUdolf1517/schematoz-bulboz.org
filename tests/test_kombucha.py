@@ -1,90 +1,285 @@
-"""Мини-игра «Чайный гриб»."""
+"""Мини-игра «Чайный гриб», мутации, отростки, банки и «Деревянные» ($₽)."""
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from app.models import Kombucha
 from app.services import kombucha as kb
 
 
-def _shift(app, user_id, hours, **stats):
-    """Отмотать время гриба назад (как будто прошло `hours` часов)."""
+def _db(app, fn):
     from app.db import session_scope
 
     async def run():
         async with session_scope() as s:
-            k = await s.get(Kombucha, user_id)
-            k.updated_at = k.updated_at - timedelta(hours=hours)
-            k.born_at = k.born_at - timedelta(hours=hours)
-            k.cooldowns = {}
-            for key, v in stats.items():
-                setattr(k, key, v)
+            return await fn(s)
     with app.app_context():
-        asyncio.run(run())
+        return asyncio.run(run())
 
 
-def test_create_and_actions(make_user):
+def _edit(app, kid, hours=0, **fields):
+    """Отмотать время гриба назад на `hours` и/или поменять поля."""
+    async def fn(s):
+        k = await s.get(Kombucha, kid)
+        k.updated_at -= timedelta(hours=hours)
+        k.born_at -= timedelta(hours=hours)
+        k.cooldowns = {}
+        for key, v in fields.items():
+            setattr(k, key, v)
+    _db(app, fn)
+
+
+def _give_wood(app, user_id, amount):
+    from app.services import wood
+
+    async def fn(s):
+        await wood.earn(s, user_id, "mutation", f"test{amount}", amount)
+    _db(app, fn)
+
+
+def _state(c):
+    return c.get("/api/kombucha").get_json()
+
+
+def _first(c):
+    return _state(c)["items"][0]
+
+
+@pytest.fixture()
+def no_mutations(monkeypatch):
+    monkeypatch.setattr(kb.rng, "random", lambda: 0.999)
+
+
+# ---------------------------------------------------------------- базовая игра
+def test_create_and_actions(make_user, no_mutations):
     c, _ = make_user()
-    k = c.get("/api/kombucha").get_json()["kombucha"]
-    assert k["alive"] and k["name"] == "Гриша" and k["stage"]["title"] == "Спора"
-    r = c.post("/api/kombucha/tea", json={})
+    st = _state(c)
+    k = st["items"][0]
+    assert k["alive"] and k["stage"]["title"] == "Спора" and st["jars"] == {"jars": 1, "used": 1, "free": 0, "max": 5}
+    assert len(st["catalog"]) == 20
+    r = c.post(f"/api/kombucha/{k['id']}/tea", json={})
     assert r.status_code == 200 and r.get_json()["kombucha"]["stats"]["tea"] == 100
-    again = c.post("/api/kombucha/tea", json={})
-    assert again.status_code == 429 and again.get_json()["retry_after"] > 3000
-    assert c.post("/api/kombucha/hack", json={}).status_code == 404
-    assert c.patch("/api/kombucha", json={"name": "Бульбоз"}).get_json()["kombucha"]["name"] == "Бульбоз"
-    assert c.patch("/api/kombucha", json={"name": "<script>"}).status_code == 400
+    again = c.post(f"/api/kombucha/{k['id']}/tea", json={})
+    assert again.status_code == 429 and again.get_json()["retry_after"] > 5 * 3600
+    assert c.post(f"/api/kombucha/{k['id']}/hack", json={}).status_code == 404
 
 
-def test_oversugar_makes_it_sticky(app, make_user):
-    c, u = make_user()
-    c.get("/api/kombucha")
-    _shift(app, u["id"], 0, sweet=95.0)
-    r = c.post("/api/kombucha/sugar", json={}).get_json()
+def test_cannot_touch_foreign_kombucha(make_user):
+    c1, _ = make_user()
+    c2, _ = make_user()
+    kid = _first(c1)["id"]
+    assert c2.post(f"/api/kombucha/{kid}/tea", json={}).status_code == 404
+    assert c2.patch(f"/api/kombucha/{kid}", json={"name": "Украл"}).status_code == 404
+
+
+def test_unique_names(make_user):
+    c1, _ = make_user()
+    c2, _ = make_user()
+    k1, k2 = _first(c1), _first(c2)
+    assert k1["name"].lower() != k2["name"].lower()
+    assert c1.patch(f"/api/kombucha/{k1['id']}", json={"name": "Бульбозавр"}).status_code == 200
+    r = c2.patch(f"/api/kombucha/{k2['id']}", json={"name": "бульбозАВР"})
+    assert r.status_code == 409 and r.get_json()["error"] == "name_taken"
+    # своё же имя можно «переименовать» в него же
+    assert c1.patch(f"/api/kombucha/{k1['id']}", json={"name": "Бульбозавр"}).status_code == 200
+    assert c1.patch(f"/api/kombucha/{k1['id']}", json={"name": "<script>"}).status_code == 400
+
+
+def test_decay_is_every_12_hours(app, make_user, no_mutations):
+    c, _ = make_user()
+    k = _first(c)
+    _edit(app, k["id"], hours=11)
+    k2 = _first(c)
+    assert k2["stats"] == k["stats"]                           # 11 ч — ещё ничего не упало
+    assert 0 < k2["next_drop_in"] <= 3600
+    _edit(app, k["id"], hours=1)
+    k3 = _first(c)
+    assert k3["stats"]["sweet"] == k["stats"]["sweet"] - 30   # 12 ч — одна ступенька
+    assert k3["stats"]["tea"] == k["stats"]["tea"] - 25
+    assert k3["next_drop_in"] > 11 * 3600
+    # уход не сдвигает таймер ступенек
+    c.post(f"/api/kombucha/{k['id']}/pet", json={})
+    assert _first(c)["next_drop_in"] > 11 * 3600
+
+
+def test_oversugar_makes_it_sticky(app, make_user, no_mutations):
+    c, _ = make_user()
+    kid = _first(c)["id"]
+    _edit(app, kid, sweet=95.0)
+    r = c.post(f"/api/kombucha/{kid}/sugar", json={}).get_json()
     assert "слипся" in r["message"] and r["kombucha"]["mood"] == "sticky"
 
 
-def test_decay_and_death_and_restart(app, make_user):
+def test_death_restart_revive_discard(app, make_user, no_mutations):
     c, u = make_user()
-    c.get("/api/kombucha")
-    _shift(app, u["id"], 10)
-    k = c.get("/api/kombucha").get_json()["kombucha"]
-    assert k["alive"] and k["stats"]["sweet"] < 40
-    _shift(app, u["id"], 60)   # всё на нуле гораздо дольше суток
-    k = c.get("/api/kombucha").get_json()["kombucha"]
+    kid = _first(c)["id"]
+    _edit(app, kid, hours=24 * 5)
+    k = _first(c)
     assert not k["alive"] and k["mood"] == "dead"
-    assert c.post("/api/kombucha/tea", json={}).status_code == 409
-    k = c.post("/api/kombucha/restart", json={"name": "Гриша II"}).get_json()["kombucha"]
-    assert k["alive"] and k["generation"] == 2 and k["xp"] == 0 and k["name"] == "Гриша II"
-    assert c.post("/api/kombucha/restart", json={}).status_code == 409
+    assert c.post(f"/api/kombucha/{kid}/tea", json={}).status_code == 409
+    # реанимация стоит денег
+    r = c.post(f"/api/kombucha/{kid}/revive", json={})
+    assert r.status_code == 402 and r.get_json()["error"] == "not_enough_wood"
+    _give_wood(app, u["id"], 500)
+    bal = _state(c)["wood"]
+    r = c.post(f"/api/kombucha/{kid}/revive", json={}).get_json()
+    assert r["kombucha"]["alive"] and r["wood"] == bal - 150
+    # снова убиваем → перезаводим
+    _edit(app, kid, hours=24 * 5)
+    k = c.post(f"/api/kombucha/{kid}/restart", json={"name": "Гриша Второй"}).get_json()["kombucha"]
+    assert k["alive"] and k["generation"] == 2 and k["xp"] == 0 and k["name"] == "Гриша Второй"
+    assert c.delete(f"/api/kombucha/{kid}").status_code == 409     # живой — не выбросить
+    _edit(app, kid, hours=24 * 5)
+    assert c.delete(f"/api/kombucha/{kid}").status_code == 200
+    assert _state(c)["jars"]["free"] == 1
 
 
-def test_danger_timer(app, make_user):
-    c, u = make_user()
-    c.get("/api/kombucha")
-    _shift(app, u["id"], 1, sweet=1.0)
-    k = c.get("/api/kombucha").get_json()["kombucha"]
-    assert k["alive"] and k["dies_in"] is not None and k["dies_in"] > 20 * 3600
-
-
-def test_daily_bonus_counts_answers(qa):
-    c = qa["answerer_c"]
-    r = c.post("/api/kombucha/daily", json={}).get_json()
-    assert r["kombucha"]["xp"] == 18   # 10 + 8 за один ответ
-    assert c.post("/api/kombucha/daily", json={}).status_code == 429
-
-
-def test_stages_and_top(app, make_user):
-    assert kb.stage_for(0)["title"] == "Спора"
-    assert kb.stage_for(2500)["title"] == "Легенда трёхлитровой банки" and kb.stage_for(2500)["next_xp"] is None
+def test_danger_timer(app, make_user, no_mutations):
     c, _ = make_user()
-    c.post("/api/kombucha/pet", json={})
+    kid = _first(c)["id"]
+    _edit(app, kid, hours=12, sweet=10.0)
+    k = _first(c)
+    assert k["alive"] and k["stats"]["sweet"] == 0 and k["dies_in"] > 23 * 3600
+
+
+def test_daily_bonus_counts_answers(qa, no_mutations):
+    c = qa["answerer_c"]
+    kid = _first(c)["id"]
+    r = c.post(f"/api/kombucha/{kid}/daily", json={}).get_json()
+    assert r["kombucha"]["xp"] == 18   # 10 + 8 за один ответ
+    assert c.post(f"/api/kombucha/{kid}/daily", json={}).status_code == 429
+
+
+# ---------------------------------------------------------------- мутации
+def test_twenty_mutations_on_all_stages():
+    assert len(kb.MUTATIONS) == 20 and len(kb.MUT_BY_CODE) == 20
+    assert {m.stage for m in kb.MUTATIONS} == {1, 2, 3, 4, 5, 6}
+
+
+def test_mutation_is_saved_and_rewarded(app, make_user, monkeypatch):
+    c, u = make_user()
+    kid = _first(c)["id"]
+    monkeypatch.setattr(kb.rng, "random", lambda: 0.0)       # всё, что может выпасть, — выпадает
+    wood0 = _state(c)["wood"]
+    r = c.post(f"/api/kombucha/{kid}/pet", json={}).get_json()
+    assert r["mutation"]["code"] == "sparkle" and r["mutation"]["first_time"]
+    assert r["wood"] >= 1 and r["kombucha"]["mutations"][0]["code"] == "sparkle"
+    st = _state(c)
+    assert st["wood"] >= wood0 + 15 + 1
+    assert [x["code"] for x in st["codex"]] == ["sparkle"]
+    # мутация остаётся после смерти и перезапуска в коллекции
+    _edit(app, kid, hours=24 * 5)
+    c.post(f"/api/kombucha/{kid}/restart", json={})
+    st = _state(c)
+    assert st["items"][0]["mutations"] == [] and [x["code"] for x in st["codex"]] == ["sparkle"]
+
+
+def test_mutation_conditions():
+    k = Kombucha(xp=0, sweet=85.0, tea=10.0, clean=90.0, happy=50.0, mutations=[], pet_count=0, generation=1)
+    orig = kb.rng.random
+    kb.rng.random = lambda: 0.0
+    try:
+        # стадия 1: «сладкоежка» только при сахаре в сладкого, «ночной» — ночью
+        k.mutations = [{"code": "sparkle"}]
+        assert kb.roll_mutation(kb.Ctx(action="sugar", k=k, hour=14)).code == "sweet_tooth"
+        assert kb.roll_mutation(kb.Ctx(action="tea", k=k, hour=3)).code == "night"
+        assert kb.roll_mutation(kb.Ctx(action="tea", k=k, hour=14)) is None
+        # «газировка» — стадия 2+, заварка на исходе
+        k.xp, k.mutations = 60, [{"code": c} for c in ("sparkle", "striped")]
+        assert kb.roll_mutation(kb.Ctx(action="tea", k=k, hour=14)).code == "bubbly"
+        # «феникс» — только второе поколение
+        k.xp = 400
+        k.mutations = [{"code": m.code} for m in kb.MUTATIONS if m.code not in ("phoenix",)]
+        assert kb.roll_mutation(kb.Ctx(action="pet", k=k, hour=14)) is None
+        k.generation = 2
+        assert kb.roll_mutation(kb.Ctx(action="pet", k=k, hour=14)).code == "phoenix"
+    finally:
+        kb.rng.random = orig
+
+
+# ---------------------------------------------------------------- банки и отростки
+def test_buy_jar_and_plant(app, make_user, no_mutations):
+    c, u = make_user()
+    _state(c)
+    assert c.post("/api/kombucha/plant", json={}).get_json()["error"] == "no_free_jar"
+    assert c.post("/api/shop/jar", json={}).status_code == 402
+    _give_wood(app, u["id"], 1000)
+    r = c.post("/api/shop/jar", json={}).get_json()
+    assert r["jars"]["jars"] == 2 and r["jars"]["free"] == 1
+    k2 = c.post("/api/kombucha/plant", json={"name": "Второй Бульк"}).get_json()["kombucha"]
+    assert k2["name"] == "Второй Бульк"
+    assert len(_state(c)["items"]) == 2
+    hist = c.get("/api/wallet").get_json()
+    assert any(t["reason"] == "buy_jar" and t["delta"] == -300 for t in hist["items"])
+
+
+def test_sprout_after_week_of_care_on_last_stage(app, make_user, no_mutations):
+    c, u = make_user()
+    kid = _first(c)["id"]
+    _edit(app, kid, xp=1000, care_days=6, mutations=[{"code": "golden", "at": "x"}])
+    r = c.post(f"/api/kombucha/{kid}/pet", json={}).get_json()
+    assert r["sprout"] == {"planted": False}          # 7-й день ухода, но банки нет — отросток ждёт
+    assert r["kombucha"]["sprout_pending"]
+    _give_wood(app, u["id"], 1000)
+    res = c.post("/api/shop/jar", json={}).get_json()
+    assert len(res["sprouts"]) == 1                   # купил банку — отросток сел сам
+    items = _state(c)["items"]
+    child = next(k for k in items if k["id"] != kid)
+    assert child["is_sprout"] and child["mutations"][0]["code"] == "golden" and child["mutations"][0]["inherited"]
+    assert not next(k for k in items if k["id"] == kid)["sprout_pending"]
+
+
+# ---------------------------------------------------------------- «Деревянные»
+def test_wood_for_activity(qa, make_user):
+    c = qa["answerer_c"]
+    w = c.get("/api/wallet").get_json()
+    reasons = {t["reason"] for t in w["items"]}
+    assert "answer" in reasons and w["balance"] >= 5
+    # вход раз в день: /auth/me начисляет один раз
+    me1 = c.get("/api/auth/me").get_json()
+    me2 = c.get("/api/auth/me").get_json()
+    assert me1["wood_daily"] >= 10 and me2["wood_daily"] == 0 and me2["wood"] == me1["wood"]
+    # комментарий
+    before = me2["wood"]
+    c.post(f"/api/answers/{qa['a']['id']}/comments", json={"body": "дополню"})
+    assert c.get("/api/wallet").get_json()["balance"] == before + 1
+    # схема: автор вопроса ставит +5
+    qa["author_c"].put(f"/api/answers/{qa['a']['id']}/vote", json={"value": 5})
+    assert any(t["reason"] == "scheme" and t["delta"] == 20 for t in c.get("/api/wallet").get_json()["items"])
+
+
+def test_wood_debate_vote_once(make_user):
+    mod, _ = make_user("moderator")
+    q = mod.post("/api/questions", json={"kind": "debate", "title": "Шаверма или шаурма?", "side_a": "Шаверма",
+                                         "side_b": "Шаурма"}).get_json()["question"]
+    c, _ = make_user()
+    b0 = c.get("/api/wallet").get_json()["balance"]
+    c.put(f"/api/questions/{q['id']}/debate-vote", json={"side": "a"})
+    c.put(f"/api/questions/{q['id']}/debate-vote", json={"side": "b"})
+    c.put(f"/api/questions/{q['id']}/debate-vote", json={"side": "a"})
+    assert c.get("/api/wallet").get_json()["balance"] == b0 + 2
+
+
+def test_wood_daily_cap(app, make_user):
+    from app.services import wood
+    c, u = make_user()
+
+    async def fn(s):
+        return [await wood.earn(s, u["id"], "comment", i) for i in range(35)]
+    got = _db(app, fn)
+    assert sum(got) == 30 and got[-1] == 0
+
+
+def test_top_and_guest(app, make_user, no_mutations):
+    c, _ = make_user()
+    kid = _first(c)["id"]
+    c.post(f"/api/kombucha/{kid}/pet", json={})
     top = app.test_client().get("/api/kombucha/top").get_json()["items"]
-    assert len(top) == 1 and top[0]["xp"] == 2
-
-
-def test_guest(app):
+    assert top[0]["xp"] == 1
     cl = app.test_client()
     assert cl.get("/api/kombucha").status_code == 401
+    assert cl.get("/api/wallet").status_code == 401
     assert cl.get("/kombucha").status_code == 200
     html = cl.get("/").get_data(as_text=True)
     assert 'href="/debates"' in html and 'href="/kombucha"' in html

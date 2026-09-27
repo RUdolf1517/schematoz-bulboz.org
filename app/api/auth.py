@@ -91,11 +91,17 @@ async def logout():
 async def me():
     from ..auth.rbac import get_user_perms
     from ..services.notifications import unread_count
+    from ..services import wood
     ban = await active_global_ban(g.user.id)
     async with session_scope() as s:
         unread = await unread_count(s, g.user.id)
+        # «Деревянные» за заход — раз в сутки по Москве (идемпотентно по дате)
+        today = wood.msk_day_start().date().isoformat()
+        daily = 0 if ban else await wood.earn(s, g.user.id, "daily_login", today,
+                                              wood.daily_login_amount(g.user.streak_days))
+        balance = await wood.balance(s, g.user.id)
     return {"user": user_public(g.user), "roles": [r.code for r in g.user.roles],
-            "unread_notifications": unread,
+            "unread_notifications": unread, "wood": balance, "wood_daily": daily,
             "permissions": sorted(await get_user_perms(g.user.id)),
             "ban": {"id": ban.id, "reason": ban.reason,
                     "ends_at": ban.ends_at.isoformat() if ban.ends_at else None,

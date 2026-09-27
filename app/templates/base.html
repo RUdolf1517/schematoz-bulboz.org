@@ -17,6 +17,7 @@
     </nav>
     <div class="top-actions">
       <a class="btn btn-ghost btn-sm icon-btn" href="/search" aria-label="Поиск" title="Поиск">🔍</a>
+      {% if logged_in %}<a class="btn btn-ghost btn-sm wood-chip" id="wood-chip" href="/wallet" title="Деревянные — валюта сайта" hidden>$₽ <b id="wood-balance">0</b></a>{% endif %}
       {% if logged_in %}<a class="btn btn-ghost btn-sm icon-btn bell" href="/notifications" aria-label="Уведомления" title="Уведомления">🔔<span class="bell-count" id="bell-count" hidden></span></a>{% endif %}
       <a class="btn btn-accent btn-sm" href="/ask">+ Спросить</a>
       {% if logged_in %}
@@ -28,6 +29,7 @@
             <a id="me-profile" href="#">Мой профиль</a>
             <a href="/settings">Настройки профиля</a>
             <a href="/kombucha">🍄 Мой чайный гриб</a>
+            <a href="/wallet">$₽ Деревянные</a>
             <a id="me-mod" href="/mod" hidden>Модерация</a>
             <a id="me-admin" href="/admin" hidden>Админка</a>
             <button id="logout-btn" type="button">Выйти</button>

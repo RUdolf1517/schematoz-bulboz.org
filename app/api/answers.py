@@ -13,6 +13,7 @@ from ..services.captcha import captcha_required
 from ..services.gamification import on_answer_created
 from ..services.notifications import notify
 from ..services.reputation import cast_vote, remove_vote
+from ..services import wood
 from . import bp
 from ..services.rating import recompute_user, refresh_question
 from .utils import account_age_hours, answer_out, json_body
@@ -55,6 +56,9 @@ async def create_answer(qid: int):
         await s.flush()
         await handler.persist(s, answer, draft)
         new_badges = await on_answer_created(s, g.user, answer)
+        await wood.earn(s, g.user.id, "answer", answer.id)
+        if side is not None:
+            await wood.earn(s, g.user.id, "debate_answer", answer.id)
         if q.author_id != g.user.id:
             notify(s, q.author_id, "answer", question_id=q.id, answer_id=answer.id,
                    username=g.user.username, question_title=q.title[:120])

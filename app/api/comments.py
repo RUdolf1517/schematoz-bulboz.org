@@ -14,6 +14,7 @@ from ..services import antispam
 from ..services.captcha import captcha_required
 from ..services.notifications import notify
 from ..services.rating import recompute_user, refresh_question
+from ..services import wood
 from . import bp
 from .utils import account_age_hours, comment_out, json_body, req_str
 
@@ -52,6 +53,7 @@ async def create_comment(aid: int):
         await s.flush()
         await s.refresh(c)
         await _bump(s, c, +1)
+        await wood.earn(s, g.user.id, "comment", c.id)
         if a.author_id != g.user.id:
             notify(s, a.author_id, "comment", question_id=q.id, answer_id=aid, comment_id=c.id,
                    username=g.user.username, question_title=q.title[:120])
