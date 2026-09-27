@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}schematoz-bulboz.org — вопросы, на которые отвечают люди{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='site.css', v=asset_v) }}">
 </head>
 <body data-page="{{ page_name|default('static') }}" data-logged-in="{{ 1 if logged_in else 0 }}">
   <header class="top">
@@ -47,6 +47,6 @@
   <div id="toast" class="toast" hidden></div>
   <div id="modal" class="modal" hidden></div>
   {% include "_footer.html" %}
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v=asset_v) }}"></script>
 </body>
 </html>

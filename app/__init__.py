@@ -15,6 +15,17 @@ def create_app(config: dict | None = None) -> Flask:
     app = Flask(__name__)
     app.config.from_object(Config)
     app.json.ensure_ascii = False
+    # версия статики: меняется при каждом изменении app.js/site.css — браузер не держит старый код в кэше
+    import hashlib
+    import os
+    _h = hashlib.sha1()
+    for _f in ("app.js", "site.css"):
+        try:
+            with open(os.path.join(app.static_folder, _f), "rb") as fh:
+                _h.update(fh.read())
+        except OSError:
+            pass
+    app.jinja_env.globals["asset_v"] = _h.hexdigest()[:10]
     if config:
         app.config.update(config)
 
