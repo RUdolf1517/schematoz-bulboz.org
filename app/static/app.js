@@ -1269,6 +1269,7 @@ document.addEventListener("toggle", (e) => {
   const d = e.target;
   if (!d.dataset?.fold) return;
   localStorage.setItem(`fold:${d.dataset.fold}`, d.open ? "1" : "0");
+  if (d.dataset.fold === "kb-muts") { const sm = d.querySelector("summary"); sm.textContent = sm.textContent.replace(/развернуть|свернуть/, d.open ? "свернуть" : "развернуть"); }
   const hint = d.querySelector(".kb-fold-hint");
   if (hint) hint.textContent = d.open ? "свернуть" : "развернуть";
 }, true);
@@ -1280,7 +1281,7 @@ document.addEventListener("click", (e) => {
 function kombuchaCard(k, extra = "") {
   return `<div class="kb-card r-${k.mutations?.[0]?.rarity || "none"}" data-kcard="${k.id}" title="Открыть карточку гриба"><div class="kb-card-svg">${kombuchaSVG(k, { small: true })}</div>
     <b>${esc(k.name)}</b><small class="muted">${esc(k.stage.title)} · ${k.xp} XP${k.generation > 1 ? ` · пок. ${k.generation}` : ""}</small>
-    ${k.mutations.length ? `<div class="kb-card-muts">${k.mutations.slice(0, 4).map(mutChip).join("")}${k.mutations.length > 4 ? `<span class="muted">+${k.mutations.length - 4}</span>` : ""}</div>` : `<small class="muted">без мутаций</small>`}
+    ${k.mutations.length ? `<div class="kb-card-muts">${k.mutations.slice(0, 3).map(mutChip).join("")}${k.mutations.length > 3 ? `<details class="kb-card-more"><summary>ещё ${k.mutations.length - 3}</summary>${k.mutations.slice(3).map(mutChip).join("")}</details>` : ""}</div>` : `<small class="muted">без мутаций</small>`}
     ${extra}</div>`;
 }
 
@@ -1442,7 +1443,7 @@ async function pageKombucha() {
         <div class="kb-stage">${esc(st.title)} · ${k.age_days} дн.${k.generation > 1 ? ` · поколение ${k.generation}` : ""}${k.is_sprout ? " · отросток" : ""}</div>
         <div class="kb-xp"><div class="kb-xp-bar"><span style="width:${pct}%"></span></div>
           <small>${k.xp} XP${st.next_xp ? ` · до стадии «${esc(st.next_title)}» ещё ${st.next_xp - k.xp}` : " · максимальная стадия 👑"} · рекорд ${k.best_xp}</small></div>
-        ${k.mutations.length ? `<details class="kb-muts-box" data-fold="kb-muts"${localStorage.getItem("fold:kb-muts") === "0" ? "" : " open"}><summary>🧬 Мутации (${k.mutations.length})</summary><div class="kb-muts">${k.mutations.map(mutChip).join("")}</div></details>` : ""}
+        ${k.mutations.length ? `<details class="kb-muts-box" data-fold="kb-muts"${localStorage.getItem("fold:kb-muts") === "1" ? " open" : ""}><summary>🧬 Мутации (${k.mutations.length}) — нажми, чтобы ${localStorage.getItem("fold:kb-muts") === "1" ? "свернуть" : "развернуть"}</summary><div class="kb-muts">${k.mutations.map(mutChip).join("")}</div></details>` : ""}
         ${k.dies_in != null && k.alive ? `<div class="kb-danger">⚠️ Гриб на грани! Закиснет через ${fmtLeft(k.dies_in)}, если не поднять показатель с нуля.</div>` : ""}
         <div class="kb-stats">${STAT.map(([key, label]) => { const v = k.stats[key];
           return `<div class="kb-stat"><span>${label}</span><div class="kb-bar ${v < 25 ? "low" : v > 90 && key === "sweet" ? "over" : ""}"><span style="width:${v}%"></span></div><b>${v}</b></div>`; }).join("")}</div>
@@ -1482,10 +1483,10 @@ async function pageKombucha() {
       <p class="muted kb-codex-lead">По 40 мутаций на каждую стадию. Каждый выпавший экземпляр получает номер на весь сайт — как подарки в Telegram: «#1» бывает только один.
         Первая находка каждой мутации даёт +15 $₽. Шанс за подходящее действие: обычная 6%, редкая 2,5%, эпическая 1%, легендарная 0,4%.</p>
       <div class="kb-rar-legend">${order.map((r) => `<span class="kb-mut r-${r}">${RAR[r]} ${got(r)}/${cnt(r)}</span>`).join("")}</div>
-      ${Object.entries(byStage).map(([st, list]) => `<h3 class="kb-cx-stage">Стадия ${st}: ${esc(list[0].stage_title)} <span class="muted">${list.filter((m) => found.has(m.code)).length}/${list.length}</span></h3>
+      ${Object.entries(byStage).map(([st, list]) => `<details class="kb-cx-stage-box" data-fold="kb-cx-${st}"${localStorage.getItem(`fold:kb-cx-${st}`) === "0" ? "" : " open"}><summary class="kb-cx-stage">Стадия ${st}: ${esc(list[0].stage_title)} <span class="muted">${list.filter((m) => found.has(m.code)).length}/${list.length}</span></summary>
       <div class="kb-codex">${list.slice().sort((x, y) => order.indexOf(x.rarity) - order.indexOf(y.rarity)).map((m) => { const f = found.get(m.code);
         return f ? `<div class="kb-cx found r-${m.rarity}" style="--mc:${m.color}"><span class="e">${esc(m.emoji)}</span><b>${esc(m.title)}</b><small>${RAR[m.rarity]}</small><small class="muted">у «${esc(f.kombucha_name || "?")}» · тираж ${m.issued}</small></div>`
-          : `<div class="kb-cx r-${m.rarity}"><span class="e">❓</span><b>???</b><small>${esc(m.hint)}</small><small class="muted">${RAR[m.rarity]} · тираж ${m.issued}</small></div>`; }).join("")}</div>`).join("")}</details>`;
+          : `<div class="kb-cx r-${m.rarity}"><span class="e">❓</span><b>???</b><small>${esc(m.hint)}</small><small class="muted">${RAR[m.rarity]} · тираж ${m.issued}</small></div>`; }).join("")}</div></details>`).join("")}</details>`;
   };
 
   const render = () => {
@@ -1509,7 +1510,7 @@ async function pageKombucha() {
       const name = ask("Имя нового гриба (уникальное на весь сайт). Оставь пустым — придумаем сами:");
       if (name === null) return;
       const r = await call("POST", "/api/kombucha/plant", { name });
-      if (r) { sel = r.kombucha.id; await load(); say("Привет! Я новенький 🌱"); }
+      if (r) { sel = r.kombucha.id; await load(); toast("🌱 Гриб посажен"); }
     }));
     const btn = (sel_) => $(sel_, root);
     if (btn("[data-rename]")) btn("[data-rename]").onclick = async () => {
@@ -1520,19 +1521,19 @@ async function pageKombucha() {
     };
     if (btn("[data-revive]")) btn("[data-revive]").onclick = async () => {
       if (!confirm(`Реанимировать за ${S.prices.revive} $₽?`)) return;
-      if (await call("POST", `/api/kombucha/${k.id}/revive`)) { await load(); say("Я… я живой! 💉"); }
+      if (await call("POST", `/api/kombucha/${k.id}/revive`)) { await load(); toast("💉 Гриб снова жив!"); }
     };
     if (btn("[data-restart]")) btn("[data-restart]").onclick = async () => {
       const name = ask("Имя для нового поколения (пусто — оставить прежнее):", "");
       if (name === null) return;
-      if (await call("POST", `/api/kombucha/${k.id}/restart`, { name })) { await load(); say("Привет! Я новенький 🌱"); loadTop(); }
+      if (await call("POST", `/api/kombucha/${k.id}/restart`, { name })) { await load(); toast("🌱 Новое поколение!"); loadTop(); }
     };
     if (btn("[data-freeze]")) btn("[data-freeze]").onclick = async () => {
       if (!confirm("Заморозить гриб? Он перестанет требовать ухода, освободит банку и встанет на полку в профиле. Разморозить можно, когда есть свободная банка.")) return;
       if (await call("POST", `/api/kombucha/${k.id}/freeze`)) { await load(); toast("🧊 Гриб на полке"); }
     };
     if (btn("[data-unfreeze]")) btn("[data-unfreeze]").onclick = async () => {
-      if (await call("POST", `/api/kombucha/${k.id}/unfreeze`)) { await load(); say("Брр… Спасибо, что разморозил! 🔥"); }
+      if (await call("POST", `/api/kombucha/${k.id}/unfreeze`)) { await load(); toast("🔥 Гриб разморожен"); }
     };
     if (btn("[data-list]")) btn("[data-list]").onclick = async () => {
       const v = ask("За сколько $₽ выставить на рынок? (от 10; 5% комиссии сгорает)", "300");
@@ -1553,7 +1554,12 @@ async function pageKombucha() {
     const k = cur();
     const r = await call("POST", `/api/kombucha/${k.id}/${action}`);
     if (!r) return;
-    S = r; render(); say(r.message);
+    S = r; render();
+    // В облачке — только цитаты. Исключение — сахарная кома: там гриб стонет.
+    const kk = r.kombucha;
+    if (kk.mood === "sticky") say(action === "sugar" ? r.message : kk.phrase);
+    else if (action === "pet") say(r.message);            // «Погладить» — сама цитата
+    else { say(kk.phrase); if (r.message && action !== "talk") toast(r.message); }
     if (r.quote) {
       const q = r.quote, box = $("#kb-quote");
       if (box) box.innerHTML = `<blockquote class="kb-quote ${action === "talk" ? "philo" : "dubious"}">${q.intro ? `<div class="muted">${esc(q.intro)}</div>` : ""}

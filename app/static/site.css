@@ -713,3 +713,7 @@ main.main-wide { max-width: 1180px; }
 .kb-codex-box > summary h2 { margin: 0; }
 .kb-codex-box > summary h2::before { content: "▸ "; }
 .kb-codex-box[open] > summary h2::before { content: "▾ "; }
+.kb-cx-stage-box > summary { cursor: pointer; }
+.kb-card-more { display: contents; }
+.kb-card-more > summary { cursor: pointer; font-size: 12px; opacity: .75; list-style: none; }
+.kb-card-more[open] > summary { display: none; }
