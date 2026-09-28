@@ -495,7 +495,7 @@ main.main-wide { max-width: 1180px; }
 .kb-label { fill: var(--muted); font-size: 10px; font-weight: 700; }
 .kb-liquid { transition: y .6s ease, fill .6s ease; }
 .kb-disc { fill: #e9d9b8; stroke: #bfa577; stroke-width: 2; }
-.kb-disc-hi { fill: #f6ecd6; }
+.kb-disc-hi { fill: #ffffff; opacity: .3; }
 .kb-tendrils { stroke: #d8c49c; stroke-width: 2; fill: none; opacity: .8; }
 .kb-face path { stroke: #2b2118; stroke-width: 3; stroke-linecap: round; fill: none; }
 .kb-blush { fill: #ff8fa3; opacity: .7; }
@@ -723,3 +723,6 @@ main.main-wide { max-width: 1180px; }
 .kb-jar-sticker { opacity: .9; filter: drop-shadow(0 1px 0 #0003); }
 .kb-drift { animation: kb-drift 5s ease-in-out infinite; transform-box: fill-box; }
 @keyframes kb-drift { 0%,100% { transform: translate(0,0) rotate(-6deg); } 50% { transform: translate(6px,-8px) rotate(6deg); } }
+/* на маленьких банках (вкладки, карточки) косметика мутаций тоже видна */
+.kb-svg.small .kb-drift, .kb-svg.small .kb-sticker, .kb-svg.small .kb-jar-sticker { display: inline; }
+.kb-svg.small .kb-orbit { display: inline; }
