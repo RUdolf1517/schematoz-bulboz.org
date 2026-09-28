@@ -1531,7 +1531,7 @@ async function pageKombucha() {
       <div class="kb-rar-legend">${order.map((r) => `<span class="kb-mut r-${r}">${RAR[r]} ${got(r)}/${cnt(r)}</span>`).join("")}</div>
       ${Object.entries(byStage).map(([st, list]) => `<details class="kb-cx-stage-box" data-fold="kb-cx-${st}"${localStorage.getItem(`fold:kb-cx-${st}`) === "0" ? "" : " open"}><summary class="kb-cx-stage">Стадия ${st}: ${esc(list[0].stage_title)} <span class="muted">${list.filter((m) => found.has(m.code)).length}/${list.length}</span></summary>
       <div class="kb-codex">${list.slice().sort((x, y) => order.indexOf(x.rarity) - order.indexOf(y.rarity)).map((m) => { const f = found.get(m.code);
-        return f ? `<div class="kb-cx found r-${m.rarity}" style="--mc:${m.color}"><span class="e">${esc(m.emoji)}</span><b>${esc(m.title)}</b><small>${RAR[m.rarity]}</small><small class="muted">у «${esc(f.kombucha_name || "?")}» · тираж ${m.issued}</small></div>`
+        return f ? `<div class="kb-cx found r-${m.rarity}" style="--mc:${m.color}"><span class="kb-cx-prev" title="Как выглядит мутация">${kombuchaSVG({ id: "cx" + m.code, name: m.title, alive: true, frozen: false, mood: "happy", mold: false, stats: { sweet: 70, tea: 70, clean: 100, happy: 80 }, stage: { size: Math.max(3, m.stage), title: "" }, mutations: [{ ...m }] }, { small: true })}</span><b>${esc(m.title)}</b><small>${RAR[m.rarity]}</small><small class="muted">у «${esc(f.kombucha_name || "?")}» · тираж ${m.issued}</small></div>`
           : `<div class="kb-cx r-${m.rarity}"><span class="e">❓</span><b>???</b><small>${esc(m.hint)}</small><small class="muted">${RAR[m.rarity]} · тираж ${m.issued}</small></div>`; }).join("")}</div></details>`).join("")}</details>`;
   };
 

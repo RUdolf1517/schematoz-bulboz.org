@@ -726,3 +726,4 @@ main.main-wide { max-width: 1180px; }
 /* на маленьких банках (вкладки, карточки) косметика мутаций тоже видна */
 .kb-svg.small .kb-drift, .kb-svg.small .kb-sticker, .kb-svg.small .kb-jar-sticker { display: inline; }
 .kb-svg.small .kb-orbit { display: inline; }
+.kb-cx-prev { display: block; width: 64px; height: 66px; margin: 0 auto 2px; } .kb-cx-prev .kb-svg { width: 100%; height: 100%; }
