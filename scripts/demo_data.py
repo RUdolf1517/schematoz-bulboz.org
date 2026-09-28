@@ -187,6 +187,22 @@ async def demo():
             for c in codes:
                 s.add(UserBadge(user_id=u[name].id, code=c))
 
+        # чайные грибы с мутациями — чтобы сразу было видно косметику (по 3 мутации на стадию)
+        from app.services import kombucha as kb
+        from app.services.kombucha_mutations import MUTATIONS
+        u["dasha"].jars = 4
+        await s.flush()
+        for owner, nm, xp, shift in [("dasha", "Бульбоз", 4200, 0), ("dasha", "Медузий", 1300, 5),
+                                     ("dasha", "Блинчик", 600, 11), ("kotik_na_fizmate", "Грибозавр", 4500, 17)]:
+            k = await kb.plant(s, u[owner], nm)
+            k.xp = xp
+            size = kb.stage_for(xp)["size"]
+            for st in range(1, size + 1):
+                pool = [m for m in MUTATIONS if m.stage == st]
+                for i in range(3):
+                    await kb.add_mutation(s, k, pool[(shift + i * 13 + st * 7) % len(pool)], now)
+        await s.flush()
+
         # жалобы — чтобы очередь модерации была не пустой
         s.add(Report(reporter_id=u["dasha"].id, target_type=ReportTarget.ANSWER, target_id=a_spam.id,
                      reason=ReportReason.SPAM, comment="Реклама левого сайта"))
