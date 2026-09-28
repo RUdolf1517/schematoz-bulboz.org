@@ -119,9 +119,10 @@ def roll_mutation(ctx: Ctx) -> Mutation | None:
     """Максимум одна новая мутация за действие. Кандидаты перемешаны, чтобы порядок
     в каталоге не давал преимущества; сначала бросаем редкие."""
     size = stage_for(ctx.k.xp)["size"]
-    full = {st for st, n in stage_mut_counts(ctx.k).items() if n >= MAX_MUT_PER_STAGE}
-    cands = [m for m in MUTATIONS if m.stage <= size and m.stage not in full
-             and not has_mut(ctx.k, m.code) and m.check(ctx)]
+    # на каждой стадии роста — только мутации этой стадии и не больше 3 штук
+    if stage_mut_counts(ctx.k).get(size, 0) >= MAX_MUT_PER_STAGE:
+        return None
+    cands = [m for m in MUTATIONS if m.stage == size and not has_mut(ctx.k, m.code) and m.check(ctx)]
     rng.shuffle(cands)
     cands.sort(key=lambda m: RARITY_ORDER.index(m.rarity))
     for m in cands:

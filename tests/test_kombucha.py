@@ -451,9 +451,12 @@ def test_max_three_mutations_per_stage():
         k.mutations.append({"code": got.code})
         assert kb.stage_mut_counts(k) == {1: 3}
         for _ in range(50):
-            assert kb.roll_mutation(ctx) is None                   # стадия 1 заполнена, а выше гриб ещё не вырос
-        k.xp = 10 ** 6                                             # Легенда: доступны все стадии, кроме заполненной
-        for _ in range(50):
-            assert kb.roll_mutation(ctx).stage != 1
+            assert kb.roll_mutation(ctx) is None                   # стадия 1 заполнена
+        k.xp = 10 ** 6                                             # Легенда: падают только мутации 6-й стадии
+        for _ in range(3):
+            m = kb.roll_mutation(ctx)
+            assert m.stage == 6
+            k.mutations.append({"code": m.code})
+        assert kb.roll_mutation(ctx) is None                       # и их тоже не больше 3
     finally:
         mp.undo()

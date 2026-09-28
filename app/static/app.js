@@ -1444,7 +1444,7 @@ async function pageKombucha() {
         <div class="kb-xp"><div class="kb-xp-bar"><span style="width:${pct}%"></span></div>
           <small>${k.xp} XP${st.next_xp ? ` · до стадии «${esc(st.next_title)}» ещё ${st.next_xp - k.xp}` : " · максимальная стадия 👑"} · рекорд ${k.best_xp}</small></div>
         ${k.mutations.length ? `<details class="kb-muts-box" data-fold="kb-muts"${localStorage.getItem("fold:kb-muts") === "1" ? " open" : ""}><summary>🧬 Мутации (${k.mutations.length}) — нажми, чтобы ${localStorage.getItem("fold:kb-muts") === "1" ? "свернуть" : "развернуть"}</summary><div class="kb-muts">${k.mutations.map(mutChip).join("")}</div>
-          <div class="kb-mut-slots muted">Лимит: не больше ${k.mut_per_stage || 3} мутаций на стадию · ${[1, 2, 3, 4, 5, 6].filter((st) => st <= k.stage.size || k.mut_slots?.[st]).map((st) => { const n = k.mut_slots?.[st] || 0, mx = k.mut_per_stage || 3; return `<span class="${n >= mx ? "full" : ""}">ст.${st}: ${n}/${mx}</span>`; }).join(" · ")}</div></details>` : ""}
+          <div class="kb-mut-slots muted">На каждой стадии — до ${k.mut_per_stage || 3} мутаций этой стадии · ${[1, 2, 3, 4, 5, 6].filter((st) => st <= k.stage.size || k.mut_slots?.[st]).map((st) => { const n = k.mut_slots?.[st] || 0, mx = k.mut_per_stage || 3; return `<span class="${n >= mx ? "full" : ""}">ст.${st}: ${n}/${mx}</span>`; }).join(" · ")}</div></details>` : ""}
         ${k.dies_in != null && k.alive ? `<div class="kb-danger">⚠️ Гриб на грани! Закиснет через ${fmtLeft(k.dies_in)}, если не поднять показатель с нуля.</div>` : ""}
         <div class="kb-stats">${STAT.map(([key, label]) => { const v = k.stats[key];
           return `<div class="kb-stat"><span>${label}</span><div class="kb-bar ${v < 25 ? "low" : v > 90 && key === "sweet" ? "over" : ""}"><span style="width:${v}%"></span></div><b>${v}</b></div>`; }).join("")}</div>
@@ -1482,7 +1482,7 @@ async function pageKombucha() {
     const codexOpen = localStorage.getItem("fold:kb-codex") === "1";
     $("#kb-codex").innerHTML = `<details class="kb-codex-box" data-fold="kb-codex"${codexOpen ? " open" : ""}><summary><h2>🧬 Коллекция мутаций <span class="muted">${found.size}/${S.catalog.length}</span></h2><span class="muted kb-fold-hint">${codexOpen ? "свернуть" : "развернуть"}</span></summary>
       <p class="muted kb-codex-lead">По 40 мутаций на каждую стадию. Каждый выпавший экземпляр получает номер на весь сайт — как подарки в Telegram: «#1» бывает только один.
-        Первая находка каждой мутации даёт +15 $₽. Шанс за подходящее действие: обычная 6%, редкая 2,5%, эпическая 1%, легендарная 0,4%. У одного гриба — не больше 3 мутаций каждой стадии.</p>
+        Первая находка каждой мутации даёт +15 $₽. Шанс за подходящее действие: обычная 6%, редкая 2,5%, эпическая 1%, легендарная 0,4%. Гриб получает только мутации своей текущей стадии и не больше 3 на стадию — вырос, открылись 3 новых места.</p>
       <div class="kb-rar-legend">${order.map((r) => `<span class="kb-mut r-${r}">${RAR[r]} ${got(r)}/${cnt(r)}</span>`).join("")}</div>
       ${Object.entries(byStage).map(([st, list]) => `<details class="kb-cx-stage-box" data-fold="kb-cx-${st}"${localStorage.getItem(`fold:kb-cx-${st}`) === "0" ? "" : " open"}><summary class="kb-cx-stage">Стадия ${st}: ${esc(list[0].stage_title)} <span class="muted">${list.filter((m) => found.has(m.code)).length}/${list.length}</span></summary>
       <div class="kb-codex">${list.slice().sort((x, y) => order.indexOf(x.rarity) - order.indexOf(y.rarity)).map((m) => { const f = found.get(m.code);
