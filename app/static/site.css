@@ -718,3 +718,8 @@ main.main-wide { max-width: 1180px; }
 .kb-card-more > summary { cursor: pointer; font-size: 12px; opacity: .75; list-style: none; }
 .kb-card-more[open] > summary { display: none; }
 .kb-mut-slots { font-size: 12px; margin-top: 6px; } .kb-mut-slots .full { color: #e0564b; font-weight: 600; }
+/* косметика мутаций */
+.kb-sticker, .kb-jar-sticker { dominant-baseline: middle; pointer-events: none; }
+.kb-jar-sticker { opacity: .9; filter: drop-shadow(0 1px 0 #0003); }
+.kb-drift { animation: kb-drift 5s ease-in-out infinite; transform-box: fill-box; }
+@keyframes kb-drift { 0%,100% { transform: translate(0,0) rotate(-6deg); } 50% { transform: translate(6px,-8px) rotate(6deg); } }

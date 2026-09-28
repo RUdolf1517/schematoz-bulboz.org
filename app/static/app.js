@@ -1291,6 +1291,46 @@ const KB_MOOD = {
   moldy: ["🦠", "Заплесневел — нужна уксусная ванна"], dead: ["💀", "Закис"],
 };
 
+// ---- косметика мутаций: у КАЖДОЙ мутации свой видимый слой, слои складываются.
+// Место действия (гриб / комбуча / банка), вид эффекта и расположение выводятся из кода мутации,
+// цвет и эмодзи — из самой мутации, редкость усиливает эффект.
+const kbHash = (s) => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.codePointAt(0), 16777619); return h >>> 0; };
+const KB_OWN_FX = new Set(["crown", "scholar", "survivor", "phoenix", "chatty", "holivar", "sparkle", "spotted", "striped", "crystal", "cosmic", "bubbly", "early", "clean_freak", "glow", "jelly", "rainbow"]);
+function kbMutFx(k, w, h, top, level) {
+  const L = { disc: [], edge: [], liquid: [], jar: [], lid: [], outside: [], glow: [], glass: [], lidColor: null, discColors: [] };
+  const R = { common: 1, rare: 1.3, epic: 1.7, legendary: 2.2 };
+  (k.mutations || []).forEach((m, idx) => {
+    const hs = kbHash(m.code), col = m.color || "#fff", dk = shade(col), r = R[m.rarity] || 1;
+    const rnd = (n) => (kbHash(m.code + n) % 1000) / 1000;          // стабильные «случайные» числа мутации
+    if (idx < 3) L.discColors.push(col);
+    if (m.rarity === "legendary" || m.rarity === "epic") L.glow.push(`drop-shadow(0 0 ${m.rarity === "legendary" ? 7 : 4}px ${col})`);
+    if (KB_OWN_FX.has(m.code)) return;                               // у этих — ручная отрисовка ниже
+    const place = hs % 3, kind = (hs >> 3) % 4;
+    if (place === 0) {                                                // ГРИБ
+      if (kind === 0) for (let i = 0; i < 2 + Math.round(r * 1.5); i++)
+        L.disc.push(`<ellipse cx="${((rnd("x" + i) - 0.5) * 1.5 * w).toFixed(1)}" cy="${((rnd("y" + i) - 0.5) * 1.2 * h).toFixed(1)}" rx="${(w * 0.06 * r).toFixed(1)}" ry="${(h * 0.16 * r).toFixed(1)}" fill="${dk}" opacity=".7"/>`);
+      else if (kind === 1) L.disc.push(`<ellipse rx="${(w * (0.35 + rnd("r") * 0.5)).toFixed(1)}" ry="${(h * (0.35 + rnd("r") * 0.5)).toFixed(1)}" fill="none" stroke="${col}" stroke-width="${(1.2 * r).toFixed(1)}" stroke-dasharray="${rnd("d") > 0.5 ? "4 3" : "none"}" opacity=".85"/>`);
+      else if (kind === 2) { const n = 3 + Math.round(r * 2);           // выросты по краю
+        for (let i = 0; i < n; i++) { const a = Math.PI * (1.1 + 0.8 * (i + 0.5) / n + (rnd("a") - 0.5) * 0.1);
+          L.edge.push(`<circle cx="${(Math.cos(a) * w * 0.92).toFixed(1)}" cy="${(Math.sin(a) * h * 0.95).toFixed(1)}" r="${(2 + r).toFixed(1)}" fill="${col}" stroke="${dk}" stroke-width=".8"/>`); } }
+      else L.disc.push(`<text x="${((rnd("x") - 0.5) * 1.3 * w).toFixed(1)}" y="${((rnd("y") - 0.3) * h + 4).toFixed(1)}" font-size="${(8 * r).toFixed(0)}" text-anchor="middle" class="kb-sticker">${esc(m.emoji)}</text>`);
+    } else if (place === 1) {                                         // КОМБУЧА (жидкость)
+      if (kind === 0) for (let i = 0; i < 3 + Math.round(r * 2); i++)  // цветные пузырьки-частицы
+        L.liquid.push(`<circle class="kb-bubble" cx="${(44 + rnd("p" + i) * 132).toFixed(0)}" cy="196" r="${(1.5 + rnd("s" + i) * 2 * r).toFixed(1)}" fill="${col}" style="animation-delay:${(rnd("t" + i) * 4).toFixed(2)}s"/>`);
+      else if (kind === 1) L.liquid.push(`<path d="M30,${(top + level * (0.35 + rnd("h") * 0.5)).toFixed(0)} Q70,${(top + level * 0.4).toFixed(0)} 110,${(top + level * (0.35 + rnd("h") * 0.5)).toFixed(0)} T190,${(top + level * 0.6).toFixed(0)} L190,230 L30,230 Z" fill="${col}" opacity="${(0.14 * r).toFixed(2)}"/>`);
+      else if (kind === 2) L.liquid.push(`<text x="${(50 + rnd("x") * 120).toFixed(0)}" y="${(top + 20 + rnd("y") * Math.max(level - 30, 10)).toFixed(0)}" font-size="${(9 * r).toFixed(0)}" class="kb-drift" style="animation-delay:${(rnd("t") * 3).toFixed(1)}s">${esc(m.emoji)}</text>`);
+      else for (let i = 0; i < 4; i++)                                // искорки в чае
+        L.liquid.push(`<circle cx="${(44 + rnd("x" + i) * 132).toFixed(0)}" cy="${(top + 10 + rnd("y" + i) * Math.max(level - 16, 10)).toFixed(0)}" r="${(0.8 * r).toFixed(1)}" fill="${col}" class="kb-star" style="animation-delay:${(i * 0.4).toFixed(1)}s"/>`);
+    } else {                                                          // БАНКА
+      if (kind === 0) L.jar.push(`<text x="${(62 + rnd("x") * 96).toFixed(0)}" y="${(120 + rnd("y") * 70).toFixed(0)}" font-size="${(10 * r).toFixed(0)}" text-anchor="middle" class="kb-jar-sticker">${esc(m.emoji)}</text>`);
+      else if (kind === 1) L.glass.push(col);                         // тонировка стекла
+      else if (kind === 2) { L.lidColor = L.lidColor || col; L.lid.push(`<circle cx="${(70 + rnd("x") * 80).toFixed(0)}" cy="17" r="${(2.5 * r).toFixed(1)}" fill="${dk}"/>`); }
+      else L.outside.push(`<text x="${rnd("s") > 0.5 ? 16 + rnd("x") * 10 : 196 + rnd("x") * 10}" y="${(40 + rnd("y") * 170).toFixed(0)}" font-size="${(12 * r).toFixed(0)}" class="kb-acc kb-orbit ${m.rarity}" style="animation-delay:${(rnd("t") * 2).toFixed(1)}s">${esc(m.emoji)}</text>`);
+    }
+  });
+  return L;
+}
+
 function kombuchaSVG(k, { small = false } = {}) {
   const st = k.stats, size = k.stage.size;
   const muts = new Set((k.mutations || []).map((m) => m.code));
@@ -1341,26 +1381,31 @@ function kombuchaSVG(k, { small = false } = {}) {
   if (has("sparkle")) outside.push(...[[28, 60], [192, 80], [24, 170], [196, 190]].map(([x, y], i) => `<text x="${x}" y="${y}" class="kb-acc kb-twinkle" font-size="14" style="animation-delay:${i * 0.4}s">✨</text>`));
   // эпические и легендарные — эмодзи на орбите вокруг банки
   const SPECIAL = new Set(["crown", "scholar", "survivor", "phoenix", "chatty", "holivar", "sparkle"]);
-  const orbit = (k.mutations || []).filter((m) => (m.rarity === "epic" || m.rarity === "legendary") && !SPECIAL.has(m.code)).slice(0, 6);
+  const orbit = [];  // эпические/легендарные теперь рисуются общим слоем kbMutFx
   const OP = [[20, 40], [200, 44], [14, 110], [206, 150], [22, 200], [198, 214]];
   orbit.forEach((m, i) => outside.push(`<text x="${OP[i][0]}" y="${OP[i][1]}" class="kb-acc kb-orbit ${m.rarity}" font-size="${m.rarity === "legendary" ? 20 : 16}" style="animation-delay:${i * 0.5}s">${esc(m.emoji)}</text>`));
   if (has("early")) outside.unshift(`<circle cx="110" cy="120" r="108" fill="url(#kb-halo)"/>`);
+  const FX = kbMutFx(k, w, h, top, level);
+  const gid = `${k.id || 0}${small ? "s" : ""}`;
+  const discFill = !old && FX.discColors.length > 1
+    ? `url(#kb-dg-${gid})` : null;
   const cls = ["kb-svg", k.frozen ? "frozen" : "", `mood-${k.mood}`, ...[...muts].map((c) => `mut-${c}`), small ? "small" : ""].join(" ");
   return `<svg class="${cls}" viewBox="0 0 220 230" role="img" aria-label="Чайный гриб ${esc(k.name)}: ${esc(k.stage.title)}">
     <defs><clipPath id="kb-jar-${k.id || 0}"><path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z"/></clipPath>
+      ${discFill ? `<linearGradient id="kb-dg-${gid}" x1="0" x2="1" y1="0" y2="1">${FX.discColors.map((c, i) => `<stop offset="${(i / (FX.discColors.length - 1) * 100).toFixed(0)}%" stop-color="${c}"/>`).join("")}</linearGradient>` : ""}
       <radialGradient id="kb-halo"><stop offset="0%" stop-color="#ffb347" stop-opacity=".45"/><stop offset="100%" stop-color="#ffb347" stop-opacity="0"/></radialGradient></defs>
-    ${outside.join("")}
-    <rect x="60" y="6" width="100" height="22" rx="6" class="kb-lid"/>
+    ${outside.join("")}${FX.outside.join("")}
+    <rect x="60" y="6" width="100" height="22" rx="6" class="kb-lid"${FX.lidColor ? ` style="fill:${FX.lidColor};stroke:${shade(FX.lidColor)}"` : ""}/>${FX.lid.join("")}
     <g clip-path="url(#kb-jar-${k.id || 0})">
       <rect x="30" y="${top}" width="160" height="${230 - top}" fill="${tint}" class="kb-liquid"/>
       <path d="M30,${top} Q70,${top - 4} 110,${top} T190,${top}" stroke="#ffffff55" stroke-width="2" fill="none"/>
-      ${stars}${bubbles}
-      <g class="${k.alive ? "kb-float" : ""}"><g class="kb-mush" transform="translate(${cx},${cy})">
+      ${stars}${bubbles}${FX.liquid.join("")}
+      <g class="${k.alive ? "kb-float" : ""}"><g class="kb-mush" transform="translate(${cx},${cy})"${FX.glow.length ? ` style="filter:${FX.glow.slice(0, 3).join(" ")}"` : ""}>
         <g class="kb-disc-wrap">
-          <ellipse rx="${w}" ry="${h}" class="kb-disc" ${disc ? `style="fill:${disc[1]};stroke:${disc[2]}"` : ""}/>
+          <ellipse rx="${w}" ry="${h}" class="kb-disc" ${discFill ? `style="fill:${discFill};stroke:${shade(FX.discColors[0])}"` : disc ? `style="fill:${disc[1]};stroke:${disc[2]}"` : ""}/>
           <ellipse rx="${w * 0.8}" ry="${h * 0.5}" cy="-${h * 0.3}" class="kb-disc-hi"/>
-          ${stripes}${dots}${crystal}
-        </g>
+          ${stripes}${dots}${crystal}${FX.disc.join("")}
+        </g>${FX.edge.join("")}
         ${size >= 4 ? `<path d="M-${w * 0.7},${h * 0.6} q6,14 12,0 q6,14 12,0 M${w * 0.3},${h * 0.6} q6,14 12,0" class="kb-tendrils"/>` : ""}
         <g class="kb-face" transform="translate(0,${(-h * 0.15).toFixed(1)}) scale(${faceK.toFixed(2)})">
           ${f.map((d) => `<path d="${d}"/>`).join("")}
@@ -1371,7 +1416,7 @@ function kombuchaSVG(k, { small = false } = {}) {
       <g opacity="${dirt.toFixed(2)}">${spots}</g>
       ${k.mold ? Array.from({ length: 9 }, (_, i) => `<circle cx="${cx + (((i * 37) % 80) - 40) * (w / 60)}" cy="${cy - h * 0.4 + ((i * 13) % 10) - 5}" r="${3 + (i % 3) * 2}" class="kb-moldspot"/>`).join("") : ""}
     </g>
-    <path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z" class="kb-jar"/>
+    <path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z" class="kb-jar"${FX.glass.length ? ` style="fill:${FX.glass[0]}22;stroke:${FX.glass[FX.glass.length - 1]}"` : ""}/>${FX.jar.join("")}
     <path d="M52,50 L50,190" class="kb-glare"/>${has("clean_freak") ? `<path d="M64,60 L63,110" class="kb-glare"/>` : ""}
     ${k.frozen ? `<path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z" class="kb-ice"/><text x="160" y="60" class="kb-acc" font-size="20">❄️</text>` : ""}
     ${small ? "" : `<g class="kb-mood-badge"><circle cx="186" cy="30" r="17"/><text x="186" y="37" text-anchor="middle" font-size="20">${KB_MOOD[k.mood]?.[0] || "🙂"}</text></g>`}
