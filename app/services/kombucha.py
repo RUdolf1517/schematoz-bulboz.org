@@ -103,11 +103,25 @@ def has_mut(k: Kombucha, code: str) -> bool:
     return any(x.get("code") == code for x in (k.mutations or []))
 
 
+MAX_MUT_PER_STAGE = 3  # у одного гриба — не больше 3 мутаций каждой стадии (итого до 18)
+
+
+def stage_mut_counts(k: Kombucha) -> dict[int, int]:
+    out: dict[int, int] = {}
+    for x in (k.mutations or []):
+        m = MUT_BY_CODE.get(x.get("code"))
+        if m:
+            out[m.stage] = out.get(m.stage, 0) + 1
+    return out
+
+
 def roll_mutation(ctx: Ctx) -> Mutation | None:
     """Максимум одна новая мутация за действие. Кандидаты перемешаны, чтобы порядок
     в каталоге не давал преимущества; сначала бросаем редкие."""
     size = stage_for(ctx.k.xp)["size"]
-    cands = [m for m in MUTATIONS if m.stage <= size and not has_mut(ctx.k, m.code) and m.check(ctx)]
+    full = {st for st, n in stage_mut_counts(ctx.k).items() if n >= MAX_MUT_PER_STAGE}
+    cands = [m for m in MUTATIONS if m.stage <= size and m.stage not in full
+             and not has_mut(ctx.k, m.code) and m.check(ctx)]
     rng.shuffle(cands)
     cands.sort(key=lambda m: RARITY_ORDER.index(m.rarity))
     for m in cands:
@@ -502,7 +516,8 @@ def out(k: Kombucha) -> dict:
         "stage": st, "cooldowns": cds, "dies_in": danger, "next_drop_in": next_drop_in(k, at) if k.alive else None,
         "age_days": (at - k.born_at).days, "born_at": k.born_at.isoformat(),
         "died_at": k.died_at.isoformat() if k.died_at else None,
-        "mutations": muts, "care_days": k.care_days, "sprouted": k.sprouted, "sprout_pending": k.sprout_pending,
+        "mutations": muts, "mut_per_stage": MAX_MUT_PER_STAGE,
+        "mut_slots": {str(st): n for st, n in sorted(stage_mut_counts(k).items())}, "care_days": k.care_days, "sprouted": k.sprouted, "sprout_pending": k.sprout_pending,
         "sprout_progress": sprout_progress(k, at), "mold": bool(k.mold),
         "owners": [{"username": o.get("username"), "at": o.get("at"), "how": o.get("how")} for o in (k.owners or [])],
         "is_sprout": k.parent_id is not None,

@@ -717,3 +717,4 @@ main.main-wide { max-width: 1180px; }
 .kb-card-more { display: contents; }
 .kb-card-more > summary { cursor: pointer; font-size: 12px; opacity: .75; list-style: none; }
 .kb-card-more[open] > summary { display: none; }
+.kb-mut-slots { font-size: 12px; margin-top: 6px; } .kb-mut-slots .full { color: #e0564b; font-weight: 600; }

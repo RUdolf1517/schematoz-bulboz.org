@@ -432,3 +432,28 @@ def test_sprout_only_on_last_stage(app, make_user, no_mutations):
     _edit(app, kid, xp=4000, care_days=6, last_care_day=None)
     r = c.post(f"/api/kombucha/{kid}/sugar", json={}).get_json()
     assert r["sprout"] and r["sprout"]["planted"]
+
+
+def test_max_three_mutations_per_stage():
+    from types import SimpleNamespace
+    from app.services.kombucha_mutations import MUTATIONS, Ctx
+    s1 = [m for m in MUTATIONS if m.stage == 1]
+    k = SimpleNamespace(xp=0, mutations=[{"code": m.code} for m in s1[:2]], mold=False)
+    import pytest as _p
+    mp = _p.MonkeyPatch()
+    try:
+        mp.setattr(kb.rng, "random", lambda: 0.0)                  # любой шанс срабатывает
+        from app.services.kombucha_mutations import Mutation
+        mp.setattr(Mutation, "check", lambda self, ctx: True)
+        ctx = Ctx(action="pet", k=k, hour=12, weekday=1, answers_24h=0)
+        got = kb.roll_mutation(ctx)
+        assert got is not None and got.stage == 1                  # третья на стадии 1 ещё можно
+        k.mutations.append({"code": got.code})
+        assert kb.stage_mut_counts(k) == {1: 3}
+        for _ in range(50):
+            assert kb.roll_mutation(ctx) is None                   # стадия 1 заполнена, а выше гриб ещё не вырос
+        k.xp = 10 ** 6                                             # Легенда: доступны все стадии, кроме заполненной
+        for _ in range(50):
+            assert kb.roll_mutation(ctx).stage != 1
+    finally:
+        mp.undo()
