@@ -205,3 +205,79 @@ async def analytics():
             "answers_24h": await count(select(func.count(Answer.id)).where(Answer.created_at >= day_ago)),
             "reports_open": await count(select(func.count(Report.id)).where(Report.status == ReportStatus.OPEN)),
         }
+
+
+# ---------------------------------------------------------------- дебаг чайных грибов (только админ)
+KB_DEBUG_PERM = "role.assign"   # есть только у роли admin
+
+
+@bp.get("/kombucha")
+@require_perm(KB_DEBUG_PERM)
+async def kb_debug_list():
+    """Грибы юзера (по умолчанию — свои) + полный каталог мутаций и стадий."""
+    from ..models import Kombucha
+    from ..services import kombucha as kb
+    login = (request.args.get("user") or "").strip().lstrip("@")
+    async with session_scope() as s:
+        user = g.user
+        if login:
+            user = (await s.execute(select(User).where(func.lower(User.username) == login.lower()))).scalar()
+            if user is None:
+                raise ApiError("Пользователь не найден", 404, "not_found")
+        items = (await s.execute(select(Kombucha).where(Kombucha.user_id == user.id)
+                                 .order_by(Kombucha.id))).scalars().all()
+        return {"user": user.username, "items": [kb.out(k) for k in items], "catalog": kb.catalog(),
+                "stages": [{"xp": xp, "title": t, "size": sz} for xp, t, sz in kb.STAGES],
+                "moods": ["happy", "hungry", "thirsty", "dirty", "sad", "sticky", "moldy", "dead"]}
+
+
+@bp.patch("/kombucha/<int:kid>")
+@require_perm(KB_DEBUG_PERM)
+async def kb_debug_edit(kid: int):
+    """Поменять гриб в обход правил: стадия (xp), мутации (любые, без лимитов), статы, жив/плесень/лёд.
+    Мутации ставятся с serial 0 и пометкой debug — тиражи и коллекции игроков не трогаются."""
+    from ..models import Kombucha
+    from ..services import kombucha as kb
+    data = json_body()
+    async with session_scope() as s:
+        k = await s.get(Kombucha, kid)
+        if k is None:
+            raise ApiError("Гриб не найден", 404, "not_found")
+        if k.alive and not k.frozen:
+            kb.tick(k)          # досчитать убывание до «сейчас», дальше правим уже актуальные значения
+        changed = {}
+        if "stage" in data:
+            sizes = {sz: xp for xp, _, sz in kb.STAGES}
+            if data["stage"] not in sizes:
+                raise ApiError("stage — от 1 до 6", 400, "validation_error")
+            k.xp = sizes[data["stage"]]
+            k.best_xp = max(k.best_xp or 0, k.xp)
+            changed["stage"] = data["stage"]
+        if "xp" in data:
+            k.xp = max(0, int(data["xp"]))
+            changed["xp"] = k.xp
+        if "mutations" in data:
+            codes = data["mutations"]
+            if not isinstance(codes, list) or any(c not in kb.MUT_BY_CODE for c in codes):
+                raise ApiError("Неизвестная мутация", 400, "validation_error")
+            old = {x.get("code"): x for x in (k.mutations or [])}
+            at = kb.now().isoformat()
+            k.mutations = [old.get(c) or {"code": c, "at": at, "serial": 0, "debug": True}
+                           for c in dict.fromkeys(codes)]
+            changed["mutations"] = len(k.mutations)
+        for st in kb.STATS:
+            if st in (data.get("stats") or {}):
+                setattr(k, st, float(max(0, min(100, data["stats"][st]))))
+                changed[st] = getattr(k, st)
+        for flag in ("alive", "mold", "frozen"):
+            if flag in data:
+                setattr(k, flag, bool(data[flag]))
+                changed[flag] = bool(data[flag])
+        if all(getattr(k, st) > 0 for st in kb.STATS):
+            k.zero_since = None
+        if data.get("alive") is True:
+            k.died_at, k.zero_since = None, None
+        k.cooldowns = {}
+        log_action(s, g.user.id, "kombucha.debug", "kombucha", kid, **{c: str(v) for c, v in changed.items()})
+        await s.flush()
+        return {"kombucha": kb.out(k)}

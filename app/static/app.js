@@ -1088,9 +1088,99 @@ async function pageMod() {
   });
 }
 
+// ---------------------------------------------------------------- админ: дебаг грибов
+async function kbDebugPanel(panel, login = "", selId = null) {
+  const D = await api("GET", `/admin/kombucha${login ? `?user=${encodeURIComponent(login)}` : ""}`);
+  const RAR = { common: "обычная", rare: "редкая", epic: "эпическая", legendary: "легендарная" };
+  let k = D.items.find((x) => x.id === selId) || D.items[0];
+  const save = async (patch) => {
+    try { const r = await api("PATCH", `/admin/kombucha/${k.id}`, patch); k = r.kombucha; D.items = D.items.map((x) => (x.id === k.id ? k : x)); draw(); }
+    catch (_) {}
+  };
+  const draw = () => {
+    if (!k) { panel.innerHTML = `${head()}<p class="muted">У @${esc(D.user)} нет грибов.</p>`; bindHead(); return; }
+    const on = new Set(k.mutations.map((m) => m.code));
+    const q = ($("#kbd-q")?.value || "").toLowerCase();
+    const onlyOn = $("#kbd-on")?.checked;
+    const byStage = {};
+    D.catalog.forEach((m) => (byStage[m.stage] ||= []).push(m));
+    panel.innerHTML = `${head()}
+      <div class="kbd">
+        <div class="kbd-left">
+          <div class="kbd-prev">${kombuchaSVG(k)}</div>
+          <p class="muted" style="text-align:center">«${esc(k.name)}» · ${esc(k.stage.title)} · xp ${k.xp} · настроение: ${esc(KB_MOOD[k.mood]?.[1] || k.mood)} · мутаций: ${on.size}</p>
+          <div class="kbd-row"><b>Стадия:</b> ${D.stages.map((st) => `<button class="btn btn-sm ${st.size === k.stage.size ? "btn-accent" : ""}" data-stage="${st.size}" title="${esc(st.title)} (от ${st.xp} xp)">${st.size}</button>`).join("")}</div>
+          ${["sweet", "tea", "clean", "happy"].map((st) => `<label class="kbd-row"><span>${{ sweet: "🍬 сахар", tea: "🫖 заварка", clean: "🧽 чистота", happy: "💛 счастье" }[st]}</span>
+            <input type="range" min="0" max="100" value="${k.stats[st]}" data-stat="${st}"><b>${k.stats[st]}</b></label>`).join("")}
+          <div class="kbd-row">
+            <label><input type="checkbox" data-flag="alive" ${k.alive ? "checked" : ""}> живой</label>
+            <label><input type="checkbox" data-flag="mold" ${k.mold ? "checked" : ""}> плесень</label>
+            <label><input type="checkbox" data-flag="frozen" ${k.frozen ? "checked" : ""}> заморожен</label>
+          </div>
+          <div class="kbd-row">
+            <button class="btn btn-sm" data-bulk="clear">Снять все мутации</button>
+            <button class="btn btn-sm" data-bulk="stage3">По 3 на каждую стадию (случайно)</button>
+            <button class="btn btn-sm" data-bulk="all-stage">Все мутации текущей стадии</button>
+          </div>
+          <p class="muted small">Изменения сразу сохраняются на гриб. Мутации из панели ставятся без лимитов, с номером #0 и не попадают в тиражи и коллекции.</p>
+        </div>
+        <div class="kbd-right">
+          <div class="kbd-row"><input class="input" id="kbd-q" placeholder="Поиск мутации: название, код, эмодзи" value="${esc(q)}">
+            <label><input type="checkbox" id="kbd-on" ${onlyOn ? "checked" : ""}> только включённые</label></div>
+          ${Object.entries(byStage).map(([st, list]) => {
+            const vis = list.filter((m) => (!q || (m.title + m.code + m.emoji).toLowerCase().includes(q)) && (!onlyOn || on.has(m.code)));
+            if (!vis.length) return "";
+            return `<details class="kbd-stage" ${localStorage.getItem("fold:kbd-" + st) === "0" ? "" : "open"} data-fold="kbd-${st}">
+              <summary>Стадия ${st}: ${esc(list[0].stage_title)} <span class="muted">${list.filter((m) => on.has(m.code)).length}/${list.length} вкл.</span></summary>
+              <div class="kbd-muts">${vis.map((m) => `<label class="kbd-mut r-${m.rarity} ${on.has(m.code) ? "on" : ""}" title="${esc(m.code)} · ${RAR[m.rarity]} · ${esc(m.hint)}">
+                <input type="checkbox" data-mut="${esc(m.code)}" ${on.has(m.code) ? "checked" : ""}>
+                <span class="kbd-dot" style="background:${m.color}"></span>${esc(m.emoji)} ${esc(m.title)}</label>`).join("")}</div></details>`;
+          }).join("")}
+        </div>
+      </div>`;
+    bindHead();
+    const codes = () => k.mutations.map((m) => m.code);
+    $$("[data-stage]", panel).forEach((b) => (b.onclick = () => save({ stage: +b.dataset.stage })));
+    $$("[data-stat]", panel).forEach((r) => {
+      r.oninput = () => (r.nextElementSibling.textContent = r.value);
+      r.onchange = () => save({ stats: { [r.dataset.stat]: +r.value } });
+    });
+    $$("[data-flag]", panel).forEach((c) => (c.onchange = () => save({ [c.dataset.flag]: c.checked })));
+    $$("[data-mut]", panel).forEach((c) => (c.onchange = () => {
+      const cur = codes().filter((x) => x !== c.dataset.mut);
+      save({ mutations: c.checked ? [...cur, c.dataset.mut] : cur });
+    }));
+    $$("[data-bulk]", panel).forEach((b) => (b.onclick = () => {
+      const mode = b.dataset.bulk;
+      if (mode === "clear") return save({ mutations: [] });
+      if (mode === "all-stage") return save({ mutations: [...new Set([...codes(), ...D.catalog.filter((m) => m.stage === k.stage.size).map((m) => m.code)])] });
+      const pick = [];
+      for (let st = 1; st <= 6; st++) {
+        const pool = D.catalog.filter((m) => m.stage === st).sort(() => Math.random() - 0.5);
+        pick.push(...pool.slice(0, 3).map((m) => m.code));
+      }
+      save({ mutations: pick });
+    }));
+    const qi = $("#kbd-q"), oi = $("#kbd-on");
+    qi.oninput = () => { const pos = qi.selectionStart; draw(); const n = $("#kbd-q"); n.focus(); n.setSelectionRange(pos, pos); };
+    oi.onchange = draw;
+  };
+  const head = () => `<div class="kbd-row kbd-head">
+      <form id="kbd-user" class="kbd-row"><input class="input" name="u" placeholder="ник владельца (пусто — мои)" value="${esc(login)}"><button class="btn btn-sm">Открыть</button></form>
+      ${D.items.length ? `<select class="input" id="kbd-sel">${D.items.map((x) => `<option value="${x.id}" ${k && x.id === k.id ? "selected" : ""}>#${x.id} ${esc(x.name)} — ${esc(x.stage.title)}${x.alive ? "" : " 💀"}${x.frozen ? " ❄️" : ""}</option>`).join("")}</select>` : ""}
+      <span class="muted">@${esc(D.user)}</span></div>`;
+  const bindHead = () => {
+    $("#kbd-user").onsubmit = (e) => { e.preventDefault(); kbDebugPanel(panel, e.target.elements.u.value.trim()); };
+    const sel = $("#kbd-sel");
+    if (sel) sel.onchange = () => { k = D.items.find((x) => x.id === +sel.value); draw(); };
+  };
+  draw();
+}
+
 async function pageAdmin() {
   if (denied("analytics.read")) return;
   initPanel({
+    async kombucha(panel) { await kbDebugPanel(panel); },
     async analytics(panel) {
       const a = await api("GET", "/admin/analytics");
       const L = { users_total: "Всего юзеров", users_24h: "Новых за 24 ч", dau: "DAU", questions_24h: "Вопросов за 24 ч", answers_24h: "Ответов за 24 ч", reports_open: "Открытых жалоб" };
