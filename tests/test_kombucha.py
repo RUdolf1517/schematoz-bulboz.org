@@ -460,3 +460,28 @@ def test_max_three_mutations_per_stage():
         assert kb.roll_mutation(ctx) is None                       # и их тоже не больше 3
     finally:
         mp.undo()
+
+
+def test_admin_kombucha_debug(make_user, no_mutations):
+    from app.services.kombucha_mutations import MUTATIONS
+    c, u = make_user()
+    kid = _first(c)["id"]
+    mc, _ = make_user("moderator")
+    assert mc.get(f"/admin/kombucha?user={u['username']}").status_code == 403   # только админ
+    assert mc.patch(f"/admin/kombucha/{kid}", json={"stage": 6}).status_code == 403
+    ac, _ = make_user("admin")
+    d = ac.get(f"/admin/kombucha?user={u['username']}").get_json()
+    assert d["items"][0]["id"] == kid and len(d["catalog"]) == 240 and len(d["stages"]) == 6
+    k = ac.patch(f"/admin/kombucha/{kid}", json={"stage": 5}).get_json()["kombucha"]
+    assert k["stage"]["size"] == 5
+    codes = [m.code for m in MUTATIONS if m.stage == 1][:5] + [MUTATIONS[-1].code]   # в обход лимита 3/стадию
+    k = ac.patch(f"/admin/kombucha/{kid}", json={"mutations": codes}).get_json()["kombucha"]
+    assert sorted(m["code"] for m in k["mutations"]) == sorted(codes) and all(m["serial"] == 0 for m in k["mutations"])
+    k = ac.patch(f"/admin/kombucha/{kid}", json={"stats": {"sweet": 99}, "mold": True}).get_json()["kombucha"]
+    assert k["stats"]["sweet"] == 99 and k["mold"]
+    assert ac.patch(f"/admin/kombucha/{kid}", json={"mutations": ["nope"]}).status_code == 400
+    assert ac.patch(f"/admin/kombucha/{kid}", json={"stage": 9}).status_code == 400
+    # владелец видит изменения, тиражи не тронуты
+    assert len(_first(c)["mutations"]) == 6
+    cat = {m["code"]: m for m in _state(c)["catalog"]}
+    assert cat[codes[0]]["issued"] == 0
