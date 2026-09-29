@@ -40,7 +40,7 @@ def test_meditation_flow(make_user, monkeypatch):
     monkeypatch.setattr(med.rng, "random", lambda: 0.0)              # гарантируем мутацию при 100%
     r = c.post(f"/api/kombucha/{kid}/meditate/finish", json={"token": t["token"], "taps": t["beats"]}).get_json()
     res = r["result"]
-    assert res["accuracy"] == 1.0 and res["wood"] == 10 and res["happy"] == 25 and res["mutation"]
+    assert res["accuracy"] == 1.0 and res["wood"] == 10 and res["happy"] == 25 and res["mutation"] and res["mut_why"] == "got"
     assert r["kombucha"]["stats"]["happy"] >= min(100, happy0)
     assert r["wood_balance"] >= wood0 + 10
     # повтор той же сессии — нельзя

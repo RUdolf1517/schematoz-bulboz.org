@@ -1513,7 +1513,7 @@ async function kbMeditate(k, onDone) {
       <p class="kb-med-acc">Точность: <b>${Math.round(R.accuracy * 100)}%</b></p>
       <p class="muted">✨ идеально ${R.perfect} · 👍 хорошо ${R.good} · мимо ${R.miss}${R.extra ? ` · лишних тапов ${R.extra}` : ""}</p>
       <p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за сегодня уже собраны · </span>`}💛 +${R.happy} счастья${R.xp ? ` · +${R.xp} опыта` : ""}</p>
-      ${R.mutation ? `<p class="kb-med-mut">🧬 ${esc(R.mutation.rarity_title)} мутация: ${esc(R.mutation.emoji)} «${esc(R.mutation.title)}» #${R.mutation.serial}</p>` : R.accuracy >= 0.75 ? `<p class="muted">Мутация в этот раз не пришла — шанс растёт с точностью.</p>` : `<p class="muted">С 75% точности появляется шанс мутации.</p>`}
+      ${R.mutation ? `<p class="kb-med-mut">🧬 ${esc(R.mutation.rarity_title)} мутация: ${esc(R.mutation.emoji)} «${esc(R.mutation.title)}» #${R.mutation.serial}</p>` : `<p class="muted">${{ limit: "На этой стадии у гриба уже 3 мутации — новые откроются на следующей стадии.", luck: "Мутация в этот раз не пришла — чем точнее, тем выше шанс (до 15%).", low: "С 75% точности появляется шанс мутации." }[R.mut_why] || ""}</p>`}
       <button class="btn btn-accent" data-close>Готово</button></div>`);
     el.querySelectorAll(".kb-med-help, .kb-med-combo, .kb-med-judge, .kb-med-bar").forEach((x) => x.remove());
     el.querySelector("[data-close]").onclick = cleanup;

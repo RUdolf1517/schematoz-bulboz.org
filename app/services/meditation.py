@@ -161,7 +161,16 @@ async def finish(s, user, k, token: str, taps) -> dict:
     if acc >= 0.95:
         from . import kombucha_achievements as ach
         await ach.award(s, user.id, "kb_zen")
-    return {**res, "happy": happy, "xp": xp if not k.mold else 0, "wood": earned, "mutation": mut,
+    size = kb.stage_for(k.xp)["size"]
+    if mut:
+        why = "got"
+    elif acc < MUT_FROM_ACC:
+        why = "low"
+    elif kb.stage_mut_counts(k).get(size, 0) >= kb.MAX_MUT_PER_STAGE:
+        why = "limit"
+    else:
+        why = "luck"
+    return {**res, "mut_why": why, "happy": happy, "xp": xp if not k.mold else 0, "wood": earned, "mutation": mut,
             "cooldown": COOLDOWN, "grade": grade(acc)}
 
 
