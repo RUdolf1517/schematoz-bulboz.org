@@ -1433,6 +1433,60 @@ function kbMutFx(k, w, h, top, level) {
   return L;
 }
 
+// ---- Звуки бульков (Web Audio, без файлов). Бульк = синус со взлётом высоты и быстрым затуханием —
+// так звучит лопающийся пузырь. Звук можно выключить (кнопка 🔊 в игре), выбор запоминается.
+const kbSnd = {
+  ctx: null,
+  get muted() { return localStorage.getItem("kb-mute") === "1"; },
+  set muted(v) { localStorage.setItem("kb-mute", v ? "1" : "0"); },
+  ac() {
+    if (!this.ctx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return null; this.ctx = new C(); }
+    if (this.ctx.state === "suspended") this.ctx.resume?.();
+    return this.ctx;
+  },
+  // один пузырь: f0 → f1 за sweep секунд, громкость vol, длина dur
+  blip(at, f0, f1, sweep, dur, vol, type = "sine") {
+    const c = this.ctx, o = c.createOscillator(), g = c.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, at);
+    o.frequency.exponentialRampToValueAtTime(f1, at + sweep);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(vol, at + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    o.connect(g).connect(this.out());
+    o.start(at); o.stop(at + dur + 0.02);
+  },
+  out() {                                                 // общий выход с мягким фильтром (убирает «компьютерность»)
+    if (!this._out) { const f = this.ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 2400; f.connect(this.ctx.destination); this._out = f; }
+    return this._out;
+  },
+  // короткий бульк «Памяти»: у каждой из 4 банок своя высота (до-ми-соль-до — легко запомнить на слух)
+  short(pad, at) {
+    if (this.muted || !this.ac()) return;
+    const c = this.ctx, t = at ?? c.currentTime, base = [262, 330, 392, 523][pad] || 330;
+    this.blip(t, base * 0.7, base * 1.6, 0.06, 0.14, 0.35);
+    this.blip(t + 0.03, base * 1.2, base * 2.2, 0.04, 0.08, 0.12);   // «капелька» сверху
+  },
+  // протяжный бульк медитации: низкий пузырь с долгим хвостом и россыпью мелких пузырьков
+  long(at) {
+    if (this.muted || !this.ac()) return;
+    const c = this.ctx, t = at ?? c.currentTime;
+    this.blip(t, 110, 240, 0.35, 1.1, 0.4);
+    this.blip(t, 220, 330, 0.5, 0.9, 0.12, "triangle");
+    for (let i = 0; i < 4; i++) { const d = 0.12 + i * 0.13 + Math.random() * 0.05, f = 380 + Math.random() * 260;
+      this.blip(t + d, f, f * 1.8, 0.05, 0.12, 0.07 - i * 0.012); }
+  },
+};
+function kbMuteBtn(el) {
+  const b = document.createElement("button");
+  b.className = "kb-med-snd"; b.title = "Звук вкл/выкл";
+  const upd = () => (b.textContent = kbSnd.muted ? "🔇" : "🔊");
+  upd();
+  b.onpointerdown = (e) => e.stopPropagation();
+  b.onclick = (e) => { e.stopPropagation(); kbSnd.muted = !kbSnd.muted; upd(); if (!kbSnd.muted) kbSnd.short(2); };
+  el.appendChild(b);
+}
+
 // ---- Меню и мини-игры гриба. Всё считает сервер: клиент только показывает и собирает действия.
 async function kbGamesMenu(k, onDone) {
   let items;
@@ -1440,6 +1494,7 @@ async function kbGamesMenu(k, onDone) {
   const m = modal(`<h2>🎮 Игры гриба</h2><p class="muted">Награда — по точности: $₽, счастье, опыт, шанс мутации (с 75%). Каждую игру можно повторить через несколько минут.</p>
     <div class="kb-games">${items.map((g) => `<button class="kb-game-card" data-game="${g.code}"><span class="e">${g.emoji}</span><b>${esc(g.title)}</b><small>${esc(g.about)}</small></button>`).join("")}</div>`);
   m.el.querySelectorAll("[data-game]").forEach((b) => (b.onclick = () => {
+    kbSnd.ac();                                                   // включить звук внутри жеста (иначе iOS промолчит)
     m.close();
     const g = b.dataset.game;
     if (g === "meditation") return kbMeditate(k, onDone);
@@ -1534,7 +1589,8 @@ async function kbMemory(k, onDone) {
   sh.area.innerHTML = `<div class="kb-mem">${PADS.map(([e, c], i) => `<button class="kb-mem-pad ${c}" data-pad="${i}">${e}</button>`).join("")}</div>`;
   const pads = [...sh.area.querySelectorAll("[data-pad]")];
   let seq = G.seq, input = [], listening = false;
-  const flash = (i) => { pads[i].classList.add("lit"); sh.later(() => pads[i].classList.remove("lit"), 380); };
+  kbMuteBtn(sh.el); kbSnd.ac();                                  // клик по карточке игры — жест, разблокирует звук
+  const flash = (i) => { kbSnd.short(i); pads[i].classList.add("lit"); sh.later(() => pads[i].classList.remove("lit"), 380); };
   const play = () => {
     listening = false; input = []; sh.hud.textContent = `цепочка ${seq.length}/${G.total}`; sh.say("Смотри…", "count");
     seq.forEach((p, i) => sh.later(() => flash(p), 700 + i * 600));
@@ -1622,11 +1678,13 @@ async function kbMeditate(k, onDone) {
     <p class="kb-med-help muted">Тапай по экрану (или жми пробел), когда кольцо сойдётся с кругом — в такт бульканью гриба.</p>`;
   document.body.appendChild(el);
   document.body.classList.add("kb-med-on");
+  kbMuteBtn(el);
   const $m = (q) => el.querySelector(q);
   const rings = $m(".kb-med-rings"), judge = $m(".kb-med-judge"), combo = $m(".kb-med-combo"), grib = $m(".kb-med-grib"), bar = $m(".kb-med-bar i");
   const APPROACH = 1300;
   const taps = [], hit = new Set();
   let t0 = performance.now(), raf = 0, done = false, streak = 0, spawned = 0;
+  const ac = kbSnd.ac(), aBase = ac ? ac.currentTime : 0;          // аудио-время, соответствующее t0
   const now = () => performance.now() - t0;
   const show = (text, cls) => { if (cls === "count" && judge.textContent === text) return; judge.textContent = text; judge.className = `kb-med-judge ${cls}`; void judge.offsetWidth; judge.classList.add("pop"); };
   const tap = (e) => {
@@ -1662,6 +1720,7 @@ async function kbMeditate(k, onDone) {
       rings.appendChild(r);
       setTimeout(() => r.remove(), APPROACH + 250);
       const bt = T.beats[spawned];
+      if (ac) kbSnd.long(Math.max(ac.currentTime, aBase + bt / 1000));   // звук ставим в очередь аудио — ровно в такт
       setTimeout(() => { grib.classList.remove("beat"); void grib.offsetWidth; grib.classList.add("beat"); }, Math.max(0, bt - t));
       spawned++;
     }
