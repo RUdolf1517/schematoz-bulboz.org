@@ -1433,6 +1433,177 @@ function kbMutFx(k, w, h, top, level) {
   return L;
 }
 
+// ---- Меню и мини-игры гриба. Всё считает сервер: клиент только показывает и собирает действия.
+async function kbGamesMenu(k, onDone) {
+  let items;
+  try { ({ items } = await api("GET", "/api/kombucha/games")); } catch (_) { return; }
+  const m = modal(`<h2>🎮 Игры гриба</h2><p class="muted">Награда — по точности: $₽, счастье, опыт, шанс мутации (с 75%). Каждую игру можно повторить через несколько минут.</p>
+    <div class="kb-games">${items.map((g) => `<button class="kb-game-card" data-game="${g.code}"><span class="e">${g.emoji}</span><b>${esc(g.title)}</b><small>${esc(g.about)}</small></button>`).join("")}</div>`);
+  m.el.querySelectorAll("[data-game]").forEach((b) => (b.onclick = () => {
+    m.close();
+    const g = b.dataset.game;
+    if (g === "meditation") return kbMeditate(k, onDone);
+    ({ pour: kbPour, memory: kbMemory, sugar: kbSugar, flies: kbFlies })[g](k, onDone);
+  }));
+}
+
+// общая полноэкранная оболочка игры
+function kbGameShell(title, help) {
+  const el = document.createElement("div");
+  el.className = "kb-med kb-game";
+  el.innerHTML = `<button class="kb-med-x" title="Прервать">✕</button><div class="kb-med-top"><b>${esc(title)}</b> <span class="kb-game-hud"></span></div>
+    <div class="kb-game-area"></div><div class="kb-med-judge" aria-live="polite"></div><p class="kb-med-help muted">${esc(help)}</p>`;
+  document.body.appendChild(el);
+  document.body.classList.add("kb-med-on");
+  const judge = el.querySelector(".kb-med-judge");
+  const sh = {
+    el, area: el.querySelector(".kb-game-area"), hud: el.querySelector(".kb-game-hud"), over: false,
+    say(text, cls = "") { judge.textContent = text; judge.className = `kb-med-judge ${cls}`; void judge.offsetWidth; judge.classList.add("pop"); },
+    close() { sh.over = true; sh.timers.forEach(clearTimeout); cancelAnimationFrame(sh.raf); el.remove(); document.body.classList.remove("kb-med-on"); document.removeEventListener("keydown", sh.key); },
+    timers: [], raf: 0,
+    later(fn, ms) { sh.timers.push(setTimeout(fn, ms)); },
+    key: (e) => { if (e.key === "Escape") { sh.close(); toast("Игра прервана"); } },
+    async finish(k, game, body, onDone) {
+      if (sh.finishing) return; sh.finishing = true;
+      sh.timers.forEach(clearTimeout); cancelAnimationFrame(sh.raf);
+      sh.say("Гриб считает…", "count");
+      let r;
+      try { r = await api("POST", `/api/kombucha/${k.id}/game/${game}/finish`, body); } catch (_) { sh.close(); return; }
+      sh.over = true;
+      const R = r.result, ST = { tea: "🫖 заварка", sweet: "🍬 сахар", clean: "🧽 чистота" };
+      const extra = { pour: `налито точно: ${R.rounds?.filter((x) => x.points >= 0.5).length || 0}/5${R.rounds?.some((x) => x.spilled) ? " · пролито: " + R.rounds.filter((x) => x.spilled).length : ""}`,
+        memory: `цепочка: ${R.reached}/${R.total}`, sugar: `сахар ${R.caught} · ошибок ${R.wrong} · пропущено ${R.missed}`,
+        flies: `отогнано мушек: ${R.swatted}` }[game] || "";
+      sh.area.innerHTML = `<div class="kb-med-result"><h2>${esc(R.grade)}</h2><p class="kb-med-acc">Точность: <b>${Math.round(R.accuracy * 100)}%</b></p>
+        <p class="muted">${esc(extra)}</p>
+        <p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за игры сегодня уже собраны · </span>`}💛 +${R.happy}${R.boost ? ` · ${ST[R.stat]} +${R.boost}` : ""}${R.xp ? ` · +${R.xp} опыта` : ""}</p>
+        ${R.mutation ? `<p class="kb-med-mut">🧬 ${esc(R.mutation.rarity_title)} мутация: ${esc(R.mutation.emoji)} «${esc(R.mutation.title)}» #${R.mutation.serial}</p>`
+          : `<p class="muted">${{ limit: "На этой стадии у гриба уже 3 мутации.", luck: "Мутация не пришла — чем точнее, тем выше шанс.", low: "С 75% точности появляется шанс мутации." }[R.mut_why] || ""}</p>`}
+        <button class="btn btn-accent" data-close>Готово</button></div>`;
+      el.querySelectorAll(".kb-med-help, .kb-med-judge").forEach((x) => x.remove());
+      sh.area.querySelector("[data-close]").onclick = () => sh.close();
+      onDone?.(r);
+    },
+  };
+  el.querySelector(".kb-med-x").onclick = () => { sh.close(); toast("Игра прервана"); };
+  document.addEventListener("keydown", sh.key);
+  return sh;
+}
+
+async function kbStart(k, game) {
+  try { return await api("POST", `/api/kombucha/${k.id}/game/${game}/start`); } catch (_) { return null; }
+}
+
+// 🫖 Налей и не пролей: держишь — льётся, отпускаешь — стоп. 5 раундов.
+async function kbPour(k, onDone) {
+  const G = await kbStart(k, "pour"); if (!G) return;
+  const sh = kbGameShell("🫖 Налей и не пролей", "Зажми палец (или пробел) — льётся чай. Отпусти, когда уровень дойдёт до метки. Перелил через край — пролил.");
+  const holds = []; let round = 0, t0 = 0, pouring = false;
+  const level = (rd, ms) => rd.rate * (ms / 1000) + rd.accel * (ms / 1000) ** 2;
+  const draw = (lvl) => {
+    const rd = G.rounds[round];
+    sh.area.innerHTML = `<div class="kb-pour"><div class="kb-pour-jar ${esc(rd.jar)}"><div class="kb-pour-tea" style="height:${Math.min(100, lvl * 100)}%"></div>
+      <div class="kb-pour-mark" style="bottom:${rd.target * 100}%"><span>метка</span></div>${pouring ? `<div class="kb-pour-stream"></div>` : ""}</div>
+      <div class="muted">${esc(rd.jar)}</div></div>`;
+    sh.hud.textContent = `раунд ${round + 1}/5`;
+  };
+  const tick = () => { if (!pouring) return; const rd = G.rounds[round], lvl = level(rd, performance.now() - t0); draw(lvl); if (lvl >= 1.05) up(); else sh.raf = requestAnimationFrame(tick); };
+  const down = (e) => { if (sh.over || pouring || round >= 5 || e.target.closest?.(".kb-med-x")) return; e.preventDefault?.(); pouring = true; t0 = performance.now(); tick(); };
+  const up = () => {
+    if (!pouring) return; pouring = false; cancelAnimationFrame(sh.raf);
+    const ms = Math.round(performance.now() - t0), rd = G.rounds[round], lvl = level(rd, ms);
+    holds.push(ms); draw(lvl);
+    const err = Math.abs(lvl - rd.target);
+    sh.say(lvl >= 1 ? "Пролил! 💦" : err <= G.tolerance * 0.3 ? "Идеально ✨" : err <= G.tolerance ? "Неплохо 👍" : "Мимо метки", lvl >= 1 ? "miss" : err <= G.tolerance ? "perfect" : "miss");
+    round++;
+    if (round >= 5) sh.later(() => sh.finish(k, "pour", { token: G.token, holds }, onDone), 700);
+    else sh.later(() => draw(0), 700);
+  };
+  sh.el.addEventListener("pointerdown", down); sh.el.addEventListener("pointerup", up); sh.el.addEventListener("pointerleave", up);
+  const kd = (e) => { if (e.code === "Space" && !e.repeat) down(e); }, ku = (e) => { if (e.code === "Space") up(); };
+  document.addEventListener("keydown", kd); document.addEventListener("keyup", ku);
+  const close0 = sh.close; sh.close = () => { document.removeEventListener("keydown", kd); document.removeEventListener("keyup", ku); close0(); };
+  draw(0);
+}
+
+// 🧠 Память гриба: Simon Says на 4 банках, цепочку раскрывает сервер по шагу.
+async function kbMemory(k, onDone) {
+  const G = await kbStart(k, "memory"); if (!G) return;
+  const sh = kbGameShell("🧠 Память гриба", "Смотри, в каких банках булькает гриб, и повтори цепочку тапами.");
+  const PADS = [["🟢", "g"], ["🔵", "b"], ["🟡", "y"], ["🔴", "r"]];
+  sh.area.innerHTML = `<div class="kb-mem">${PADS.map(([e, c], i) => `<button class="kb-mem-pad ${c}" data-pad="${i}">${e}</button>`).join("")}</div>`;
+  const pads = [...sh.area.querySelectorAll("[data-pad]")];
+  let seq = G.seq, input = [], listening = false;
+  const flash = (i) => { pads[i].classList.add("lit"); sh.later(() => pads[i].classList.remove("lit"), 380); };
+  const play = () => {
+    listening = false; input = []; sh.hud.textContent = `цепочка ${seq.length}/${G.total}`; sh.say("Смотри…", "count");
+    seq.forEach((p, i) => sh.later(() => flash(p), 700 + i * 600));
+    sh.later(() => { listening = true; sh.say("Повтори!", "good"); }, 700 + seq.length * 600);
+  };
+  pads.forEach((b) => (b.onclick = async () => {
+    if (!listening || sh.over) return;
+    const i = +b.dataset.pad; flash(i); input.push(i);
+    if (input[input.length - 1] !== seq[input.length - 1] || input.length === seq.length) {
+      listening = false;
+      let r; try { r = await api("POST", `/api/kombucha/${k.id}/game/memory/step`, { token: G.token, input }); } catch (_) { sh.close(); return; }
+      if (r.done) { sh.say(r.ok ? "Вся цепочка! 🏆" : "Ошибка 😵", r.ok ? "perfect" : "miss"); sh.later(() => sh.finish(k, "memory", { token: G.token }, onDone), 800); }
+      else { seq = r.seq; sh.say("Верно ✨", "perfect"); sh.later(play, 600); }
+    }
+  }));
+  play();
+}
+
+// общий «дождь» предметов для «Сахар или соль» и «Отгони мушек»
+// 🍬 Сахар или соль
+async function kbSugar(k, onDone) {
+  const G = await kbStart(k, "sugar"); if (!G) return;
+  const sh = kbGameShell("🍬 Сахар или соль", "Тапай только кубики сахара 🍬. Соль, перец, чеснок и лук не трогай!");
+  sh.area.innerHTML = `<div class="kb-rain"><div class="kb-rain-grib">${kombuchaSVG({ ...k, id: "sg" + k.id }, { small: true })}</div></div>`;
+  const box = sh.area.firstChild, taps = [], t0 = performance.now();
+  let good = 0, bad = 0;
+  G.items.forEach((it) => sh.later(() => {
+    const d = document.createElement("button");
+    d.className = "kb-drop"; d.textContent = it.kind === "sugar" ? "🍬" : G.bad[it.kind];
+    d.style.left = `${6 + it.lane * 19}%`; d.style.animationDuration = `${it.fall}ms`;
+    d.onpointerdown = (e) => {
+      e.stopPropagation(); taps.push({ id: it.id, t: Math.round(performance.now() - t0) }); d.remove();
+      if (it.kind === "sugar") { good++; sh.say("Сахарок ✨", "perfect"); } else { bad++; sh.say("Фу! 🤢", "miss"); }
+      sh.hud.textContent = `🍬 ${good} · ошибок ${bad}`;
+    };
+    box.appendChild(d); sh.later(() => d.remove(), it.fall + 50);
+  }, it.t));
+  sh.later(() => sh.finish(k, "sugar", { token: G.token, taps }, onDone), G.length + 200);
+}
+
+// 🪰 Отгони мушек
+async function kbFlies(k, onDone) {
+  const G = await kbStart(k, "flies"); if (!G) return;
+  const sh = kbGameShell("🪰 Отгони мушек", "Мушки летят к банке — тапни каждую, пока не села. Три севшие — конец.");
+  sh.area.innerHTML = `<div class="kb-flies"><div class="kb-flies-jar">${kombuchaSVG({ ...k, id: "fl" + k.id }, { small: true })}</div></div>`;
+  const box = sh.area.firstChild, taps = [], t0 = performance.now();
+  let lives = G.lives, swat = 0, ended = false;
+  const hud = () => (sh.hud.textContent = `${"❤️".repeat(Math.max(lives, 0))}${"🖤".repeat(G.lives - Math.max(lives, 0))} · отогнано ${swat}`);
+  hud();
+  const end = () => { if (ended) return; ended = true; sh.later(() => sh.finish(k, "flies", { token: G.token, taps }, onDone), 400); };
+  G.flies.forEach((f) => sh.later(() => {
+    if (ended) return;
+    const d = document.createElement("button");
+    const a = (f.angle * Math.PI) / 180;
+    d.className = "kb-fly"; d.textContent = "🪰";
+    d.style.setProperty("--fx", `${Math.cos(a) * 48}vmin`); d.style.setProperty("--fy", `${Math.sin(a) * 48}vmin`);
+    d.style.animationDuration = `${f.dur}ms`;
+    let gone = false;
+    d.onpointerdown = (e) => {
+      e.stopPropagation(); if (gone || ended) return; gone = true;
+      taps.push({ id: f.id, t: Math.round(performance.now() - t0) }); swat++; hud();
+      d.classList.add("swat"); sh.later(() => d.remove(), 250); sh.say("Шлёп! 👋", "perfect");
+    };
+    box.appendChild(d);
+    sh.later(() => { if (gone) return; gone = true; d.remove(); if (ended) return; lives--; hud(); sh.say("Села! 😖", "miss"); if (lives <= 0) end(); }, f.dur);
+  }, f.t));
+  sh.later(end, G.length + 200);
+}
+
 // ---- «Медитация гриба»: ритм-тапалка. Ритм и подсчёт — на сервере; здесь только показ и сбор тапов.
 async function kbMeditate(k, onDone) {
   let T;
@@ -1727,7 +1898,7 @@ async function pageKombucha() {
           <div class="kb-actions">${BTN.map(([a, e, t]) => { const cd = k.cooldowns[a];
             return `<button class="btn kb-act" data-act="${a}"${cd ? " disabled" : ""}><span class="e">${e}</span><span>${t}</span>${cd ? `<small>через ${fmtLeft(cd)}</small>` : ""}</button>`; }).join("")}</div>
           <button class="btn kb-talk" data-act="talk"${k.cooldowns.talk ? " disabled" : ""}>💭 Поговорить с грибом${k.cooldowns.talk ? ` · через ${fmtLeft(k.cooldowns.talk)}` : " — о философии"}</button>
-          ${k.alive && !k.frozen ? `<button class="btn kb-med-btn" data-meditate>🧘 Медитация гриба</button>` : ""}
+          ${k.alive && !k.frozen ? `<button class="btn kb-med-btn" data-games>🎮 Игры гриба</button>` : ""}
           <div id="kb-quote"></div>
           <button class="btn btn-accent kb-daily" data-act="daily"${k.cooldowns.daily ? " disabled" : ""}>🏆 Схема дня${k.cooldowns.daily ? ` · через ${fmtLeft(k.cooldowns.daily)}` : ": забрать бонус за ответы"}</button>
           ${sprout}
@@ -1783,11 +1954,12 @@ async function pageKombucha() {
     }));
     const btn = (sel_) => $(sel_, root);
     if (btn("[data-fs]")) btn("[data-fs]").onclick = () => kbFullscreen(() => cur());
-    if (btn("[data-meditate]")) btn("[data-meditate]").onclick = () => kbMeditate(cur(), async (r) => {
+    const afterGame = (r) => {
       S.items = S.items.map((x) => (x.id === r.kombucha.id ? r.kombucha : x));
       S.wood = r.wood_balance; render();
-      if (r.result.mutation) toast(`🧬 Медитация открыла мутацию: ${r.result.mutation.emoji} «${r.result.mutation.title}» #${r.result.mutation.serial}!`);
-    });
+      if (r.result.mutation) toast(`🧬 Игра открыла мутацию: ${r.result.mutation.emoji} «${r.result.mutation.title}» #${r.result.mutation.serial}!`);
+    };
+    if (btn("[data-games]")) btn("[data-games]").onclick = () => kbGamesMenu(cur(), afterGame);
     const fsOpen = $(".kb-fs-art");
     if (fsOpen && cur()) fsOpen.innerHTML = kombuchaSVG({ ...cur(), id: "fs" + cur().id });     // полноэкранный вид обновляется вместе с данными
     if (btn("[data-rename]")) btn("[data-rename]").onclick = async () => {

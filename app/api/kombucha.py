@@ -94,6 +94,45 @@ async def kombucha_meditate_finish(kid: int):
         return {"result": res, "kombucha": kb.out(k), "wood_balance": await wood.balance(s, user.id)}
 
 
+@bp.get("/kombucha/games")
+@login_required
+async def kombucha_games():
+    from ..services import minigames
+    return {"items": minigames.catalog()}
+
+
+@bp.post("/kombucha/<int:kid>/game/<any(pour, memory, sugar, flies):game>/start")
+@login_required
+async def kombucha_game_start(kid: int, game: str):
+    from ..services import minigames
+    async with session_scope() as s:
+        k = await kb.get_own(s, g.user.id, kid)
+        return minigames.start(g.user.id, k, game)
+
+
+@bp.post("/kombucha/<int:kid>/game/memory/step")
+@login_required
+async def kombucha_game_memory_step(kid: int):
+    from ..services import minigames
+    data = json_body()
+    async with session_scope() as s:
+        k = await kb.get_own(s, g.user.id, kid)
+        return minigames.memory_step(g.user.id, k, str(data.get("token") or ""), data.get("input"))
+
+
+@bp.post("/kombucha/<int:kid>/game/<any(pour, memory, sugar, flies):game>/finish")
+@login_required
+async def kombucha_game_finish(kid: int, game: str):
+    from ..services import minigames
+    data = json_body()
+    async with session_scope() as s:
+        user = await s.get(User, g.user.id, with_for_update=True)
+        k = await kb.get_own(s, user.id, kid)
+        res = await minigames.finish(s, user, k, game, str(data.get("token") or ""), data)
+        await s.flush()
+        return {"result": res, "kombucha": kb.out(k), "wood_balance": await wood.balance(s, user.id)}
+
+
 @bp.patch("/kombucha/<int:kid>")
 @login_required
 async def kombucha_rename(kid: int):

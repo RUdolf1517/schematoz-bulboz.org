@@ -789,3 +789,39 @@ body.kb-med-on { overflow: hidden; }
 .kb-med-result h2 { margin: 0 0 6px; }
 .kb-med-acc { font-size: 20px; margin: 4px 0; }
 .kb-med-mut { color: #ffe066; font-weight: 700; }
+/* меню игр гриба */
+.kb-games { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
+.kb-game-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 10px; border-radius: 14px;
+  border: 1px solid #ffffff22; background: #ffffff0a; color: inherit; cursor: pointer; text-align: center; }
+.kb-game-card:hover { border-color: var(--accent); background: #ffffff14; }
+.kb-game-card .e { font-size: 34px; }
+.kb-game-card small { color: var(--muted); font-size: 12px; }
+.kb-game-area { width: min(92vw, 520px); flex: 1; max-height: 70vh; position: relative; display: grid; place-items: center; }
+.kb-game-hud { margin-left: 8px; font-weight: 600; }
+/* 🫖 налей */
+.kb-pour { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.kb-pour-jar { position: relative; width: 140px; height: 220px; border: 4px solid #cfe3f0; border-top: none; border-radius: 0 0 26px 26px; overflow: visible; background: #ffffff08; }
+.kb-pour-jar.кружка { width: 170px; height: 170px; border-radius: 0 0 40px 40px; }
+.kb-pour-jar.пиала { width: 220px; height: 120px; border-radius: 0 0 110px 110px; }
+.kb-pour-jar.бутыль { width: 110px; height: 260px; }
+.kb-pour-jar.стакан { width: 120px; height: 200px; border-radius: 0 0 10px 10px; }
+.kb-pour-tea { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(#d9953c, #8a4f15); border-radius: inherit; }
+.kb-pour-mark { position: absolute; left: -14px; right: -14px; border-top: 3px dashed #7fff9a; }
+.kb-pour-mark span { position: absolute; right: -52px; top: -10px; font-size: 12px; color: #7fff9a; }
+.kb-pour-stream { position: absolute; left: 50%; top: -60px; bottom: 0; width: 8px; transform: translateX(-50%); background: #c77c2a; border-radius: 4px; opacity: .85; }
+/* 🧠 память */
+.kb-mem { display: grid; grid-template-columns: repeat(2, minmax(110px, 150px)); gap: 14px; }
+.kb-mem-pad { aspect-ratio: 1; border-radius: 24px; border: 3px solid #ffffff33; font-size: 46px; background: #ffffff0d; cursor: pointer; transition: transform .1s, box-shadow .1s, background .1s; }
+.kb-mem-pad.lit { transform: scale(1.08); background: #ffffff40; box-shadow: 0 0 28px #fff8; }
+/* 🍬 дождь и 🪰 мушки */
+.kb-rain, .kb-flies { position: relative; width: 100%; height: min(62vh, 520px); overflow: hidden; border-radius: 16px; background: #ffffff08; }
+.kb-rain-grib { position: absolute; bottom: 0; left: 50%; width: 120px; transform: translateX(-50%); opacity: .9; pointer-events: none; }
+.kb-rain-grib .kb-svg, .kb-flies-jar .kb-svg { width: 100%; height: auto; }
+.kb-drop { position: absolute; top: -50px; width: 54px; height: 54px; font-size: 38px; border: none; background: none; cursor: pointer;
+  animation: kb-drop linear forwards; touch-action: manipulation; }
+@keyframes kb-drop { from { transform: translateY(0); } to { transform: translateY(calc(min(62vh, 520px) + 60px)); } }
+.kb-flies-jar { position: absolute; left: 50%; top: 50%; width: 110px; transform: translate(-50%, -50%); pointer-events: none; }
+.kb-fly { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px; font-size: 32px; border: none;
+  background: none; cursor: pointer; animation: kb-fly linear forwards; touch-action: manipulation; }
+@keyframes kb-fly { from { transform: translate(var(--fx), var(--fy)); } to { transform: translate(0, 0); } }
+.kb-fly.swat { animation-play-state: paused; opacity: 0; transition: opacity .2s; }
