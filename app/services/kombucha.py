@@ -32,6 +32,7 @@ from sqlalchemy.dialects.postgresql import insert
 from ..errors import ApiError
 from ..models import Answer, ContentStatus, DebateVote, Kombucha, KombuchaCodex, KombuchaTrade, MutationCounter, User
 from . import kombucha_achievements as kb_achievements
+from . import kombucha_diary as diary
 from . import quotes, wood
 from .kombucha_mutations import MUT_BY_CODE, MUTATIONS, RARITY, RARITY_ORDER, Ctx, Mutation
 
@@ -151,6 +152,8 @@ async def add_mutation(s, k: Kombucha, m: Mutation, at: datetime, inherited: boo
     if new and not inherited:
         await wood.earn(s, k.user_id, "mutation", m.code)
     await kb_achievements.after_mutation(s, k.user_id, m)
+    diary.log(s, k, "inherited" if inherited else "mutation", at=at, emoji=m.emoji, title=m.title,
+              rarity=RARITY[m.rarity][0], serial=serial)
     return {"code": m.code, "title": m.title, "emoji": m.emoji, "rarity": m.rarity,
             "rarity_title": RARITY[m.rarity][0], "serial": serial, "first_time": new}
 
@@ -272,8 +275,10 @@ async def ensure_first(s, user: User) -> list[Kombucha]:
     items = await list_for(s, user_id, lock=True)
     if not items and not (user.profile or {}).get("kombucha_started"):
         user.profile = {**(user.profile or {}), "kombucha_started": True}
-        s.add(_new(user_id, await free_name(s)))
+        first = _new(user_id, await free_name(s))
+        s.add(first)
         await s.flush()
+        diary.log(s, first, "born")
         await kb_achievements.after_plant(s, user_id)
         items = await list_for(s, user_id, lock=True)
     return items
@@ -304,6 +309,10 @@ async def plant(s, user: User, name: str | None = None, parent: Kombucha | None 
     k = _new(user.id, name, parent)
     s.add(k)
     await s.flush()
+    if parent:
+        diary.log(s, k, "sprout_born", parent=parent.name)
+    else:
+        diary.log(s, k, "born")
     if parent and parent.mutations:
         # наследственность: новый экземпляр одной случайной мутации родителя
         m = MUT_BY_CODE.get(rng.choice(parent.mutations).get("code"))
@@ -364,6 +373,8 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
     if k.frozen:
         raise ApiError("Гриб заморожен 🧊 Разморозь, чтобы ухаживать", 409, "kombucha_frozen")
     in_danger = k.zero_since is not None
+    danger_since = k.zero_since
+    old_xp = k.xp
     answers_24h = debate_24h = 0
     if action == "daily":
         left = _cd_left(k, "daily", DAILY_COOLDOWN, at)
@@ -395,6 +406,8 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
         quote = None
         if action == "pet":
             k.pet_count += 1
+            if k.pet_count in diary.PET_MILESTONES:
+                diary.log(s, k, "pets", n=k.pet_count)
             quote = quotes.dubious()
             msg = rng.choice(TALK["sticky"]) if mood(k) == "sticky" else quotes.as_speech(quote)
         elif action == "talk":
@@ -405,6 +418,7 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
                 await kb_achievements.award(s, user.id, "kb_philo")
         elif action == "cure":
             k.mold = False
+            diary.log(s, k, "cured")
             await kb_achievements.award(s, user.id, "kb_mold")
         if k.mold:
             xp = 0
@@ -419,6 +433,8 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
     rescued = in_danger and all(getattr(k, st) > 0 for st in STATS)
     if rescued:
         k.zero_since = None
+        diary.log(s, k, "rescued", hours=max(1, round((at - danger_since).total_seconds() / 3600)))
+    diary.stage_check(s, k, old_xp)
     today = at.astimezone(MSK).date()
     if k.last_care_day != today:
         k.last_care_day = today
@@ -447,9 +463,11 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
         await kb_achievements.award(s, user.id, "kb_split")
         if (await jars_info(s, user))["free"] > 0:
             child = await plant(s, user, parent=k)
+            diary.log(s, k, "sprout", child=child.name)
             res["sprout"] = {"planted": True, "name": child.name}
         else:
             k.sprout_pending = True
+            diary.log(s, k, "sprout", child="малыша (ждёт свободную банку)")
             res["sprout"] = {"planted": False}
     return res
 
@@ -476,6 +494,7 @@ async def restart(s, k: Kombucha, name: str | None = None) -> None:
         raise ApiError("Гриб жив, его не надо перезаводить", 409, "kombucha_alive")
     if name:
         k.name = await ensure_name(s, name, exclude_id=k.id)
+    diary.flush_death(s, k)
     at = now()
     k.generation += 1
     k.xp = 0
@@ -485,6 +504,7 @@ async def restart(s, k: Kombucha, name: str | None = None) -> None:
     k.mold, k.last_sprout_at, k.sprout_count = False, None, 0
     k.mutations = []  # в коллекции юзера мутации остаются навсегда
     k.born_at = k.updated_at = at
+    diary.log(s, k, "restart", gen=k.generation)
 
 
 async def revive(s, user: User, k: Kombucha) -> None:
@@ -493,6 +513,8 @@ async def revive(s, user: User, k: Kombucha) -> None:
         raise ApiError("Гриб и так жив", 409, "kombucha_alive")
     await wood.spend(s, user.id, wood.PRICES["revive"], "revive", f"{k.id}:{k.died_at.isoformat()}")
     await kb_achievements.award(s, user.id, "kb_revive")
+    diary.flush_death(s, k)
+    diary.log(s, k, "revived", price=wood.PRICES["revive"])
     at = now()
     k.sweet = k.tea = k.clean = k.happy = 50.0
     k.alive, k.zero_since, k.died_at, k.mold = True, None, None, False
@@ -544,6 +566,7 @@ async def freeze(s, user: User, k: Kombucha) -> None:
     if k.frozen:
         raise ApiError("Гриб уже заморожен", 409, "kombucha_frozen")
     k.frozen, k.frozen_at = True, now()
+    diary.log(s, k, "frozen")
     await kb_achievements.award(s, user.id, "kb_freeze")
 
 
@@ -560,6 +583,7 @@ async def unfreeze(s, user: User, k: Kombucha) -> None:
     if k.zero_since:
         k.zero_since += pause
     k.frozen, k.frozen_at = False, None
+    diary.log(s, k, "unfrozen")
 
 
 async def transfer(s, k: Kombucha, to_user_id: int, how: str = "trade", price: int | None = None) -> None:
@@ -573,6 +597,8 @@ async def transfer(s, k: Kombucha, to_user_id: int, how: str = "trade", price: i
     if price is not None:
         entry["price"] = price
     k.owners = [*hist, entry][-50:]
+    diary.log(s, k, "moved", to=names.get(to_user_id) or "?",
+              how=f" за {price} $₽" if price is not None else (" по обмену" if how == "trade" else ""))
     k.user_id = to_user_id
     k.price = None
     k.listed_at = None

@@ -827,3 +827,34 @@ body.kb-med-on { overflow: hidden; }
 .kb-fly.swat { animation-play-state: paused; opacity: 0; transition: opacity .2s; }
 .kb-med-snd { position: absolute; top: 12px; right: 60px; width: 40px; height: 40px; border-radius: 50%; border: 1px solid #fff4;
   background: #0006; color: #fff; font-size: 18px; cursor: pointer; z-index: 2; }
+
+/* ---- «Налей и не пролей»: помехи */
+.kb-pour-mods { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; min-height: 28px; }
+.kb-pour-mod { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: #ffffff14; border: 1px solid #ffffff22; }
+.kb-pour-stage { position: relative; padding: 70px 70px 10px; }
+.kb-pour-jar.shaking { animation: kb-shake 1s ease-in-out infinite; }
+@keyframes kb-shake { 0%, 100% { transform: translateX(0) rotate(0); } 20% { transform: translateX(-7px) rotate(-3deg); } 45% { transform: translateX(6px) rotate(2.5deg); } 70% { transform: translateX(-4px) rotate(-1.5deg); } }
+.kb-pour-foam { position: absolute; left: 0; right: 0; border-radius: 6px; height: 0; background: repeating-radial-gradient(circle at 30% 60%, #fff8e8 0 5px, #f3e2c0 5px 9px); transition: height .4s ease-out; }
+.kb-pour-mark.tiny { border-top-width: 2px; border-color: #ffd36b; }
+.kb-pour-mark.tiny span { color: #ffd36b; }
+.kb-pour-dark { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; border-radius: 12px; transition: opacity .08s; }
+.kb-pour-dark.on { opacity: .97; }
+.kb-diary-link { margin-left: 8px; font-size: 14px; text-decoration: none; }
+
+/* ---- черновики */
+.draft-status { font-size: 12px; margin-left: 10px; }
+.draft-row { display: flex; gap: 10px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid #ffffff14; }
+.draft-main { flex: 1; display: flex; flex-direction: column; gap: 3px; text-decoration: none; color: inherit; min-width: 0; }
+.draft-main span { overflow-wrap: anywhere; }
+
+/* ---- дневник гриба */
+.kb-diary-head { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.kb-diary-head h1 { margin: 0 0 4px; font-size: 22px; }
+.kb-diary-art { width: 120px; flex: none; }
+.kb-diary { position: relative; padding-left: 8px; }
+.kb-diary-row { display: flex; gap: 12px; padding: 10px 0; border-left: 2px solid #ffffff1c; padding-left: 14px; margin-left: 10px; position: relative; }
+.kb-diary-row .e { position: absolute; left: -15px; top: 8px; width: 28px; height: 28px; display: grid; place-items: center; background: var(--panel, #1b1b22); border-radius: 50%; font-size: 16px; }
+.kb-diary-row > div { padding-left: 14px; }
+.kb-diary-row p { margin: 0 0 2px; }
+.kb-diary-row.died p, .kb-diary-row.rescued p { font-weight: 600; }
+.kb-diary-row.mutation .e, .kb-diary-row.stage .e { box-shadow: 0 0 0 2px #7fff9a55; }

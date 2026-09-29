@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Дневник гриба — schematoz-bulboz.org{% endblock %}
+{% block content %}
+<div id="diary" data-kid="{{ kombucha_id }}">
+  <section class="panel kb-diary-head"><p class="muted">Загружаем дневник…</p></section>
+  <section class="panel"><div class="kb-diary" id="diary-list"></div>
+    <button class="btn btn-ghost btn-sm" id="diary-more" hidden>Листать дальше</button></section>
+</div>
+{% endblock %}

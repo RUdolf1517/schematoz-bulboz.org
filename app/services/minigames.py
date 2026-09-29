@@ -3,8 +3,9 @@
 Общий принцип (как у «Медитации»): игру генерирует сервер из seed, сессия лежит в Redis,
 результат пересчитывает сервер по присланным действиям игрока — клиент не присылает «очки».
 
-* pour    — 5 раундов: держишь палец — льётся чай, отпускаешь — стоп. Уровень считается сервером
-            по длительности нажатия (формула налива известна обоим). Цель — попасть в метку.
+* pour    — 6 раундов: держишь палец — льётся чай, отпускаешь — стоп. Уровень и положение метки считает
+            сервер по длительности нажатия. С каждым раундом помех больше: банка трясётся (метка ездит),
+            струя дёргается, чай пенится, гаснет свет, метка прячется, допуск сужается.
 * memory  — Simon Says на 4 банках. Сервер раскрывает цепочку по одному шагу: следующий элемент
             клиент получает только после правильного повтора текущей (подсмотреть всю цепочку нельзя).
 * sugar   — сверху падают предметы, тапать только сахар. Тап засчитывается, только если в этот момент
@@ -21,6 +22,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 import secrets
 import time
@@ -28,6 +30,7 @@ import time
 from ..errors import ApiError
 from ..extensions import get_redis
 from . import kombucha as kb
+from . import kombucha_diary as diary
 from . import wood
 from .meditation import _roll_mutation, grade
 
@@ -37,7 +40,7 @@ MUT_FROM_ACC = 0.75
 
 GAMES = {
     # код: (название, эмодзи, какой показатель гриба поднимает, описание)
-    "pour": ("Налей и не пролей", "🫖", "tea", "Держи палец — льётся чай. Отпусти ровно на метке."),
+    "pour": ("Налей и не пролей", "🫖", "tea", "Банка трясётся, свет гаснет, чай пенится. Отпусти ровно на метке."),
     "memory": ("Память гриба", "🧠", "happy", "Гриб булькает по банкам — повтори цепочку."),
     "sugar": ("Сахар или соль", "🍬", "sweet", "Тапай только сахар. Соль, перец и чеснок — мимо!"),
     "flies": ("Отгони мушек", "🪰", "clean", "Тапни мушку, пока она не села на банку. Три севшие — конец."),
@@ -51,23 +54,65 @@ def _now_ms() -> int:
 
 
 # ---------------------------------------------------------------- генераторы (детерминированы по seed)
-POUR_ROUNDS = 5
+POUR_ROUNDS = 6
+POUR_TOL = 0.08
+# Помехи — растут с каждым раундом. Все параметры из seed, сервер считает по тем же формулам, что и клиент.
+#   shake — банка трясётся, метка ездит вверх-вниз (цель = метка В МОМЕНТ отпускания)
+#   pulse — струя дёргается: то хлещет, то капает
+#   foam  — чай пенится: после отпускания уровень ещё подрастёт на f·уровень
+#   dark  — в середине налива гаснет свет (моргает лампочка)
+#   hide  — метка исчезает, как только начал лить (запоминай!)
+#   tiny  — узкая метка: допуск меньше
+POUR_MODS = ("shake", "pulse", "foam", "dark", "hide", "tiny")
+POUR_MODS_PER_ROUND = (1, 1, 2, 2, 3, 4)
 
 
-def pour_level(rate: float, accel: float, ms: float) -> float:
-    """Уровень чая (0..1+) после ms миллисекунд налива. Струя разгоняется: rate*t + accel*t²."""
+def pour_level(rd: dict, ms: float) -> float:
+    """Уровень во время налива: разгон струи + пульсация. Без пены."""
     t = max(0.0, ms) / 1000
-    return rate * t + accel * t * t
+    lvl = rd["rate"] * t + rd["accel"] * t * t
+    pu = rd.get("pulse")
+    if pu:
+        w = pu["w"]
+        lvl += rd["rate"] * pu["p"] * (math.sin(w * t - math.pi / 2) + 1) / w  # ∫ p·(1 - cos wt)
+    return lvl
+
+
+def pour_final(rd: dict, ms: float) -> float:
+    """Итоговый уровень после того, как осядет/поднимется пена."""
+    return pour_level(rd, ms) * (1 + (rd.get("foam") or {}).get("f", 0.0))
+
+
+def pour_target(rd: dict, ms: float) -> float:
+    """Где метка в момент ms от начала налива (трясётся — ездит)."""
+    sh = rd.get("shake")
+    if not sh:
+        return rd["target"]
+    return rd["target"] + sh["amp"] * math.sin(2 * math.pi * max(0.0, ms) / sh["period"] + sh["phase"])
 
 
 def gen_pour(seed: int) -> dict:
     r = random.Random(seed)
     rounds = []
     for i in range(POUR_ROUNDS):
-        rounds.append({"target": round(r.uniform(0.45, 0.9), 3), "rate": round(r.uniform(0.18, 0.3) + i * 0.03, 3),
-                       "accel": round(r.uniform(0.0, 0.05) + i * 0.01, 3),
-                       "jar": r.choice(["банка", "кружка", "пиала", "бутыль", "стакан"])})
-    return {"rounds": rounds, "tolerance": 0.12}
+        mods = r.sample(POUR_MODS, POUR_MODS_PER_ROUND[i])
+        if i == 0:
+            mods = ["shake"]                                   # сразу даём понять, что будет весело
+        rd = {"target": round(r.uniform(0.45, 0.78), 3), "rate": round(r.uniform(0.24, 0.34) + i * 0.035, 3),
+              "accel": round(r.uniform(0.02, 0.06) + i * 0.012, 3),
+              "jar": r.choice(["банка", "кружка", "пиала", "бутыль", "стакан"]), "mods": mods,
+              "tol": round(POUR_TOL * (0.6 if "tiny" in mods else 1.0), 3)}
+        if "shake" in mods:
+            rd["shake"] = {"amp": round(r.uniform(0.05, 0.09) + i * 0.008, 3), "period": round(r.uniform(900, 1500) - i * 60),
+                           "phase": round(r.uniform(0, 2 * math.pi), 3)}
+        if "pulse" in mods:
+            rd["pulse"] = {"p": round(r.uniform(0.6, 0.95), 3), "w": round(2 * math.pi / r.uniform(0.45, 0.8), 3)}
+        if "foam" in mods:
+            rd["foam"] = {"f": round(r.uniform(0.08, 0.2), 3)}
+        if "dark" in mods:
+            rd["dark"] = {"at": round(r.uniform(350, 900)), "dur": round(r.uniform(600, 1100))}
+        rounds.append(rd)
+    return {"rounds": rounds, "tolerance": POUR_TOL}
 
 
 MEMORY_LEN = 12
@@ -116,18 +161,18 @@ def gen_flies(seed: int) -> dict:
 # ---------------------------------------------------------------- подсчёт (чистые функции — тестируются отдельно)
 def score_pour(game: dict, holds: list) -> dict:
     if not isinstance(holds, list) or len(holds) != POUR_ROUNDS:
-        raise ApiError("Нужно 5 наливов", 400, "validation_error")
-    tol = game["tolerance"]
+        raise ApiError(f"Нужно {POUR_ROUNDS} наливов", 400, "validation_error")
     rounds, total = [], 0.0
     for rd, ms in zip(game["rounds"], holds):
         if not isinstance(ms, (int, float)) or ms < 0 or ms > 20000:
             raise ApiError("Некорректный налив", 400, "validation_error")
-        lvl = pour_level(rd["rate"], rd["accel"], ms)
-        spilled = lvl >= 1.0
-        err = abs(lvl - rd["target"])
-        pts = 0.0 if spilled else max(0.0, 1 - err / tol)
+        during, lvl, target = pour_level(rd, ms), pour_final(rd, ms), pour_target(rd, ms)
+        spilled = during >= 1.0 or lvl >= 1.0
+        err = abs(lvl - target)
+        pts = 0.0 if spilled else max(0.0, 1 - err / rd["tol"])
         total += pts
-        rounds.append({"level": round(min(lvl, 1.2), 3), "target": rd["target"], "spilled": spilled, "points": round(pts, 3)})
+        rounds.append({"level": round(min(lvl, 1.2), 3), "target": round(target, 3), "spilled": spilled,
+                       "points": round(pts, 3)})
     return {"accuracy": round(total / POUR_ROUNDS, 3), "rounds": rounds, "min_ms": sum(holds)}
 
 
@@ -281,6 +326,7 @@ async def reward(s, user, k, game: str, token: str, res: dict) -> dict:
         cap = 90.0 if stat == "sweet" else 100.0          # сахарную кому игрой не устроить
         setattr(k, stat, min(cap, max(getattr(k, stat), min(cap, getattr(k, stat) + boost))))
     xp = 0 if k.mold else round(10 * acc)
+    old_xp = k.xp
     k.xp += xp
     k.best_xp = max(k.best_xp, k.xp)
     if all(getattr(k, st) > 0 for st in kb.STATS):
@@ -288,6 +334,9 @@ async def reward(s, user, k, game: str, token: str, res: dict) -> dict:
     earned = await wood.earn(s, user.id, "minigame", f"{game}:{token}", amount=round(8 * acc))
     m = _roll_mutation(k, acc)
     mut = await kb.add_mutation(s, k, m, kb.now()) if m else None
+    diary.stage_check(s, k, old_xp)
+    if acc >= 0.95:
+        diary.log(s, k, "game", title=GAMES[game][0], acc=round(acc * 100))
     size = kb.stage_for(k.xp)["size"]
     why = ("got" if mut else "low" if acc < MUT_FROM_ACC
            else "limit" if kb.stage_mut_counts(k).get(size, 0) >= kb.MAX_MUT_PER_STAGE else "luck")

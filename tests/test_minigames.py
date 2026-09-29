@@ -7,20 +7,30 @@ from app.services import minigames as mg
 
 def test_pour_scoring():
     g = mg.gen_pour(7)
-    assert mg.gen_pour(7) == g and len(g["rounds"]) == 5
-    # идеальные наливы: подбираем длительность под метку по той же формуле
+    assert mg.gen_pour(7) == g and len(g["rounds"]) == mg.POUR_ROUNDS
+    assert g["rounds"][0]["mods"] == ["shake"] and len(g["rounds"][-1]["mods"]) == 4
+    # идеальные наливы: перебором ищем момент, когда итог (с пеной) совпадает с ездящей меткой
     def perfect_ms(rd):
-        lo, hi = 0, 20000
-        for _ in range(60):
-            mid = (lo + hi) / 2
-            lo, hi = (mid, hi) if mg.pour_level(rd["rate"], rd["accel"], mid) < rd["target"] else (lo, mid)
-        return lo
-    assert mg.score_pour(g, [perfect_ms(rd) for rd in g["rounds"]])["accuracy"] > 0.99
-    spill = mg.score_pour(g, [20000] * 5)
+        return min(range(0, 8000, 2), key=lambda ms: 9 if mg.pour_level(rd, ms) >= 1 else abs(mg.pour_final(rd, ms) - mg.pour_target(rd, ms)))
+    assert mg.score_pour(g, [perfect_ms(rd) for rd in g["rounds"]])["accuracy"] > 0.97
+    n = mg.POUR_ROUNDS
+    spill = mg.score_pour(g, [20000] * n)
     assert spill["accuracy"] == 0 and all(r["spilled"] for r in spill["rounds"])
-    assert mg.score_pour(g, [0] * 5)["accuracy"] == 0
+    assert mg.score_pour(g, [0] * n)["accuracy"] == 0
     with pytest.raises(ApiError):
         mg.score_pour(g, [100])
+
+
+def test_pour_is_hard():
+    """Налив «по старинке» — без учёта тряски и пены — больше не даёт высокий балл."""
+    accs = []
+    for seed in range(40):
+        g = mg.gen_pour(seed)
+        holds = []
+        for rd in g["rounds"]:
+            holds.append(min(range(0, 8000, 5), key=lambda ms: abs(mg.pour_level(rd, ms) - rd["target"])))
+        accs.append(mg.score_pour(g, holds)["accuracy"])
+    assert sum(accs) / len(accs) < 0.6
 
 
 def test_sugar_scoring():

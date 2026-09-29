@@ -15,6 +15,7 @@ from ..services.notifications import notify
 from ..services.reputation import cast_vote, remove_vote
 from ..services import wood
 from . import bp
+from .drafts import drop_draft
 from ..services.rating import recompute_user, refresh_question
 from .utils import account_age_hours, answer_out, json_body
 
@@ -56,6 +57,7 @@ async def create_answer(qid: int):
         await s.flush()
         await handler.persist(s, answer, draft)
         new_badges = await on_answer_created(s, g.user, answer)
+        await drop_draft(s, g.user.id, answer_qid=qid)
         await wood.earn(s, g.user.id, "answer", answer.id)
         if side is not None:
             await wood.earn(s, g.user.id, "debate_answer", answer.id)

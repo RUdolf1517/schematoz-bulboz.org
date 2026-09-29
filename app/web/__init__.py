@@ -73,6 +73,18 @@ def kombucha():
     return page("kombucha.html", "kombucha")
 
 
+@bp.get("/g/<int:kid>")
+def kombucha_diary(kid: int):
+    return page("diary.html", "diary", kombucha_id=kid)
+
+
+@bp.get("/drafts")
+def drafts():
+    if not current_user_id():
+        return redirect(url_for("web.login", next="/drafts"))
+    return page("drafts.html", "drafts")
+
+
 @bp.get("/market")
 def market():
     return page("market.html", "market")

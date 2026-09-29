@@ -167,3 +167,34 @@ class TaskSubmission(Base):
     reason: Mapped[str | None] = mapped_column(String(300))      # почему отклонено / решение модератора
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class KombuchaEvent(Base):
+    """Дневник гриба: «родился», «вырос», «мутировал», «чуть не помер»… Публичный, им можно поделиться.
+    Смерть пишется лениво (tick() работает без сессии) — её досчитывает services/kombucha_diary.py."""
+    __tablename__ = "kombucha_events"
+    __table_args__ = (Index("ix_kombucha_events_kb", "kombucha_id", text("id DESC")),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kombucha_id: Mapped[int] = mapped_column(ForeignKey("kombuchas.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(24))
+    body: Mapped[str] = mapped_column(String(300))
+    emoji: Mapped[str] = mapped_column(String(16), default="📝", server_default="📝")
+    data: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Draft(Base):
+    """Черновик вопроса или ответа. Сохраняется сам (автосейв из формы), живёт, пока не опубликуешь."""
+    __tablename__ = "drafts"
+    __table_args__ = (Index("ix_drafts_user", "user_id", text("updated_at DESC")),
+                      Index("uq_drafts_answer", "user_id", "question_id", unique=True,
+                            postgresql_where=text("kind = 'answer'")))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(16))                       # question | answer
+    question_id: Mapped[int | None] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    body: Mapped[str] = mapped_column(String(5000), default="", server_default="")
+    extra: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))  # kind, room_id, cover, стороны…
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

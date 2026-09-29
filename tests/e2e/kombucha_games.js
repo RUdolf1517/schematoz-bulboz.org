@@ -62,15 +62,24 @@ const check = (n, ok, extra = "") => console.log(`${ok ? "✅" : "❌"} ${n}${ok
   doc.querySelector("#modal").click(); await sleep(400);             // клик по фону закрывает меню
   check("меню закрывается", doc.querySelector("#modal").hidden);
 
-  // 🫖 налей: бинпоиск идеальной длительности
+  // 🫖 налей: ищем идеальный момент по тем же формулам (тряска метки + пульс струи + пена)
   await openGame("pour");
   const P = last["pour/start"];
-  check("налей: старт", !!P && P.rounds.length === 5);
+  check("налей: старт, 6 раундов с помехами", !!P && P.rounds.length === 6 && P.rounds[5].mods.length === 4, JSON.stringify(P?.rounds.map((r) => r.mods)));
+  const lv = (rd, ms) => { const t = ms / 1000; let l = rd.rate * t + rd.accel * t * t; if (rd.pulse) l += rd.rate * rd.pulse.p * (Math.sin(rd.pulse.w * t - Math.PI / 2) + 1) / rd.pulse.w; return l; };
+  const tg = (rd, ms) => rd.shake ? rd.target + rd.shake.amp * Math.sin(2 * Math.PI * ms / rd.shake.period + rd.shake.phase) : rd.target;
+  let sawDark = false, sawMods = 0;
   for (const rd of P.rounds) {
-    let lo = 0, hi = 20000; for (let i = 0; i < 50; i++) { const m = (lo + hi) / 2; const t = m / 1000; (rd.rate * t + rd.accel * t * t < rd.target ? (lo = m) : (hi = m)); }
+    let best = 0, be = 9;
+    for (let ms = 0; ms < 8000; ms += 2) { if (lv(rd, ms) >= 1) break; const e = Math.abs(lv(rd, ms) * (1 + (rd.foam?.f || 0)) - tg(rd, ms)); if (e < be) { be = e; best = ms; } }
+    sawMods += doc.querySelectorAll(".kb-pour-mod").length === rd.mods.length ? 1 : 0;
     const g = doc.querySelector(".kb-game");
-    g.dispatchEvent(new w.Event("pointerdown", { bubbles: true })); await sleep(lo); g.dispatchEvent(new w.Event("pointerup", { bubbles: true })); await sleep(900);
+    g.dispatchEvent(new w.Event("pointerdown", { bubbles: true }));
+    if (rd.dark && best > rd.dark.at + 150) { await sleep(rd.dark.at + 100); sawDark ||= !!doc.querySelector(".kb-pour-dark.on") || true; await sleep(best - rd.dark.at - 100); }
+    else await sleep(best);
+    g.dispatchEvent(new w.Event("pointerup", { bubbles: true })); await sleep(1500);
   }
+  check("налей: плашки помех показаны", sawMods === 6);
   await result("налей", 8000);
 
   // 🧠 память: 3 верных шага, потом ошибка

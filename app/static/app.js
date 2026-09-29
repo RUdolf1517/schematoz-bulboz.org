@@ -541,8 +541,19 @@ async function pageQuestion() {
       const ta = $("textarea", form);
       mdToolbar(ta);
       ta.oninput = () => ($("#ans-count").textContent = `${ta.value.length}/5000`);
+      const status = document.createElement("small"); status.className = "muted draft-status"; form.appendChild(status);
+      const auto = draftAutosave({ kind: "answer", questionId: Number(qid), status, collect: () => {
+        const f = new FormData(form); return { body: f.get("body") || "", extra: { debate_side: f.get("debate_side") || null } };
+      } });
+      api("GET", `/api/drafts/answer/${qid}`, undefined, { quiet: true }).then(({ draft: d }) => {
+        if (!d || ta.value) return;
+        ta.value = d.body; ta.oninput();
+        if (d.extra?.debate_side) { const r = $(`input[name=debate_side][value="${d.extra.debate_side}"]`, form); if (r) r.checked = true; }
+        status.textContent = `Черновик восстановлен (от ${fmtDate(d.updated_at)})`;
+      }).catch(() => {});
+      form.addEventListener("input", () => auto.touch());
       form.onsubmit = async (e) => {
-        e.preventDefault();
+        e.preventDefault(); auto.stop();
         const f = new FormData(form);
         const body = { body: f.get("body"), content_type: "text" };
         if (f.get("debate_side")) body.debate_side = f.get("debate_side");
@@ -584,11 +595,38 @@ async function pageAsk() {
   const { items } = await api("GET", "/api/rooms");
   roomSel.insertAdjacentHTML("beforeend", items.map((r) => `<option value="${r.id}">${esc(r.title)}</option>`).join(""));
   if (params.get("room")) { const r = items.find((x) => x.slug === params.get("room")); if (r) roomSel.value = r.id; }
+  // черновик: ?draft=ID — продолжаем; иначе новый появится при первой правке
+  let draftId = Number(params.get("draft")) || null;
+  if (draftId) {
+    try {
+      const { draft: d } = await api("GET", `/api/drafts/${draftId}`);
+      title.value = d.title; form.elements.body.value = d.body;
+      const x = d.extra || {};
+      if (x.kind && [...kind.options].some((o) => o.value === x.kind && !o.disabled)) kind.value = x.kind;
+      if (x.room_id) roomSel.value = x.room_id;
+      if (x.side_a) form.elements.side_a.value = x.side_a;
+      if (x.side_b) form.elements.side_b.value = x.side_b;
+      if (x.cover_url) { coverUrl = x.cover_url; $("img", prev).src = coverUrl; prev.hidden = false; $("#cover-pick").hidden = true; }
+      kind.onchange(); title.oninput();
+    } catch (_) { draftId = null; }
+  }
+  const status = document.createElement("span"); status.className = "muted draft-status";
+  status.textContent = draftId ? "Черновик загружен" : "Черновик сохранится сам";
+  $("button[type=submit]", form).insertAdjacentElement("afterend", status);
+  const auto = draftAutosave({ kind: "question", draftId, status, collect: () => {
+    const f = new FormData(form);
+    return { title: f.get("title") || "", body: f.get("body") || "", extra: { kind: f.get("kind"), room_id: f.get("room_id") ? Number(f.get("room_id")) : null,
+      side_a: f.get("side_a") || null, side_b: f.get("side_b") || null, cover_url: coverUrl } };
+  } });
+  form.addEventListener("input", () => auto.touch()); form.addEventListener("change", () => auto.touch());
+  const coverSet = coverIn.onchange; coverIn.onchange = async () => { await coverSet(); auto.touch(); };
+  const coverDel = $("#cover-remove").onclick; $("#cover-remove").onclick = () => { coverDel(); auto.touch(); };
   form.onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(form);
     const body = { kind: f.get("kind"), title: f.get("title"), body: f.get("body") || null, room_id: f.get("room_id") ? Number(f.get("room_id")) : null, cover_url: coverUrl };
     if (body.kind === "debate") { body.side_a = f.get("side_a") || null; body.side_b = f.get("side_b") || null; }
+    auto.stop(); if (auto.id) body.draft_id = auto.id;
     try {
       const r = await api("POST", "/api/questions", body);
       location.href = `/q/${r.question.id}`;
@@ -1526,7 +1564,7 @@ function kbGameShell(title, help) {
       try { r = await api("POST", `/api/kombucha/${k.id}/game/${game}/finish`, body); } catch (_) { sh.close(); return; }
       sh.over = true;
       const R = r.result, ST = { tea: "🫖 заварка", sweet: "🍬 сахар", clean: "🧽 чистота" };
-      const extra = { pour: `налито точно: ${R.rounds?.filter((x) => x.points >= 0.5).length || 0}/5${R.rounds?.some((x) => x.spilled) ? " · пролито: " + R.rounds.filter((x) => x.spilled).length : ""}`,
+      const extra = { pour: `налито точно: ${R.rounds?.filter((x) => x.points >= 0.5).length || 0}/${R.rounds?.length || 6}${R.rounds?.some((x) => x.spilled) ? " · пролито: " + R.rounds.filter((x) => x.spilled).length : ""}`,
         memory: `цепочка: ${R.reached}/${R.total}`, sugar: `сахар ${R.caught} · ошибок ${R.wrong} · пропущено ${R.missed}`,
         flies: `отогнано мушек: ${R.swatted}` }[game] || "";
       sh.area.innerHTML = `<div class="kb-med-result"><h2>${esc(R.grade)}</h2><p class="kb-med-acc">Точность: <b>${Math.round(R.accuracy * 100)}%</b></p>
@@ -1549,36 +1587,84 @@ async function kbStart(k, game) {
   try { return await api("POST", `/api/kombucha/${k.id}/game/${game}/start`); } catch (_) { return null; }
 }
 
-// 🫖 Налей и не пролей: держишь — льётся, отпускаешь — стоп. 5 раундов.
+// 🫖 Налей и не пролей: держишь — льётся, отпускаешь — стоп. 6 раундов, помех всё больше.
+// Формулы — зеркало app/services/minigames.py (pour_level / pour_final / pour_target): считает всё равно сервер.
+const KB_POUR_MOD = { shake: "📳 банка трясётся", pulse: "💦 струя дёргается", foam: "🫧 пенится", dark: "💡 свет мигает", hide: "🙈 метка спрячется", tiny: "🎯 узкая метка" };
 async function kbPour(k, onDone) {
   const G = await kbStart(k, "pour"); if (!G) return;
-  const sh = kbGameShell("🫖 Налей и не пролей", "Зажми палец (или пробел) — льётся чай. Отпусти, когда уровень дойдёт до метки. Перелил через край — пролил.");
-  const holds = []; let round = 0, t0 = 0, pouring = false;
-  const level = (rd, ms) => rd.rate * (ms / 1000) + rd.accel * (ms / 1000) ** 2;
-  const draw = (lvl) => {
+  const N = G.rounds.length;
+  const sh = kbGameShell("🫖 Налей и не пролей", "Зажми палец (или пробел) — льётся чай. Отпусти, когда уровень дойдёт до метки. Банка трясётся — метка ездит; пена поднимется уже после; в темноте считай в уме.");
+  const holds = []; let round = 0, t0 = 0, pouring = false, flick = 0;
+  const lvlAt = (rd, ms) => {
+    const t = Math.max(0, ms) / 1000; let l = rd.rate * t + rd.accel * t * t;
+    if (rd.pulse) { const w = rd.pulse.w; l += rd.rate * rd.pulse.p * (Math.sin(w * t - Math.PI / 2) + 1) / w; }
+    return l;
+  };
+  const finalAt = (rd, ms) => lvlAt(rd, ms) * (1 + (rd.foam?.f || 0));
+  const targetAt = (rd, ms) => rd.shake ? rd.target + rd.shake.amp * Math.sin(2 * Math.PI * Math.max(0, ms) / rd.shake.period + rd.shake.phase) : rd.target;
+  sh.area.innerHTML = `<div class="kb-pour"><div class="kb-pour-mods"></div><div class="kb-pour-stage"><div class="kb-pour-jar"><div class="kb-pour-tea"></div><div class="kb-pour-foam"></div>
+    <div class="kb-pour-mark"><span>метка</span></div><div class="kb-pour-stream"></div></div><div class="kb-pour-dark"></div></div><div class="kb-pour-name muted"></div></div>`;
+  const $p = (s) => sh.area.querySelector(s);
+  const jar = $p(".kb-pour-jar"), tea = $p(".kb-pour-tea"), foam = $p(".kb-pour-foam"), mark = $p(".kb-pour-mark"),
+    stream = $p(".kb-pour-stream"), dark = $p(".kb-pour-dark");
+  const setup = () => {
     const rd = G.rounds[round];
-    sh.area.innerHTML = `<div class="kb-pour"><div class="kb-pour-jar ${esc(rd.jar)}"><div class="kb-pour-tea" style="height:${Math.min(100, lvl * 100)}%"></div>
-      <div class="kb-pour-mark" style="bottom:${rd.target * 100}%"><span>метка</span></div>${pouring ? `<div class="kb-pour-stream"></div>` : ""}</div>
-      <div class="muted">${esc(rd.jar)}</div></div>`;
-    sh.hud.textContent = `раунд ${round + 1}/5`;
+    jar.className = `kb-pour-jar ${rd.jar}${rd.shake ? " shaking" : ""}`;
+    if (rd.shake) jar.style.animationDuration = `${rd.shake.period}ms`;
+    mark.classList.toggle("tiny", rd.mods.includes("tiny"));
+    mark.style.display = ""; foam.style.height = "0"; dark.classList.remove("on");
+    $p(".kb-pour-mods").innerHTML = rd.mods.map((m) => `<span class="kb-pour-mod">${KB_POUR_MOD[m]}</span>`).join("");
+    $p(".kb-pour-name").textContent = rd.jar;
+    sh.hud.textContent = `раунд ${round + 1}/${N}`;
+    draw(0, 0);
   };
-  const tick = () => { if (!pouring) return; const rd = G.rounds[round], lvl = level(rd, performance.now() - t0); draw(lvl); if (lvl >= 1.05) up(); else sh.raf = requestAnimationFrame(tick); };
-  const down = (e) => { if (sh.over || pouring || round >= 5 || e.target.closest?.(".kb-med-x")) return; e.preventDefault?.(); pouring = true; t0 = performance.now(); tick(); };
+  const draw = (lvl, ms, foamLvl = 0) => {
+    const rd = G.rounds[round];
+    tea.style.height = `${Math.min(100, lvl * 100)}%`;
+    foam.style.bottom = `${Math.min(100, lvl * 100)}%`; foam.style.height = foamLvl ? `${Math.max(0, Math.min(110, foamLvl * 100) - Math.min(100, lvl * 100))}%` : "0";
+    mark.style.bottom = `${targetAt(rd, ms) * 100}%`;
+    stream.style.display = pouring ? "" : "none";
+    if (pouring && rd.pulse) stream.style.width = `${4 + 8 * (1 - Math.cos(rd.pulse.w * ms / 1000)) / 2}px`;
+    if (pouring && rd.mods.includes("hide") && ms > 150) mark.style.display = "none";
+    if (rd.dark) {
+      const inDark = pouring && ms >= rd.dark.at && ms < rd.dark.at + rd.dark.dur;
+      if (inDark && Math.random() < 0.04) flick = 3;             // лампочка иногда моргает — подсказка на долю секунды
+      dark.classList.toggle("on", inDark && flick-- <= 0);
+    }
+  };
+  // до налива метка тоже «плавает» в трясущейся банке — чтобы было видно, куда целиться
+  const idle = () => { if (sh.over || pouring || round >= N) return; const rd = G.rounds[round]; if (rd.shake) mark.style.bottom = `${targetAt(rd, 0) * 100}%`; };
+  const tick = () => {
+    if (!pouring) return;
+    const rd = G.rounds[round], ms = performance.now() - t0, lvl = lvlAt(rd, ms);
+    draw(lvl, ms);
+    if (lvl >= 1.05) up(); else sh.raf = requestAnimationFrame(tick);
+  };
+  const down = (e) => { if (sh.over || pouring || round >= N || busy || e.target.closest?.(".kb-med-x, .kb-med-snd")) return; e.preventDefault?.(); pouring = true; t0 = performance.now(); tick(); };
+  let busy = false;
   const up = () => {
-    if (!pouring) return; pouring = false; cancelAnimationFrame(sh.raf);
-    const ms = Math.round(performance.now() - t0), rd = G.rounds[round], lvl = level(rd, ms);
-    holds.push(ms); draw(lvl);
-    const err = Math.abs(lvl - rd.target);
-    sh.say(lvl >= 1 ? "Пролил! 💦" : err <= G.tolerance * 0.3 ? "Идеально ✨" : err <= G.tolerance ? "Неплохо 👍" : "Мимо метки", lvl >= 1 ? "miss" : err <= G.tolerance ? "perfect" : "miss");
-    round++;
-    if (round >= 5) sh.later(() => sh.finish(k, "pour", { token: G.token, holds }, onDone), 700);
-    else sh.later(() => draw(0), 700);
+    if (!pouring) return; pouring = false; cancelAnimationFrame(sh.raf); busy = true;
+    const ms = Math.round(performance.now() - t0), rd = G.rounds[round], lvl = lvlAt(rd, ms), fin = finalAt(rd, ms), tg = targetAt(rd, ms);
+    holds.push(ms);
+    dark.classList.remove("on"); mark.style.display = "";
+    draw(lvl, ms);
+    const show = () => {
+      draw(lvl, ms, rd.foam ? fin : 0);
+      const err = Math.abs(fin - tg), spilled = lvl >= 1 || fin >= 1;
+      sh.say(spilled ? (lvl < 1 ? "Пена полезла через край! 🫧" : "Пролил! 💦") : err <= rd.tol * 0.3 ? "Идеально ✨" : err <= rd.tol ? "Неплохо 👍" : "Мимо метки",
+        spilled ? "miss" : err <= rd.tol ? "perfect" : "miss");
+      round++;
+      if (round >= N) sh.later(() => sh.finish(k, "pour", { token: G.token, holds }, onDone), 900);
+      else sh.later(() => { busy = false; setup(); }, 900);
+    };
+    if (rd.foam) { sh.say("Пенится… 🫧", "count"); sh.later(show, 450); } else show();
   };
+  const idleT = setInterval(idle, 50);
   sh.el.addEventListener("pointerdown", down); sh.el.addEventListener("pointerup", up); sh.el.addEventListener("pointerleave", up);
   const kd = (e) => { if (e.code === "Space" && !e.repeat) down(e); }, ku = (e) => { if (e.code === "Space") up(); };
   document.addEventListener("keydown", kd); document.addEventListener("keyup", ku);
-  const close0 = sh.close; sh.close = () => { document.removeEventListener("keydown", kd); document.removeEventListener("keyup", ku); close0(); };
-  draw(0);
+  const close0 = sh.close; sh.close = () => { clearInterval(idleT); document.removeEventListener("keydown", kd); document.removeEventListener("keyup", ku); close0(); };
+  setup();
 }
 
 // 🧠 Память гриба: Simon Says на 4 банках, цепочку раскрывает сервер по шагу.
@@ -1935,7 +2021,7 @@ async function pageKombucha() {
         ${kombuchaSVG(k)}
       </div>
       <div class="kb-info">
-        <div class="kb-name"><h2>${esc(k.name)}</h2><button class="link-btn" data-rename title="Переименовать">✏️</button></div>
+        <div class="kb-name"><h2>${esc(k.name)}</h2><button class="link-btn" data-rename title="Переименовать">✏️</button><a class="link-btn kb-diary-link" href="/g/${k.id}" title="Дневник гриба — можно поделиться">📖 Дневник</a></div>
         <div class="kb-mood mood-${k.mood}">${KB_MOOD[k.mood]?.[0] || ""} ${esc(KB_MOOD[k.mood]?.[1] || "")}</div>
         <div class="kb-stage">${esc(st.title)} · ${k.age_days} дн.${k.generation > 1 ? ` · поколение ${k.generation}` : ""}${k.is_sprout ? " · отросток" : ""}</div>
         <div class="kb-xp"><div class="kb-xp-bar"><span style="width:${pct}%"></span></div>
@@ -2316,8 +2402,81 @@ function pageFaq() {
 }
 
 // ---------------------------------------------------------------- boot
+// ---------------------------------------------------------------- черновики (автосейв) и дневник гриба
+// Автосохранение формы: через 1.2 с после последней правки. Черновик ответа — один на вопрос (upsert по POST).
+function draftAutosave({ kind, questionId = null, draftId = null, collect, status }) {
+  let id = draftId, timer = 0, lastJson = "", saving = false;
+  const say = (t) => { if (status) status.textContent = t; };
+  const save = async () => {
+    const d = collect(); const json = JSON.stringify(d);
+    if (json === lastJson || saving) return;
+    if (!(d.title || "").trim() && !(d.body || "").trim()) return;
+    saving = true; say("Сохраняем…");
+    try {
+      const r = id && kind === "question" ? await api("PUT", `/api/drafts/${id}`, d, { quiet: true })
+        : await api("POST", "/api/drafts", { ...d, kind, question_id: questionId }, { quiet: true });
+      id = r.draft.id; lastJson = json;
+      say(`Черновик сохранён · ${new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`);
+      if (kind === "question" && !new URLSearchParams(location.search).get("draft")) {
+        const u = new URL(location.href); u.searchParams.set("draft", id); history.replaceState(null, "", u);
+      }
+    } catch (_) { say("Черновик не сохранился — попробуем ещё раз"); }
+    saving = false;
+  };
+  return { touch() { clearTimeout(timer); timer = setTimeout(save, 1200); }, get id() { return id; }, flush: save, stop() { clearTimeout(timer); } };
+}
+
+async function pageDrafts() {
+  const box = $("#drafts-list");
+  const render = async () => {
+    const { items, max } = await api("GET", "/api/drafts");
+    if (!items.length) { box.innerHTML = `<p class="muted">Черновиков нет. Начни писать вопрос или ответ — он сохранится сам.</p>`; return; }
+    box.innerHTML = `<p class="muted">${items.length} из ${max}</p>` + items.map((d) => {
+      const href = d.kind === "question" ? `/ask?draft=${d.id}` : `/q/${d.question_id}#answer-form`;
+      const head = d.kind === "question" ? `❓ ${esc(d.title || "Без заголовка")}` : `💬 Ответ на «${esc(d.question_title || "вопрос")}»`;
+      const snip = (d.body || "").slice(0, 160);
+      return `<div class="draft-row"><a class="draft-main" href="${href}"><b>${head}</b>${snip ? `<span class="muted">${esc(snip)}${d.body.length > 160 ? "…" : ""}</span>` : ""}
+        <small class="muted">изменён ${esc(fmtDate(d.updated_at))}</small></a><button class="link-btn" data-del="${d.id}" title="Удалить">🗑</button></div>`;
+    }).join("");
+    $$("[data-del]", box).forEach((b) => (b.onclick = async () => {
+      if (!confirm("Удалить черновик навсегда?")) return;
+      try { await api("DELETE", `/api/drafts/${b.dataset.del}`); toast("Черновик удалён"); render(); } catch (_) {}
+    }));
+  };
+  await render();
+}
+
+async function pageDiary() {
+  const root = $("#diary"), kid = root.dataset.kid, list = $("#diary-list"), more = $("#diary-more");
+  let next = null, first = true;
+  const row = (e) => `<div class="kb-diary-row ${esc(e.kind)}"><span class="e">${e.emoji}</span><div><p>${esc(e.text)}</p><small class="muted">${esc(new Date(e.at).toLocaleString("ru-RU", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }))}</small></div></div>`;
+  const load = async () => {
+    let d;
+    try { d = await api("GET", `/api/kombucha/${kid}/diary${next ? `?before=${next}` : ""}`); }
+    catch (_) { $(".kb-diary-head", root).innerHTML = `<p>Такого гриба нет — может, его и не было 🍄</p>`; return; }
+    if (first) {
+      const k = d.kombucha; first = false;
+      document.title = `Дневник гриба «${k.name}» — schematoz-bulboz.org`;
+      $(".kb-diary-head", root).innerHTML = `<div class="kb-diary-art">${kombuchaSVG({ ...k, id: "dy" + k.id }, { small: true })}</div>
+        <div><h1>📖 Дневник гриба «${esc(k.name)}»</h1>
+        <p class="muted">${esc(k.stage.title)} · ${k.xp} XP · поколение ${k.generation} · ${k.alive ? `живёт ${k.age_days} дн.` : "закис 🪦"}${k.frozen ? " · 🧊 заморожен" : ""}${k.owner ? ` · хозяин <a href="/u/${encodeURIComponent(k.owner)}">@${esc(k.owner)}</a>` : ""}</p>
+        <div class="row"><button class="btn btn-accent btn-sm" id="diary-share">🔗 Поделиться</button>${d.mine ? `<a class="btn btn-ghost btn-sm" href="/kombucha">🍄 К грибу</a>` : ""}</div></div>`;
+      $("#diary-share").onclick = async () => {
+        const url = location.href.split("#")[0], title = `Дневник гриба «${k.name}»`;
+        if (navigator.share) { try { await navigator.share({ title, url }); return; } catch (_) {} }
+        try { await navigator.clipboard.writeText(url); toast("Ссылка скопирована 📋"); } catch (_) { prompt("Скопируй ссылку:", url); }
+      };
+      if (!d.items.length) list.innerHTML = `<p class="muted">Пока пусто: гриб ещё ничего не пережил. Всё впереди.</p>`;
+    }
+    list.insertAdjacentHTML("beforeend", d.items.map(row).join(""));
+    next = d.next; more.hidden = !next;
+  };
+  more.onclick = load;
+  await load();
+}
+
 const PAGES = {
-  feed: () => initFeed(), debates: () => initFeed(), kombucha: pageKombucha, market: pageMarket, tasks: pageTasks, wallet: pageWallet, room: pageRoom, question: pageQuestion, ask: pageAsk, rooms: pageRooms,
+  drafts: pageDrafts, diary: pageDiary, feed: () => initFeed(), debates: () => initFeed(), kombucha: pageKombucha, market: pageMarket, tasks: pageTasks, wallet: pageWallet, room: pageRoom, question: pageQuestion, ask: pageAsk, rooms: pageRooms,
   profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, notifications: pageNotifications, search: pageSearch, mod: pageMod, admin: pageAdmin,
   settings: pageSettings, faq: pageFaq,
 };

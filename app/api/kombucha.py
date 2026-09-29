@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from ..auth.rbac import login_required
+from ..auth.sessions import current_user_id
 from ..db import session_scope
 from ..errors import ApiError
 from ..models import Kombucha, KombuchaCodex, MutationCounter, User, WoodTx
@@ -140,7 +141,10 @@ async def kombucha_rename(kid: int):
     try:
         async with session_scope() as s:
             k = await kb.get_own(s, g.user.id, kid)
+            old = k.name
             k.name = await kb.ensure_name(s, name, exclude_id=k.id)
+            if old != k.name:
+                kb.diary.log(s, k, "renamed", old=old, new=k.name)
             await s.flush()
             return {"kombucha": kb.out(k)}
     except IntegrityError:  # гонка: кто-то занял имя между проверкой и записью
@@ -224,3 +228,17 @@ async def wallet():
             "items": [{"id": t.id, "delta": t.delta, "reason": t.reason, "title": wood.title_for(t.reason),
                        "balance_after": t.balance_after, "created_at": t.created_at.isoformat()} for t in rows],
             "next_before": rows[-1].id if len(rows) == 50 else None}
+
+
+# ---------------------------------------------------------------- дневник гриба (публичный — им делятся ссылкой /g/<id>)
+@bp.get("/kombucha/<int:kid>/diary")
+async def kombucha_diary(kid: int):
+    before = request.args.get("before", type=int)
+    async with session_scope() as s:
+        k = await s.get(Kombucha, kid)
+        if k is None:
+            raise ApiError("Гриб не найден", 404, "not_found")
+        kb.tick(k)
+        owner = (await s.execute(select(User.username).where(User.id == k.user_id))).scalar()
+        d = await kb.diary.read(s, k, before)
+        return {"kombucha": kb.public_out(k, owner), "mine": current_user_id() == k.user_id, **d}

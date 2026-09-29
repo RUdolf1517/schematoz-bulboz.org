@@ -18,6 +18,7 @@ from ..services.gamification import on_question_created
 from ..auth.sessions import current_user_id
 from ..services import wood
 from . import bp
+from .drafts import drop_draft
 from .utils import account_age_hours, answer_out, comment_out, json_body, question_out, req_str
 
 
@@ -56,6 +57,7 @@ async def create_question():
         await s.flush()
         await s.refresh(q)
         new_badges = await on_question_created(s, g.user.id)
+        await drop_draft(s, g.user.id, draft_id=data.get("draft_id"))
         await wood.earn(s, g.user.id, "question", q.id)
         await recompute_user(s, g.user.id)
         await refresh_question(s, q)

@@ -26,6 +26,7 @@ import time
 from ..errors import ApiError
 from ..extensions import get_redis
 from . import kombucha as kb
+from . import kombucha_diary as diary
 from . import wood
 from .kombucha_mutations import MUTATIONS
 
@@ -152,12 +153,16 @@ async def finish(s, user, k, token: str, taps) -> dict:
     happy = round(25 * acc)
     xp = round(12 * acc)
     k.happy = min(100.0, k.happy + happy)
+    old_xp = k.xp
     if not k.mold:
         k.xp += xp
         k.best_xp = max(k.best_xp, k.xp)
     earned = await wood.earn(s, user.id, "meditation", token, amount=round(10 * acc))
     m = _roll_mutation(k, acc)
     mut = await kb.add_mutation(s, k, m, kb.now()) if m else None
+    diary.stage_check(s, k, old_xp)
+    if acc >= 0.95:
+        diary.log(s, k, "game", title="Медитация гриба", acc=round(acc * 100))
     if acc >= 0.95:
         from . import kombucha_achievements as ach
         await ach.award(s, user.id, "kb_zen")
