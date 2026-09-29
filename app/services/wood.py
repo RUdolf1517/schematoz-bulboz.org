@@ -3,7 +3,7 @@
 Начисляется за активность, тратится в магазине «Чайного гриба» (банки, реанимация).
 Каждое начисление идёт через журнал wood_tx с уникальным (user_id, reason, ref):
 одно событие — одна выплата, даже при повторном запросе. У «фармовых» причин
-есть дневной лимит (по Москве), чтобы спам ответами не печатал деньги.
+есть дневной лимит (по Москве), чтобы автокликер не печатал деньги.
 Реальными деньгами $₽ не покупаются и не выводятся — это игровая валюта.
 """
 from __future__ import annotations
@@ -21,25 +21,21 @@ MSK = timezone(timedelta(hours=3))
 
 # причина: (сумма, дневной лимит выплат или None, подпись для истории)
 EARN = {
-    "daily_login": (10, None, "Зашёл на сайт"),
-    "question": (3, 10, "Задал вопрос"),
-    "answer": (5, 20, "Ответил на вопрос"),
-    "comment": (1, 30, "Комментарий"),
-    "debate_vote": (2, 20, "Голос в холиваре"),
-    "debate_answer": (3, 10, "Аргумент в холиваре"),
-    "scheme": (20, None, "Ответ стал «Схемой»"),
-    "kombucha_care": (1, 10, "Уход за грибом"),
+    "daily_login": (10, None, "Зашёл проведать гриба"),
+    "kombucha_care": (1, 20, "Уход за грибом"),
+    "daily_bonus": (20, None, "Бонус дня (до 20, зависит от ухода)"),
     "mutation": (15, None, "Новая мутация гриба"),
     "sprout": (50, None, "Гриб дал отросток"),
-    "wall_post": (1, 10, "Запись на стене"),
     "minigame": (8, 10, "Мини-игры гриба (до 8 за игру, по точности)"),
     "meditation": (10, 5, "Медитация гриба (до 10 за раз, по точности)"),
     "sale": (0, None, "Продал гриб"),
-    "task_reward": (0, None, "Награда за задание"),
-    "task_refund": (0, None, "Возврат за задание"),
 }
-SPEND_TITLES = {"buy_jar": "Купил банку", "revive": "Реанимация гриба", "buy_kombucha": "Купил гриб на рынке",
-                "task_create": "Создал задание (эскроу)"}
+# старые причины из Q&A-эпохи — только чтобы история кошелька читалась
+LEGACY_TITLES = {"question": "Задал вопрос", "answer": "Ответил на вопрос", "comment": "Комментарий",
+                 "debate_vote": "Голос в холиваре", "debate_answer": "Аргумент в холиваре", "scheme": "Ответ стал «Схемой»",
+                 "wall_post": "Запись на стене", "task_reward": "Награда за задание", "task_refund": "Возврат за задание",
+                 "task_create": "Создал задание (эскроу)"}
+SPEND_TITLES = {"buy_jar": "Купил банку", "revive": "Реанимация гриба", "buy_kombucha": "Купил гриб на рынке"}
 MARKET_FEE = 0.05          # комиссия рынка сгорает — борьба с инфляцией
 MIN_PRICE, MAX_PRICE = 10, 1_000_000
 PRICES = {"jar": 300, "revive": 150}
@@ -52,7 +48,7 @@ def msk_day_start(now: datetime | None = None) -> datetime:
 
 
 def daily_login_amount(streak_days: int) -> int:
-    """10 $₽ за заход + до 10 $₽ сверху за стрик ответов."""
+    """10 $₽ за заход + до 10 $₽ сверху за стрик ухода."""
     return EARN["daily_login"][0] + min(max(streak_days, 0), 10)
 
 
@@ -99,7 +95,7 @@ async def balance(s, user_id: int) -> int:
 
 
 def title_for(reason: str) -> str:
-    return EARN[reason][2] if reason in EARN else SPEND_TITLES.get(reason, reason)
+    return EARN[reason][2] if reason in EARN else SPEND_TITLES.get(reason) or LEGACY_TITLES.get(reason, reason)
 
 
 def rules() -> list[dict]:

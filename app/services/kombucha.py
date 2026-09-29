@@ -11,7 +11,7 @@
 - 4 показателя 0..100: сахар, заварка, чистота, настроение. Падают ступенькой
   РАЗ В 12 ЧАСОВ (DROP), отсчёт от рождения гриба — уход не сдвигает таймер.
 - Действия с кулдаунами дают показатель и опыт. Пересластил (сахар > 90) — гриб слипся.
-- «Схема дня»: раз в 20 часов бонус опыта за твои ответы на сайте за сутки.
+- «Бонус дня»: раз в 20 часов опыт за мини-игры и $₽ за уход за сутки.
 - Если любой показатель лежит на нуле 24 часа — гриб закисает. Можно перезавести
   (поколение +1) или реанимировать за $₽.
 - Имя гриба уникально на весь сайт (без учёта регистра).
@@ -30,7 +30,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from ..errors import ApiError
-from ..models import Answer, ContentStatus, DebateVote, Kombucha, KombuchaCodex, KombuchaTrade, MutationCounter, User
+from ..models import Kombucha, KombuchaCodex, KombuchaTrade, MutationCounter, User, WoodTx
 from . import kombucha_achievements as kb_achievements
 from . import kombucha_diary as diary
 from . import quotes, wood
@@ -72,7 +72,7 @@ NAMES = ["Гриша", "Бульбоз", "Кефирыч", "Чайнобой", "
 
 TALK = {
     "happy": ["Жизнь — как заварка: главное, не пересластить.", "Я сегодня особенно газированный 😎",
-              "Ответь на вопрос в ленте — мне от этого тоже хорошо.", "Бульк. Это значит «спасибо»."],
+              "Сыграй со мной в мини-игру — мне от этого тоже хорошо.", "Бульк. Это значит «спасибо»."],
     "hungry": ["Сахарку бы…", "Я не капризничаю, я ферментируюсь без сахара."],
     "thirsty": ["Заварки! Полцарства за заварку!", "Я почти компот. Долей чаю."],
     "dirty": ["Банка мутная, как объяснения у доски.", "Помой банку, пожалуйста. Мне неловко."],
@@ -149,6 +149,10 @@ async def add_mutation(s, k: Kombucha, m: Mutation, at: datetime, inherited: boo
     k.mutations = [*(k.mutations or []), entry]
     new = (await s.execute(insert(KombuchaCodex).values(user_id=k.user_id, code=m.code, kombucha_name=k.name)
                            .on_conflict_do_nothing().returning(KombuchaCodex.code))).scalar() is not None
+    if new:
+        # уровень грибовода = 1 + открытые мутации / 5 (открывает рамки аватара и т.п.)
+        n = await s.scalar(select(func.count()).select_from(KombuchaCodex).where(KombuchaCodex.user_id == k.user_id))
+        await s.execute(update(User).where(User.id == k.user_id).values(level=min(50, 1 + (n or 0) // 5)))
     if new and not inherited:
         await wood.earn(s, k.user_id, "mutation", m.code)
     await kb_achievements.after_mutation(s, k.user_id, m)
@@ -354,15 +358,18 @@ def _cd_left(k: Kombucha, key: str, cd: timedelta, at: datetime) -> int:
     return max(int((datetime.fromisoformat(last) + cd - at).total_seconds()), 0)
 
 
-async def answers_last_day(s, user_id: int) -> int:
-    return await s.scalar(select(func.count(Answer.id)).where(
-        Answer.author_id == user_id, Answer.status == ContentStatus.ACTIVE,
-        Answer.created_at >= now() - timedelta(hours=24))) or 0
+async def _tx_last_day(s, user_id: int, reasons: tuple[str, ...]) -> int:
+    return await s.scalar(select(func.count(WoodTx.id)).where(
+        WoodTx.user_id == user_id, WoodTx.reason.in_(reasons), WoodTx.created_at >= now() - timedelta(hours=24))) or 0
 
 
-async def debate_votes_last_day(s, user_id: int) -> int:
-    return await s.scalar(select(func.count()).select_from(DebateVote).where(
-        DebateVote.user_id == user_id, DebateVote.created_at >= now() - timedelta(hours=24))) or 0
+async def games_last_day(s, user_id: int) -> int:
+    """Сколько мини-игр (с наградой) сыграно за сутки — для «Бонуса дня»."""
+    return await _tx_last_day(s, user_id, ("minigame", "meditation"))
+
+
+async def meditations_last_day(s, user_id: int) -> int:
+    return await _tx_last_day(s, user_id, ("meditation",))
 
 
 async def act(s, user: User, k: Kombucha, action: str) -> dict:
@@ -375,21 +382,24 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
     in_danger = k.zero_since is not None
     danger_since = k.zero_since
     old_xp = k.xp
-    answers_24h = debate_24h = 0
+    games_24h = med_24h = 0
+    daily_wood = 0
     if action == "daily":
         left = _cd_left(k, "daily", DAILY_COOLDOWN, at)
         if left:
-            raise ApiError("Схема дня уже забрана", 429, "cooldown", retry_after=left)
-        answers_24h = await answers_last_day(s, user.id)
-        debate_24h = await debate_votes_last_day(s, user.id)
-        n = min(answers_24h, 6)
+            raise ApiError("Бонус дня уже забран", 429, "cooldown", retry_after=left)
+        games_24h = await games_last_day(s, user.id)
+        med_24h = await meditations_last_day(s, user.id)
+        care_24h = await _tx_last_day(s, user.id, ("kombucha_care",))
+        n = min(games_24h, 6)
         gain = 5 + 5 * n
         if k.mold:
             gain = 0
         k.xp += gain
         k.happy = min(k.happy + 10, 100.0)
-        msg = (f"+{gain} опыта: ты дал {n} ответ(ов) за сутки, гриб гордится 🏆" if n
-               else f"+{gain} опыта. Ответь на вопросы в ленте, завтра бонус будет больше 😉")
+        daily_wood = await wood.earn(s, user.id, "daily_bonus", f"{k.id}:{at.date().isoformat()}", amount=5 + min(care_24h, 15))
+        msg = (f"+{gain} опыта и +{daily_wood} $₽: за сутки {n} игр(ы), гриб гордится 🏆" if n
+               else f"+{gain} опыта и +{daily_wood} $₽. Сыграй в игры гриба — завтра бонус будет больше 😉")
         if k.mold:
             msg = "С плесенью гриб не растёт 🦠 Сначала вылечи его уксусной ванной."
     elif action in ACTIONS:
@@ -440,12 +450,14 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
         k.last_care_day = today
         k.care_days += 1
     earned = await wood.earn(s, user.id, "kombucha_care", f"{k.id}:{action}:{at.isoformat()}")
+    from .gamification import on_care
+    await on_care(s, user.id)
 
     res: dict = {"message": msg, "mutation": None, "sprout": None, "wood": earned,
                  "quote": quote if action in ACTIONS else None}
     msk = at.astimezone(MSK)
-    m = None if k.mold else roll_mutation(Ctx(action=action, k=k, hour=msk.hour, weekday=msk.weekday(), answers_24h=answers_24h,
-                          debate_24h=debate_24h, was_in_danger=rescued, streak_days=user.streak_days))
+    m = None if k.mold else roll_mutation(Ctx(action=action, k=k, hour=msk.hour, weekday=msk.weekday(), games_24h=games_24h,
+                          med_24h=med_24h, was_in_danger=rescued, streak_days=user.streak_days))
     if m:
         res["mutation"] = await add_mutation(s, k, m, at)
     if stage_for(k.xp)["size"] == 6:

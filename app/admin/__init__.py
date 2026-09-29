@@ -9,20 +9,15 @@ from sqlalchemy import delete, func, select
 from ..auth.rbac import invalidate_perms, require_perm
 from ..db import session_scope
 from ..errors import ApiError
-from ..models import (
-    Answer, Category, LegalPage, LegalPageVersion, ModAction, Question, Report, ReportStatus,
-    Role, Room, Setting, User, UserRole,
-)
+from ..models import Kombucha, LegalPage, LegalPageVersion, ModAction, Role, Setting, User, UserRole, WoodTx
 from ..moderation import modlog_out
 from ..services.captcha import invalidate_captcha_settings, validate_captcha_settings
-from ..services.features import get_features, invalidate_features
 from ..services.modlog import log_action
 from ..api.utils import json_body, req_str
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
-SETTING_PERMS = {"captcha": "settings.captcha", "antispam": "settings.antispam",
-                 "features": "settings.features"}
+SETTING_PERMS = {"captcha": "settings.captcha", "antispam": "settings.antispam"}
 
 
 @bp.put("/users/<int:uid>/roles")
@@ -44,37 +39,10 @@ async def set_roles(uid: int):
             s.add(UserRole(user_id=uid, role_id=r.id, granted_by=g.user.id))
         log_action(s, g.user.id, "role.set", "user", uid, roles=sorted(codes))
         await s.flush()
-        from ..services.rating import recompute_user
-        await recompute_user(s, uid)  # tier: админ/модер — ∞
+        from ..services.roles import sync_tier
+        await sync_tier(s, uid)
     invalidate_perms(uid)
     return {"ok": True, "roles": sorted(codes)}
-
-
-@bp.post("/categories")
-@require_perm("category.manage")
-async def create_category():
-    data = json_body()
-    async with session_scope() as s:
-        c = Category(slug=req_str(data, "slug", max_len=64), title=req_str(data, "title", max_len=128),
-                     parent_id=data.get("parent_id"), sort=data.get("sort", 0))
-        s.add(c)
-        await s.flush()
-        log_action(s, g.user.id, "category.create", "category", c.id, slug=c.slug)
-    return {"id": c.id}, 201
-
-
-@bp.post("/rooms")
-@require_perm("room.manage")
-async def create_room():
-    data = json_body()
-    async with session_scope() as s:
-        r = Room(slug=req_str(data, "slug", max_len=64), title=req_str(data, "title", max_len=128),
-                 description=data.get("description"), category_id=data.get("category_id"),
-                 is_official=bool(data.get("is_official", True)))
-        s.add(r)
-        await s.flush()
-        log_action(s, g.user.id, "room.create", "room", r.id, slug=r.slug)
-    return {"id": r.id}, 201
 
 
 @bp.get("/settings/<key>")
@@ -85,8 +53,6 @@ async def get_setting(key: str):
 
     @require_perm(perm)
     async def _do():
-        if key == "features":
-            return {"key": key, "value": await get_features()}
         async with session_scope() as s:
             row = await s.get(Setting, key)
         value = row.value if row else {}
@@ -108,7 +74,7 @@ async def search_users():
             stmt = stmt.where(User.username.contains(q, autoescape=True) | User.email.contains(q, autoescape=True))
         users = (await s.scalars(stmt)).all()
     return {"items": [{"id": u.id, "username": u.username, "email": u.email,
-                       "reputation": u.reputation, "roles": sorted(r.code for r in u.roles),
+                       "roles": sorted(r.code for r in u.roles),
                        "created_at": u.created_at.isoformat()} for u in users]}
 
 
@@ -125,11 +91,6 @@ async def put_setting(key: str):
             raise ApiError("value — объект", 400, "validation_error")
         if key == "captcha":
             value = validate_captcha_settings(value)
-        if key == "features":
-            bad = [k for k, v in value.items()
-                   if k not in current_app.config["FEATURES"] or not isinstance(v, bool)]
-            if bad:
-                raise ApiError(f"Неизвестные флаги: {', '.join(bad)}", 400, "validation_error")
         async with session_scope() as s:
             row = await s.get(Setting, key, with_for_update=True)
             old = row.value if row else None
@@ -138,8 +99,6 @@ async def put_setting(key: str):
             else:
                 row.value, row.updated_by = value, g.user.id
             log_action(s, g.user.id, "settings.update", "setting", None, key=key, old=old, new=value)
-        if key == "features":
-            invalidate_features()
         if key == "captcha":
             invalidate_captcha_settings()
         return {"key": key, "value": value}
@@ -201,9 +160,10 @@ async def analytics():
             "users_total": await count(select(func.count(User.id))),
             "users_24h": await count(select(func.count(User.id)).where(User.created_at >= day_ago)),
             "dau": await count(select(func.count(User.id)).where(User.last_seen_at >= day_ago)),
-            "questions_24h": await count(select(func.count(Question.id)).where(Question.created_at >= day_ago)),
-            "answers_24h": await count(select(func.count(Answer.id)).where(Answer.created_at >= day_ago)),
-            "reports_open": await count(select(func.count(Report.id)).where(Report.status == ReportStatus.OPEN)),
+            "kombuchas_alive": await count(select(func.count(Kombucha.id)).where(Kombucha.alive.is_(True), Kombucha.frozen.is_(False))),
+            "kombuchas_born_24h": await count(select(func.count(Kombucha.id)).where(Kombucha.born_at >= day_ago)),
+            "games_24h": await count(select(func.count(WoodTx.id)).where(WoodTx.reason.in_(("minigame", "meditation")), WoodTx.created_at >= day_ago)),
+            "wood_earned_24h": await count(select(func.coalesce(func.sum(WoodTx.delta), 0)).where(WoodTx.delta > 0, WoodTx.created_at >= day_ago)),
         }
 
 

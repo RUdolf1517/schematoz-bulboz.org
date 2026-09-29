@@ -25,7 +25,7 @@ def test_profile_update_validation(make_user):
     c, _ = make_user()
     d = c.get("/api/me/profile").get_json()
     assert "themes" in d["options"]
-    assert _patch(c, theme="neon", accent="#00FF00", status_emoji="😎", status_text="ЕГЭ скоро",
+    assert _patch(c, theme="neon", accent="#00FF00", status_emoji="😎", status_text="гриб растёт",
                   interests=["аниме", "#Аниме", "физика"], links=[{"title": "tg", "url": "https://t.me/x"}]).status_code == 200
     s = c.get("/api/me/profile").get_json()["settings"]
     assert s["theme"] == "neon" and s["accent"] == "#00ff00" and s["interests"] == ["аниме", "физика"]
@@ -35,7 +35,7 @@ def test_profile_update_validation(make_user):
     assert _patch(c, avatar_url="https://evil.example/a.png").status_code == 400
     assert _patch(c, avatar_url="/media/" + "0" * 32 + ".webp").status_code == 400
     assert _patch(c, showcase_badges=["no_such_badge"]).status_code == 400
-    assert _patch(c, pinned_answer_id=999999).status_code == 400
+    assert _patch(c, pinned_kombucha_id=999999).status_code == 400
     assert _patch(c, avatar_frame="rainbow").status_code == 403
     assert _patch(c, status_emoji="abc").status_code == 400
 
@@ -43,18 +43,26 @@ def test_profile_update_validation(make_user):
 def test_hidden_sections_not_leaked(app, make_user):
     c, _ = make_user()
     me = c.get("/api/me/profile").get_json()["user"]["username"]
-    assert _patch(c, hidden_sections=["badges", "follows", "streak"]).status_code == 200
+    c.get("/api/kombucha")   # первый гриб выдаётся при первом заходе
+    assert _patch(c, hidden_sections=["badges", "stats", "garden", "streak"]).status_code == 200
+    assert _patch(c, hidden_sections=["follows"]).status_code == 400
+    assert _patch(c, hidden_sections=["badges", "stats", "garden", "streak"]).status_code == 200
     own = c.get(f"/api/users/{me}").get_json()
-    assert own["is_owner"] and "followers" in own["stats"]
+    assert own["is_owner"] and "codex" in own["stats"] and len(own["garden"]) == 1
     other = app.test_client().get(f"/api/users/{me}").get_json()
-    assert other["badges"] == [] and "followers" not in other["stats"] and other["user"]["streak_days"] is None
+    assert other["badges"] == [] and other["stats"] == {} and other["garden"] == []
+    assert other["user"]["streak_days"] is None
 
 
-def test_pin_only_own_answer(qa):
-    assert _patch(qa["author_c"], pinned_answer_id=qa["a"]["id"]).status_code == 400
-    assert _patch(qa["answerer_c"], pinned_answer_id=qa["a"]["id"]).status_code == 200
-    d = qa["other_c"].get(f"/api/users/{qa['answerer']['username']}").get_json()
-    assert d["pinned_answer"]["answer_id"] == qa["a"]["id"]
+def test_pin_only_own_kombucha(make_user):
+    a, au = make_user()
+    b, _ = make_user()
+    kid = a.get("/api/kombucha").get_json()["items"][0]["id"]
+    assert _patch(b, pinned_kombucha_id=kid).status_code == 400
+    assert _patch(a, pinned_kombucha_id=kid).status_code == 200
+    d = b.get(f"/api/users/{au['username']}").get_json()
+    assert d["pinned_kombucha"]["id"] == kid and "mutations" in d["pinned_kombucha"]
+    assert _patch(a, pinned_kombucha_id=None).status_code == 200
 
 
 def test_settings_page_requires_login(app, make_user):

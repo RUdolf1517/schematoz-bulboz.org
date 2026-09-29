@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 from flask import g, request
 from sqlalchemy import or_, select
 
-from ..auth.rbac import login_required
+from ..auth.rbac import login_required, require_perm
+from ..services.captcha import captcha_required
 from ..db import session_scope
 from ..errors import ApiError
 from ..models import Kombucha, KombuchaTrade, User
@@ -42,7 +43,8 @@ async def kombucha_freeze(kid: int, op: str):
 
 
 @bp.post("/kombucha/<int:kid>/list")
-@login_required
+@require_perm("market.trade")  # забаненным рынок закрыт
+@captcha_required()  # только при подозрительной активности (после загрузки юзера)
 async def kombucha_list(kid: int):
     data = json_body()
     price = data.get("price")
@@ -88,7 +90,8 @@ async def market():
 
 
 @bp.post("/market/<int:kid>/buy")
-@login_required
+@require_perm("market.trade")  # забаненным рынок закрыт
+@captcha_required()  # только при подозрительной активности (после загрузки юзера)
 async def market_buy(kid: int):
     data = json_body()
     async with session_scope() as s:
@@ -149,7 +152,8 @@ def _tradable(k: Kombucha | None, owner_id: int, what: str) -> Kombucha:
 
 
 @bp.post("/trades")
-@login_required
+@require_perm("market.trade")  # забаненным рынок закрыт
+@captcha_required()  # только при подозрительной активности (после загрузки юзера)
 async def trade_create():
     """{to_username, give_id, want_id|null}. want_id=null — подарок."""
     data = json_body()

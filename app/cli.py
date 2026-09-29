@@ -78,19 +78,9 @@ def register_cli(app: Flask) -> None:
 
     @app.cli.command("seed")
     def seed_cmd():
-        """Роли, права, юр. страницы, стартовые комнаты."""
+        """Роли, права, юр. страницы."""
         _run_db(app, seed())
         click.echo("seeded")
-
-    @app.cli.command("recompute-ratings")
-    def recompute_ratings():
-        """Пересчитать рейтинги всех юзеров и вопросов (раз в сутки по cron — для «свежести»)."""
-        from .services.rating import recompute_all
-
-        async def _run():
-            async with session_scope() as s:
-                return await recompute_all(s)
-        click.echo(f"recomputed {_run_db(app, _run())} users")
 
     @app.cli.command("create-db-dev")
     def create_db_dev():
@@ -108,7 +98,7 @@ def register_cli(app: Flask) -> None:
     def create_admin(username, email, password):
         from sqlalchemy import func, or_
 
-        from .services.rating import recompute_user
+        from .services.roles import sync_tier
 
         async def _run():
             async with session_scope() as s:
@@ -127,6 +117,6 @@ def register_cli(app: Flask) -> None:
                 for r in roles:
                     s.add(UserRole(user_id=u.id, role_id=r.id))
                 await s.flush()
-                await recompute_user(s, u.id)  # rating_tier = 2 → рейтинг ∞
+                await sync_tier(s, u.id)
         _run_db(app, _run())
         click.echo(f"Админ @{username.lower()} создан. Вход: /login")

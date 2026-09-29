@@ -34,13 +34,14 @@ def test_too_young(app):
 
 
 def test_anonymous_cannot_post(app):
-    r = app.test_client().post("/api/questions", json={"title": "Как пожарить воду?"})
-    assert r.status_code == 401
+    c = app.test_client()
+    assert c.post("/api/trades", json={}).status_code == 401
+    assert c.post("/api/kombucha/plant", json={}).status_code == 401
 
 
 def test_user_cannot_access_mod_or_admin(make_user):
     c, _ = make_user()
-    assert c.get("/mod/reports").status_code == 403
+    assert c.get("/mod/users?q=ab").status_code == 403
     assert c.get("/admin/analytics").status_code == 403
     assert c.get("/admin/modlog").status_code == 403
 
@@ -48,7 +49,7 @@ def test_user_cannot_access_mod_or_admin(make_user):
 def test_moderator_limits(make_user):
     mod_c, _ = make_user("moderator")
     _, victim = make_user()
-    assert mod_c.get("/mod/reports").status_code == 200
+    assert mod_c.get("/mod/users?q=ab").status_code == 200
     assert mod_c.get("/admin/modlog").status_code == 403           # полный лог — только админ
     r = mod_c.post("/mod/bans", json={"user_id": victim["id"], "reason": "спам", "days": None})
     assert r.status_code == 403                                     # перманент — только админ
@@ -61,8 +62,8 @@ def test_suspicious_activity_triggers_captcha(app, make_user):
     from app.services import antispam
     with app.test_request_context():
         antispam.mark_suspicious(f"u:{user['id']}", "test")
-    r = c.post("/api/questions", json={"title": "Можно ли пожарить воду?"})
+    r = c.post("/api/market/999/buy", json={})
     assert r.status_code == 403 and r.json["error"] == "captcha_required"
     pass_captcha(c)
-    assert c.post("/api/questions", json={"title": "Можно ли пожарить воду?"}).status_code == 201
-    assert c.post("/api/questions", json={"title": "И ещё один вопрос?"}).status_code == 201
+    assert c.post("/api/market/999/buy", json={}).status_code == 404
+    assert c.post("/api/market/998/buy", json={}).status_code == 404

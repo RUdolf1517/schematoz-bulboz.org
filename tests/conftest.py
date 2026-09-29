@@ -40,8 +40,6 @@ def app(database_url):
         "DATABASE_URL": database_url,
         "REDIS_CLIENT": fakeredis.FakeRedis(decode_responses=True),
         "KREMLE_AUTO_GUARD": False,
-        "NEW_ACCOUNT_VOTE_HOLD_HOURS": 0,
-        "VOTE_CHANGE_COOLDOWN_SECONDS": 0,
         "ANTISPAM_POSTS_PER_MINUTE": 100,
     })
 
@@ -88,24 +86,10 @@ def make_user(app):
                     for rid in await s.scalars(select(Role.id).where(Role.code.in_(codes))):
                         s.add(UserRole(user_id=user["id"], role_id=rid))
                     await s.flush()
-                    from app.services.rating import recompute_user
-                    await recompute_user(s, user["id"])
+                    from app.services.roles import sync_tier
+                    await sync_tier(s, user["id"])
             with app.app_context():
                 asyncio.run(grant())
                 invalidate_perms(user["id"])
         return client, user
     return _make
-
-
-@pytest.fixture()
-def qa(make_user):
-    """Автор вопроса, отвечающий, сторонний зритель + вопрос и ответ."""
-    author_c, author = make_user()
-    answerer_c, answerer = make_user()
-    other_c, other = make_user()
-    q = author_c.post("/api/questions", json={"kind": "knowledge",
-                                              "title": "Почему шарик падает с ускорением?"}).json["question"]
-    a = answerer_c.post(f"/api/questions/{q['id']}/answers",
-                        json={"body": "Потому что на него действует сила тяжести, F = ma."}).json["answer"]
-    return dict(author_c=author_c, author=author, answerer_c=answerer_c, answerer=answerer,
-                other_c=other_c, other=other, q=q, a=a)

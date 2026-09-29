@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Notification
 
-KINDS = {"answer", "scheme", "badge", "ban", "appeal", "follow", "comment", "trade", "sale", "wall", "task"}
+KINDS = {"badge", "ban", "appeal", "trade", "sale", "kombucha"}
 
 
 def notify(s: AsyncSession, user_id: int, kind: str, **payload) -> Notification:

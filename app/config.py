@@ -47,20 +47,9 @@ class Config:
     KREMLE_MAX_ERRORS = int(os.environ.get("KREMLE_MAX_ERRORS", "1"))
 
     # Репутация
-    VOTE_CHANGE_COOLDOWN_SECONDS = 600       # менять голос не чаще раза в 10 минут
-    NEW_ACCOUNT_VOTE_HOLD_HOURS = 24         # голоса «свежих» аккаунтов пишутся с delta=0
 
     # Антиспам (правила, без ML)
     ANTISPAM_POSTS_PER_MINUTE = 5
 
-    # Фича-флаги типов ответа (значения по умолчанию; админ переопределяет в settings)
-    FEATURES = {
-        "ANSWER_TEXT_ENABLED": True,
-        "ANSWER_VOICE_ENABLED": False,
-        "ANSWER_VIDEO_ENABLED": False,
-    }
-    ANSWER_TEXT_MAX_LEN = 5000
-    COMMENT_MAX_LEN = 200
     UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "var", "uploads"))
     MAX_CONTENT_LENGTH = 9 * 1024 * 1024
-    ANSWER_MEDIA_MAX_DURATION_MS = 60_000

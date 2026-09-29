@@ -33,27 +33,14 @@ const txt = (dom, sel) => (dom.window.document.querySelector(sel)?.textContent |
 function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " " + name + (extra ? "  — " + extra : "")); if (!cond) process.exitCode = 1; }
 
 (async () => {
-  // 1. Лента анонимно: карточки, кнопка «Войти» в хедере
-  let d = await open("/");
-  const cards = d.window.document.querySelectorAll(".card[data-href]");
-  check("лента: карточки есть", cards.length >= 5, cards.length + " шт.");
-  check("хедер: кнопка «Войти»", txt(d, "#login-btn") === "Войти");
-  check("карточка ведёт на вопрос", cards[0]?.dataset.href?.startsWith("/q/"), cards[0]?.dataset.href);
-  check("лента: у карточек рейтинг и кнопки голоса", !!d.window.document.querySelector(".card .card-vote .cv-score"));
-  check("лента: обложка у вопроса", !!d.window.document.querySelector(".card-cover"));
-  check("футер: ссылка на холивары после ленты", d.window.document.querySelector(".site-footer .footer-debates")?.getAttribute("href") === "/debates");
-  check("футер", txt(d, ".credit").includes("разработано RUdolf1517 на основе технологий rudolfzinovev.xyz"));
+  // 1. Гость: лендинг с топом грибов
+  let d = await open("/", 1500);
+  check("лендинг: гриб нарисован и есть топ", !!d.window.document.querySelector("#home-art svg") && d.window.document.querySelectorAll("#home-top .kb-card, #home-top li, #home-top a").length > 0, txt(d, "#home-top").slice(0, 80));
+  check("шапка: Войти, Рынок, без Q&A", !!d.window.document.querySelector("#login-btn") && !!d.window.document.querySelector('.main-nav a[href="/market"]') && !d.window.document.querySelector('a[href="/ask"], a[href="/rooms"], a[href="/debates"]'));
+  check("футер", txt(d, ".site-footer").includes("разработано RUdolf1517") && txt(d, ".site-footer").includes("СукИнЭндСын"));
 
-  // 2. Страница вопроса анонимно
-  d = await open("/q/1");
-  check("вопрос: заголовок", txt(d, ".q-head h1").startsWith("Почему шарик"));
-  check("вопрос: «Схема» первой", d.window.document.querySelector(".answer")?.classList.contains("best"));
-  check("вопрос: призыв войти", txt(d, "#question").includes("Войди, чтобы ответить"));
-  check("вопрос: markdown в ответе", !!d.window.document.querySelector(".answer .md strong"));
-  check("вопрос: комментарии, модер первым", txt(d, ".answer .comment .c-meta").includes("@moder") && txt(d, ".urating.tier-mod") === "★∞");
-
-  // 3. Вход сразу формой, без капчи
-  d = await open("/login?next=/q/1");
+  // 2. Вход
+  d = await open("/login?next=/market");
   check("логин: демо-аккаунты показаны", txt(d, ".demo-box").includes("admin-demo-2026"));
   const f = d.window.document.querySelector("#auth-form");
   check("логин: форма видна без капчи", f && !f.hidden && !d.window.document.querySelector("#captcha-step"));
@@ -61,36 +48,32 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   f.dispatchEvent(new d.window.Event("submit", { cancelable: true }));
   await sleep(900);
 
-  // 3b. Настройки профиля: живое превью + сохранение + FAQ
+  // 3. Настройки профиля
   d = await open("/settings", 1500);
   let sf = d.window.document.querySelector("#settings-form");
-  check("настройки: форма загрузилась", !!sf.querySelector("[name=theme]"));
+  check("настройки: форма загрузилась", !!sf.querySelector("[name=theme]") && !!sf.querySelector("[name=pinned_kombucha_id]") && !sf.querySelector("[name=wall_closed]"));
   sf.querySelector('[name=theme][value="neon"]').click();
-  sf.elements.status_text.value = "готовлюсь к ЕГЭ";
+  sf.elements.status_text.value = "ращу легенду";
+  const pin = sf.querySelector("[name=pinned_kombucha_id] option:nth-child(2)");
+  if (pin) sf.elements.pinned_kombucha_id.value = pin.value;
   sf.dispatchEvent(new d.window.Event("input", { bubbles: true }));
-  check("настройки: превью обновилось", !!d.window.document.querySelector("#preview .theme-neon") && txt(d, "#preview").includes("готовлюсь к ЕГЭ"));
+  check("настройки: превью обновилось", !!d.window.document.querySelector("#preview .theme-neon") && txt(d, "#preview").includes("ращу легенду"));
+  check("настройки: превью закреплённого гриба", !pin || !!d.window.document.querySelector("#preview .pinned-kb svg"));
   sf.dispatchEvent(new d.window.Event("submit", { cancelable: true })); await sleep(900);
-  d = await open("/u/dasha");
-  check("профиль: тема и статус применились", !!d.window.document.querySelector(".profile-skin.theme-neon") && txt(d, ".status-line") === "готовлюсь к ЕГЭ");
+  d = await open("/u/dasha", 1500);
+  check("профиль: тема и статус применились", !!d.window.document.querySelector(".profile-skin.theme-neon") && txt(d, ".status-line") === "ращу легенду");
+  check("профиль: грибная статистика и подоконник", txt(d, ".stats").includes("мутаций") && d.window.document.querySelectorAll(".kb-shelf .kb-card").length >= 1);
+  check("профиль: без стены и репутации", !d.window.document.querySelector("#wall") && !txt(d, "main").includes("репутация"));
   d = await open("/faq");
   const fq = d.window.document.querySelector("#faq-search");
   check("FAQ: есть вопросы", d.window.document.querySelectorAll(".faq-item").length > 2);
   fq.value = "zzzнетничего"; fq.dispatchEvent(new d.window.Event("input"));
   check("FAQ: поиск прячет всё и показывает заглушку", !d.window.document.querySelector("#faq-empty").hidden);
 
-  // 3d. Голосование прямо из ленты
+  // 4. Чайный гриб на главной
   d = await open("/", 1500);
-  const cv = [...d.window.document.querySelectorAll(".card .card-vote")].find((b) => !b.querySelector("[data-cvote='1']").disabled && b.dataset.my === "0" && b.dataset.qid !== "4");
-  const cvBefore = Number(cv.querySelector(".cv-score").textContent);
-  cv.querySelector("[data-cvote='1']").click(); await sleep(900);
-  check("лента: ▲ поднимает рейтинг без перехода в вопрос", d.window.location.pathname === "/" && cv.querySelector("[data-cvote='1']").classList.contains("on-up") && Number(cv.querySelector(".cv-score").textContent) > cvBefore);
-  d = await open("/", 1500);
-  check("лента: мой голос виден после перезагрузки", !!d.window.document.querySelector(`.card-vote[data-qid="${cv.dataset.qid}"] .on-up`));
-
-  // 3c. Чайный гриб
-  d = await open("/kombucha", 1500);
   check("гриб: банка нарисована", !!d.window.document.querySelector(".kb-main .kb-svg"));
-  check("гриб: в шапке есть Холивары и Гриб", !!d.window.document.querySelector('.main-nav a[href="/debates"]') && !!d.window.document.querySelector('.main-nav a[href="/kombucha"].active'));
+  check("гриб: пункт «Мой гриб» активен", !!d.window.document.querySelector('.main-nav a[href="/"].active'));
   d.window.document.querySelector('[data-act="tea"]').click(); await sleep(900);
   check("гриб: заварка долита, кнопка на кулдауне", d.window.document.querySelector('[data-act="tea"]')?.disabled === true);
   check("гриб: банки, коллекция из 240 мутаций по стадиям, таймер 12 ч", !!d.window.document.querySelector(".kb-jar-tab.active") && d.window.document.querySelectorAll(".kb-cx").length === 240 && d.window.document.querySelectorAll(".kb-cx-stage").length === 6 && txt(d, ".kb-next").includes("12 часов"));
@@ -101,129 +84,58 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   d.window.document.querySelector("[data-list]").click(); await sleep(1200);
   globalThis.PROMPT_ANSWER = undefined;
   check("гриб: выставлен на продажу", txt(d, "[data-unlist]").includes("777"));
-  const meName = decodeURIComponent(d.window.document.querySelector("#me-profile").getAttribute("href").split("/u/")[1]);
   d = await open("/market", 3000);
   check("рынок: мой гриб на витрине", txt(d, "#mk-list").includes("777") && txt(d, "#mk-list").includes("твой") && txt(d, "#mk-trades").includes("Входящие"));
-  d = await open(`/u/${encodeURIComponent(meName)}`, 1800);
+  d = await open("/u/dasha", 1800);
   check("профиль: гриб на полке с ценой", d.window.document.querySelectorAll("#shelf-list .kb-card").length === 1 && txt(d, "#shelf-list").includes("777"));
-  check("профиль: бейджи-достижения гриба", txt(d, ".badges").includes("Грибовод") && txt(d, ".badges").includes("Морозилка"));
-  const wta = d.window.document.querySelector("#wall-form textarea");
-  wta.value = "Первая запись на стене 🍄";
-  d.window.document.querySelector("#wall-form form").dispatchEvent(new d.window.Event("submit", { cancelable: true })); await sleep(1200);
-  check("стена: запись появилась", txt(d, "#wall-list").includes("Первая запись на стене"));
-  d = await open("/kombucha", 1500);
+  d = await open("/", 1500);
   d.window.document.querySelector("[data-unlist]").click(); await sleep(900);
   d.window.document.querySelector("[data-unfreeze]").click(); await sleep(1200);
   check("гриб: снят с продажи и разморожен", !d.window.document.querySelector(".kb-svg.frozen") && !!d.window.document.querySelector(".kb-actions"));
   d = await open("/wallet", 1500);
-  check("кошелёк: баланс и история", txt(d, "#w-balance").endsWith("$₽") && d.window.document.querySelectorAll(".wallet-row").length > 0);
-
-  // 4. Даша — автор вопроса 1: видит кнопки +5/−1
-  d = await open("/q/1");
-  check("хедер: имя пользователя", txt(d, "#me-name") === "dasha");
-  const voteVals = [...d.window.document.querySelectorAll("[data-vote]")].map((b) => b.dataset.vote);
-  check("автор видит только +5 и −1", voteVals.length && voteVals.every((v) => v === "5" || v === "-1"), voteVals.join(","));
-  check("подсказка автору", txt(d, ".author-hint").includes("+5"));
-  // переголосуем «ну это гравитация лол»: снимаем −1 (повторный клик) и ставим +5
-  let second = d.window.document.querySelectorAll(".answer")[1];
-  second.querySelector('[data-vote="-1"]').click(); await sleep(900);
-  d = await open("/q/1");
-  second = d.window.document.querySelectorAll(".answer")[1];
-  check("повторный клик снимает голос", !second.querySelector(".on-down"), txt(d, ".answer:nth-of-type(2) .score"));
-
-  // 4б. Комментарий к ответу и апвоут вопроса
-  const cf = d.window.document.querySelector(".comment-form");
-  cf.elements.body.value = "**огонь**, спасибо";
-  cf.dispatchEvent(new d.window.Event("submit", { cancelable: true })); await sleep(1000);
-  check("комментарий опубликован с markdown", [...d.window.document.querySelectorAll(".comment .md strong")].some((x) => x.textContent === "огонь"));
-  check("свой вопрос — голосовать нельзя", !d.window.document.querySelector("[data-qvote]"));
-  d = await open("/q/4");
-  const before = txt(d, ".q-vote .score");
-  d.window.document.querySelector('[data-qvote="1"]').click(); await sleep(1000);
-  check("апвоут вопроса поднимает рейтинг", txt(d, ".q-vote .score") !== before && !!d.window.document.querySelector('[data-qvote="1"].on-up'), before + " → " + txt(d, ".q-vote .score"));
-  d = await open("/ask");
-  check("юзер не может создать холивар", d.window.document.querySelector("#debate-opt").disabled);
-  check("форма вопроса: обложка и markdown-панель", !!d.window.document.querySelector("#cover-input") && !!d.window.document.querySelector(".md-toolbar"));
-  d = await open("/debates");
-  check("страница холиваров", d.window.document.querySelector('[data-tab="debates"]').classList.contains("active") && txt(d, "#feed").includes("Шаверма"));
-
-  // 5. Даша отвечает на чужой вопрос (q4) — у неё там ±1
-  d = await open("/q/4");
-  const vals4 = [...d.window.document.querySelectorAll("[data-vote]")].map((b) => b.dataset.vote);
-  check("не-автор видит только +1 и −1", vals4.every((v) => v === "1" || v === "-1"), vals4.join(","));
-  const af = d.window.document.querySelector("#answer-form");
-  af.elements.body.value = "Карточки + таймлайн, и каждый день по 20 минут.";
-  af.dispatchEvent(new d.window.Event("submit", { cancelable: true }));
-  await sleep(1200);
-  check("ответ опубликован", txt(d, "#question").includes("Карточки + таймлайн"));
-
-  // 5б. Редактирование своего ответа
-  d = await open("/q/4");
-  const mine = [...d.window.document.querySelectorAll("[data-edit-a]")];
-  check("свой ответ: кнопки изменить/удалить", mine.length === 1);
-  mine[0].click(); await sleep(200);
-  const ef = d.window.document.querySelector("#edit-form");
-  ef.elements.body.value = "Карточки + таймлайн, 20 минут в день. UPD: и пробники!";
-  ef.dispatchEvent(new d.window.Event("submit", { cancelable: true })); await sleep(1000);
-  check("ответ изменён, пометка «изменено»", txt(d, "#question").includes("UPD: и пробники") && txt(d, "#question").includes("изменено"));
-
-  // 5в. Поиск и подписка
-  d = await open("/search?q=шарик", 1200);
-  check("поиск находит вопрос", txt(d, "#search-results").includes("Почему шарик"));
-  d = await open("/u/kotik_na_fizmate");
-  const fbtn = d.window.document.querySelector("#follow-btn");
-  check("кнопка подписки", txt(d, "#follow-btn") === "Подписаться");
-  fbtn.click(); await sleep(900);
-  check("подписка оформлена", txt(d, "#follow-btn") === "Отписаться");
-  d = await open("/");
-  d.window.document.querySelector('[data-tab="following"]').click(); await sleep(900);
-  check("вкладка «Подписки»", d.window.document.querySelectorAll("#feed .card[data-href]").length >= 1);
-  d = await open("/notifications");
-  check("страница уведомлений", !!d.window.document.querySelector("#read-all"));
-
-  // 6. Холивар: голос за сторону
-  d = await open("/q/2");
-  d.window.document.querySelector('[data-side="b"]').click(); await sleep(900);
-  d = await open("/q/2");
-  check("холивар: голос засчитан", d.window.document.querySelector('[data-side="b"]').classList.contains("mine"), txt(d, ".debate-bar .bar"));
-
-  // 7. Профиль, комнаты
-  d = await open("/u/kotik_na_fizmate");
-  check("профиль: бейджи", txt(d, "#profile").includes("Рабочая схема"));
-  check("профиль: темы репутации", txt(d, "#profile").includes("ЕГЭ Физика"));
-  d = await open("/rooms");
-  const joinBtn = d.window.document.querySelector('[data-join="genshin"]');
-  joinBtn.click(); await sleep(800);
-  d = await open("/?");
-  d.window.document.querySelector('[data-tab="my_rooms"]').click(); await sleep(900);
-  check("вкладка «Мои комнаты»", txt(d, "#feed").includes("Genshin"), txt(d, "#feed").slice(0, 80));
+  const reasons = txt(d, "#w-rules");
+  check("кошелёк: баланс, история, правила без Q&A", txt(d, "#w-balance").endsWith("$₽") && d.window.document.querySelectorAll(".wallet-row").length > 0 && !/вопрос|ответ|стен|задани/i.test(reasons), reasons.slice(0, 120));
+  d = await open("/notifications", 1200);
+  check("уведомления открываются", !!d.window.document.querySelector("#notifications"));
+  for (const p of ["/q/1", "/ask", "/rooms", "/tasks"]) {
+    const r = await fetch(BASE + p, { redirect: "manual" });
+    check(`Q&A-страница ${p} удалена`, r.status === 404);
+  }
   d = await open("/mod");
   check("юзеру панель модерации закрыта", txt(d, "main").includes("Нет доступа"));
 
-  // 8. Выход и вход админом
+  // 5. Админ
   d.window.document.querySelector("#logout-btn").click(); await sleep(700);
   d = await open("/login");
   const f2 = d.window.document.querySelector("#auth-form");
   f2.elements.login.value = "admin"; f2.elements.password.value = "admin-demo-2026";
   f2.dispatchEvent(new d.window.Event("submit", { cancelable: true }));
   await sleep(900);
-  d = await open("/");
-  d = await open("/ask");
-  check("админ может создать холивар", !d.window.document.querySelector("#debate-opt").disabled);
+  d = await open("/", 1200);
   check("админ: пункты меню", !d.window.document.querySelector("#me-admin").hidden && !d.window.document.querySelector("#me-mod").hidden);
   d = await open("/mod", 1300);
-  check("мод-панель: жалоба на спам в очереди", txt(d, "#panel").includes("free-genshin-gems"));
-  d.window.document.querySelector('[data-act="hide"]').click(); await sleep(1200);
-  check("жалоба закрыта скрытием", !txt(d, "#panel").includes("free-genshin-gems"));
+  const mq = d.window.document.querySelector("#mod-q");
+  mq.value = "kotik"; mq.dispatchEvent(new d.window.Event("input")); await sleep(1300);
+  check("мод-панель: поиск игрока", txt(d, "#mod-users").includes("@kotik"));
+  globalThis.PROMPT_ANSWER = undefined;
+  d.window.document.querySelector("[data-ban]").click(); await sleep(300);
+  const bf = d.window.document.querySelector("#ban-form");
+  bf.elements.reason.value = "автокликер в «Мушках»";
+  bf.dispatchEvent(new d.window.Event("submit", { cancelable: true })); await sleep(1500);
+  check("мод-панель: бан выдан", txt(d, "#mod-users").includes("автокликер"));
+  d.window.document.querySelector("[data-lift]").click(); await sleep(1500);
+  check("мод-панель: бан снят", !!d.window.document.querySelector("[data-ban]"));
   d.window.document.querySelector('[data-tab="appeals"]').click(); await sleep(900);
-  check("свою апелляцию админ не видит", txt(d, "#panel").includes("Апелляций нет"));
+  check("апелляции открываются", txt(d, "#panel").includes("Апелляций нет"));
   d = await open("/admin", 1200);
-  check("админка: аналитика", txt(d, "#panel").includes("Всего юзеров"));
-  for (const tab of ["users", "captcha", "features", "legal", "rooms", "modlog"]) {
-    d.window.document.querySelector(`[data-tab="${tab}"]`).click(); await sleep(900);
+  check("админка: грибная аналитика", txt(d, "#panel").includes("Живых грибов"));
+  for (const tab of ["users", "captcha", "legal", "modlog", "kombucha"]) {
+    d.window.document.querySelector(`[data-tab="${tab}"]`).click(); await sleep(1200);
     check(`админка: вкладка ${tab}`, !txt(d, "#panel").includes("Не удалось") && !txt(d, "#panel").includes("Загружаем"), txt(d, "#panel").slice(0, 60));
   }
-  check("лог: действие модерации записано", txt(d, "#panel").includes("content.hide"));
+  d.window.document.querySelector('[data-tab="modlog"]').click(); await sleep(1000);
+  check("лог: бан и снятие записаны", txt(d, "#panel").includes("ban.issue") && txt(d, "#panel").includes("ban.lift"));
+  check("вкладок фич и комнат нет", !d.window.document.querySelector('[data-tab="features"], [data-tab="rooms"]'));
   console.log(errors.length ? "JS errors:\n" + errors.join("\n") : "JS errors: none");
   if (errors.length) process.exitCode = 1;
 })();

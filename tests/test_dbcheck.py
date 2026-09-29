@@ -32,5 +32,5 @@ def test_api_returns_503_when_db_down(database_url):
     import fakeredis
     app = create_app({"TESTING": True, "DATABASE_URL": bad,
                       "REDIS_CLIENT": fakeredis.FakeRedis(decode_responses=True)})
-    r = app.test_client().get("/api/feed")
+    r = app.test_client().get("/api/market")
     assert r.status_code == 503 and r.json["error"] == "db_unavailable"

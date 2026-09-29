@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from sqlalchemy import select
 
 from ..errors import ApiError
-from ..models import Answer, ContentStatus, Upload, User, UserBadge
+from ..models import Kombucha, Upload, User, UserBadge
 from .markdown import MEDIA_RE
 
 THEMES = {
@@ -25,9 +25,8 @@ LAYOUTS = {"classic": "Классика", "centered": "По центру", "comp
 # Рамки аватара открываются уровнем — повод расти
 FRAMES = {"none": ("Без рамки", 1), "neon": ("Неон", 2), "fire": ("Огонь", 3), "gold": ("Золото", 5),
           "rainbow": ("Радуга", 8)}
-SECTIONS = {"streak": "Стрик", "badges": "Бейджи", "topics": "Репутация по темам",
-            "best_answers": "Лучшие ответы", "follows": "Подписчики и подписки", "stats": "Статистика",
-            "shelf": "Полка с грибами", "wall": "Стена"}
+SECTIONS = {"streak": "Стрик", "badges": "Бейджи", "stats": "Грибная статистика",
+            "garden": "Живые грибы", "shelf": "Полка с замороженными грибами"}
 
 HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 MAX_LINKS, MAX_INTERESTS, MAX_SHOWCASE = 5, 10, 3
@@ -35,8 +34,7 @@ MAX_LINKS, MAX_INTERESTS, MAX_SHOWCASE = 5, 10, 3
 DEFAULTS = {
     "theme": "default", "accent": None, "font": "default", "card_style": "glass", "layout": "classic",
     "avatar_frame": "none", "status_emoji": "", "status_text": "", "about": "", "city": "", "pronouns": "",
-    "links": [], "interests": [], "showcase_badges": [], "pinned_answer_id": None, "hidden_sections": [],
-    "wall_closed": False,
+    "links": [], "interests": [], "showcase_badges": [], "pinned_kombucha_id": None, "hidden_sections": [],
 }
 
 
@@ -153,21 +151,19 @@ async def apply_update(s, user: User, data: dict) -> None:
             raise ApiError("В витрину можно поставить только свои бейджи", 400, "validation_error",
                            field="showcase_badges")
         prof["showcase_badges"] = list(dict.fromkeys(codes))
-    if "pinned_answer_id" in data:
-        aid = data["pinned_answer_id"]
-        if aid is not None:
-            a = await s.get(Answer, aid) if isinstance(aid, int) and not isinstance(aid, bool) else None
-            if a is None or a.author_id != user.id or a.status != ContentStatus.ACTIVE:
-                raise ApiError("Закрепить можно только свой ответ", 400, "validation_error", field="pinned_answer_id")
-        prof["pinned_answer_id"] = aid
+    if "pinned_kombucha_id" in data:
+        kid = data["pinned_kombucha_id"]
+        if kid is not None:
+            k = await s.get(Kombucha, kid) if isinstance(kid, int) and not isinstance(kid, bool) else None
+            if k is None or k.user_id != user.id:
+                raise ApiError("Закрепить можно только своего гриба", 400, "validation_error", field="pinned_kombucha_id")
+        prof["pinned_kombucha_id"] = kid
     if "hidden_sections" in data:
         hs = data["hidden_sections"] or []
         if not isinstance(hs, list) or not set(hs) <= SECTIONS.keys():
             raise ApiError(f"hidden_sections: из {', '.join(SECTIONS)}", 400, "validation_error",
                            field="hidden_sections")
         prof["hidden_sections"] = sorted(set(hs))
-    if "wall_closed" in data:
-        prof["wall_closed"] = bool(data["wall_closed"])
     user.profile = {k: v for k, v in prof.items() if v != DEFAULTS.get(k)}
 
 
@@ -176,5 +172,5 @@ def public_custom(u: User) -> dict:
     p = merged(u)
     return {k: p[k] for k in ("theme", "accent", "font", "card_style", "layout", "avatar_frame",
                               "status_emoji", "status_text", "about", "city", "pronouns", "links",
-                              "interests", "showcase_badges", "pinned_answer_id", "hidden_sections", "wall_closed")} | {
+                              "interests", "showcase_badges", "pinned_kombucha_id", "hidden_sections")} | {
         "banner_url": u.banner_url, "avatar_url": u.avatar_url}

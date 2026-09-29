@@ -28,29 +28,10 @@ def page(template: str, name: str, **ctx):
 
 @bp.get("/", endpoint="index")
 def index():
-    return page("feed.html", "feed")
-
-
-@bp.get("/q/<int:qid>")
-def question(qid: int):
-    return page("question.html", "question", qid=qid)
-
-
-@bp.get("/ask")
-def ask():
+    """Главная — это сам тамагочи. Гостю — лендинг с грибом и кнопкой «Завести»."""
     if not current_user_id():
-        return redirect(url_for("web.login", next="/ask"))
-    return page("ask.html", "ask")
-
-
-@bp.get("/rooms")
-def rooms():
-    return page("rooms.html", "rooms")
-
-
-@bp.get("/r/<slug>")
-def room(slug: str):
-    return page("room.html", "room", slug=slug)
+        return page("home.html", "home")
+    return page("kombucha.html", "kombucha")
 
 
 @bp.get("/media/<name>")
@@ -63,14 +44,9 @@ def media(name: str):
     return resp
 
 
-@bp.get("/debates")
-def debates():
-    return page("feed.html", "debates", preset_tab="debates")
-
-
 @bp.get("/kombucha")
 def kombucha():
-    return page("kombucha.html", "kombucha")
+    return redirect(url_for("web.index"))
 
 
 @bp.get("/g/<int:kid>")
@@ -78,26 +54,9 @@ def kombucha_diary(kid: int):
     return page("diary.html", "diary", kombucha_id=kid)
 
 
-@bp.get("/drafts")
-def drafts():
-    if not current_user_id():
-        return redirect(url_for("web.login", next="/drafts"))
-    return page("drafts.html", "drafts")
-
-
 @bp.get("/market")
 def market():
     return page("market.html", "market")
-
-
-@bp.get("/tasks")
-def tasks():
-    return page("tasks.html", "tasks", task_id=None)
-
-
-@bp.get("/tasks/<int:tid>")
-def task(tid: int):
-    return page("tasks.html", "tasks", task_id=tid)
 
 
 @bp.get("/wallet")
@@ -119,11 +78,6 @@ def notifications():
     if not current_user_id():
         return redirect(url_for("web.login", next="/notifications"))
     return page("notifications.html", "notifications")
-
-
-@bp.get("/search")
-def search():
-    return page("search.html", "search", q=(request.args.get("q") or "")[:200])
 
 
 @bp.get("/u/<username>")

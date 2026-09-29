@@ -3,24 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>{% block title %}schematoz-bulboz.org — вопросы, на которые отвечают люди{% endblock %}</title>
+  <title>{% block title %}schematoz-bulboz.org — тамагочи про чайный гриб{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='site.css', v=asset_v) }}">
 </head>
 <body data-page="{{ page_name|default('static') }}" data-logged-in="{{ 1 if logged_in else 0 }}">
   <header class="top">
-    <a class="logo" href="/">schematoz<span>·</span>bulboz</a>
+    <a class="logo" href="/">🍄 schematoz<span>·</span>bulboz</a>
     <nav class="main-nav">
-      <a href="/" class="{{ 'active' if page_name == 'feed' }}">Лента</a>
-      <a href="/rooms" class="{{ 'active' if page_name in ('rooms', 'room') }}">Комнаты</a>
-      <a href="/debates" class="{{ 'active' if page_name == 'debates' }}">⚔️ Холивары</a>
-      <a href="/kombucha" class="{{ 'active' if page_name == 'kombucha' }}">🍄 Гриб</a>
-      <a href="/tasks" class="{{ 'active' if page_name == 'tasks' }}">📋 Задания</a>
+      <a href="/" class="{{ 'active' if page_name in ('kombucha', 'home') }}">🍄 Мой гриб</a>
+      <a href="/market" class="{{ 'active' if page_name == 'market' }}">🛒 Рынок</a>
+      <a href="/faq" class="{{ 'active' if page_name == 'faq' }}">❓ FAQ</a>
     </nav>
     <div class="top-actions">
-      <a class="btn btn-ghost btn-sm icon-btn" href="/search" aria-label="Поиск" title="Поиск">🔍</a>
       {% if logged_in %}<a class="btn btn-ghost btn-sm wood-chip" id="wood-chip" href="/wallet" title="Деревянные — валюта сайта" hidden>$₽ <b id="wood-balance">0</b></a>{% endif %}
       {% if logged_in %}<a class="btn btn-ghost btn-sm icon-btn bell" href="/notifications" aria-label="Уведомления" title="Уведомления">🔔<span class="bell-count" id="bell-count" hidden></span></a>{% endif %}
-      <a class="btn btn-accent btn-sm" href="/ask">+ Спросить</a>
+      {% if not logged_in %}<a class="btn btn-accent btn-sm" href="/register">Завести гриба</a>{% endif %}
       {% if logged_in %}
         <div class="user-menu" id="user-menu">
           <button class="btn btn-ghost btn-sm" id="user-menu-btn" aria-haspopup="true" aria-expanded="false">
@@ -29,8 +26,7 @@
           <div class="dropdown" id="user-dropdown" hidden>
             <a id="me-profile" href="#">Мой профиль</a>
             <a href="/settings">Настройки профиля</a>
-            <a href="/drafts">📝 Черновики</a>
-            <a href="/kombucha">🍄 Мой чайный гриб</a>
+            <a href="/">🍄 Мой чайный гриб</a>
             <a href="/market">🛒 Грибной рынок</a>
             <a href="/wallet">$₽ Деревянные</a>
             <a id="me-mod" href="/mod" hidden>Модерация</a>

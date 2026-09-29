@@ -1,6 +1,0 @@
-{% extends "base.html" %}
-{% block content %}
-<h1>Поиск</h1>
-<form class="form" id="search-form" role="search"><input class="input" name="q" minlength="2" maxlength="200" required placeholder="Что ищем? Например: шарики, ЕГЭ, сковородка" value="{{ q|e }}"></form>
-<div id="search-results"></div>
-{% endblock %}

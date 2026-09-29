@@ -121,28 +121,9 @@ def test_trade_swap_and_gift(make_user):
 
 
 # ---------------------------------------------------------------- стена
-def test_wall(make_user):
-    co, owner = make_user()
-    ca, author = make_user()
-    cm, _ = make_user("moderator")
-    cx, _ = make_user()
-    url = f"/api/users/{owner['username']}/wall"
-    r = ca.post(url, json={"body": "Привет, **схематоз**!"})
-    assert r.status_code == 201 and "<strong>" in r.get_json()["post"]["body_html"]
-    assert ca.post(url, json={"body": "x" * 501}).status_code == 400
-    items = cx.get(url).get_json()["items"]
-    assert items[0]["author"]["username"] == author["username"] and not items[0]["can_delete"]
-    pid = items[0]["id"]
-    assert "wall" in [n["kind"] for n in co.get("/api/notifications").get_json()["items"]]
-    assert cx.delete(f"/api/wall/{pid}").status_code == 403
-    assert co.delete(f"/api/wall/{pid}").status_code == 200        # хозяин стены
-    pid2 = ca.post(url, json={"body": "ещё"}).get_json()["post"]["id"]
-    assert cm.delete(f"/api/wall/{pid2}").status_code == 200       # модератор
-    assert cx.get(url).get_json()["items"] == []
-    # хозяин закрыл стену
-    assert co.patch("/api/me/profile", json={"wall_closed": True}).status_code == 200
-    assert ca.post(url, json={"body": "можно?"}).get_json()["error"] == "wall_closed"
-    assert co.post(url, json={"body": "мне можно"}).status_code == 201
+def test_wall_is_gone(make_user):
+    c, u = make_user()
+    assert c.get(f"/api/users/{u['username']}/wall").status_code == 404
 
 
 def test_achievements_catalog_in_badges():

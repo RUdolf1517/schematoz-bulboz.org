@@ -6,15 +6,9 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const KIND = { opinion: "💬 Мнение", knowledge: "📚 Знания", story: "📖 История", debate: "⚔️ Холивар" };
-const REPORT_REASONS = { spam: "Спам", bullying: "Травля / оскорбления", nsfw: "18+", doxxing: "Деанон / личные данные", self_harm: "Самоповреждение", illegal: "Незаконное", other: "Другое" };
 const plural = (n, one, few, many) => { const m10 = n % 10, m100 = n % 100; return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20) ? few : many; };
-const answersWord = (n) => `${n} ${plural(n, "ответ", "ответа", "ответов")}`;
 const fmtDate = (iso) => new Date(iso).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-const signed = (n) => (n > 0 ? `+${n}` : `${n}`);
 const initial = (name) => esc((name || "?")[0].toUpperCase());
-// markdown → простой текст для превью в ленте
-const mdPlain = (t) => String(t || "").replace(/!\[[^\]]*\]\([^)]*\)/g, "🖼").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`#>~]+/g, "").trim();
 const here = () => location.pathname + location.search;
 
 let toastTimer;
@@ -88,7 +82,7 @@ async function loadMe() {
   $("#me-name").textContent = ME.user.username;
   $("#me-avatar").textContent = ME.user.username[0].toUpperCase();
   $("#me-profile").href = `/u/${encodeURIComponent(ME.user.username)}`;
-  $("#me-mod").hidden = !ME.permissions.includes("report.review");
+  $("#me-mod").hidden = !ME.permissions.includes("ban.temporary");
   $("#me-admin").hidden = !ME.permissions.includes("analytics.read");
   setBell(ME.unread_notifications || 0);
   setWood(ME.wood);
@@ -122,16 +116,9 @@ const perm = (p) => !!ME && ME.permissions.includes(p);
 const requireLogin = () => { if (!ME) { location.href = `/login?next=${encodeURIComponent(here())}`; return false; } return true; };
 
 // ---------------------------------------------------------------- shared UI pieces
-function ratingChip(u) {
-  if (!u || u.rating_display == null) return "";
-  const cls = u.rating_tier === 2 ? "tier-admin" : u.rating_tier === 1 ? "tier-mod" : "";
-  const title = u.rating_tier === 2 ? "Админ: рейтинг бесконечный" : u.rating_tier === 1 ? "Модератор: рейтинг бесконечный (ниже админа)" : "Рейтинг пользователя";
-  return `<span class="urating ${cls}" title="${title}">★${esc(u.rating_display)}</span>`;
-}
-
 function userLink(u) {
   if (!u) return "";
-  return `<a href="/u/${encodeURIComponent(u.username)}">${avatarHTML(u)}@${esc(u.username)}${u.status_emoji ? ` <span class="status-emoji sm">${esc(u.status_emoji)}</span>` : ""}</a>${ratingChip(u)}`;
+  return `<a href="/u/${encodeURIComponent(u.username)}">${avatarHTML(u)}@${esc(u.username)}${u.status_emoji ? ` <span class="status-emoji sm">${esc(u.status_emoji)}</span>` : ""}</a>`;
 }
 
 // ---------------------------------------------------------------- картинки и markdown
@@ -159,526 +146,8 @@ function wrapSelection(ta, before, after = before) {
   insertAtCursor(ta, before + sel + after);
 }
 
-// Панель над textarea: жирный, курсив, код, ссылка, картинка. Вставка картинки из буфера — тоже.
-function mdToolbar(ta) {
-  if (!ta || ta.dataset.mdReady) return;
-  ta.dataset.mdReady = "1";
-  const bar = document.createElement("div");
-  bar.className = "md-toolbar";
-  bar.innerHTML = `<button type="button" data-md="b" title="Жирный"><b>B</b></button><button type="button" data-md="i" title="Курсив"><i>I</i></button><button type="button" data-md="code" title="Код">&lt;/&gt;</button><button type="button" data-md="link" title="Ссылка">🔗</button><label class="md-img" title="Картинка">📷<input type="file" accept="image/*" hidden></label><span class="md-hint">markdown</span>`;
-  ta.parentNode.insertBefore(bar, ta);
-  bar.addEventListener("click", (e) => {
-    const b = e.target.closest("button[data-md]");
-    if (!b) return;
-    ({ b: () => wrapSelection(ta, "**"), i: () => wrapSelection(ta, "_"), code: () => wrapSelection(ta, "`"),
-       link: () => wrapSelection(ta, "[", "](https://)") })[b.dataset.md]();
-  });
-  const put = async (file) => {
-    try { const r = await uploadImage(file); insertAtCursor(ta, (ta.value && !ta.value.endsWith("\n") ? "\n" : "") + r.markdown + "\n"); } catch (_) {}
-  };
-  const fileIn = $("input[type=file]", bar);
-  fileIn.onchange = () => { if (fileIn.files[0]) put(fileIn.files[0]); fileIn.value = ""; };
-  ta.addEventListener("paste", (e) => {
-    const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith("image/"));
-    if (f) { e.preventDefault(); put(f); }
-  });
-}
-
 function newBadgesToast(codes) {
   if (codes && codes.length) toast(`🏅 Новый бейдж! Загляни в профиль`);
-}
-
-function reportDialog(targetType, targetId) {
-  if (!requireLogin()) return;
-  const opts = Object.entries(REPORT_REASONS).map(([k, v]) => `<label class="check"><input type="radio" name="reason" value="${k}"> ${esc(v)}</label>`).join("");
-  const m = modal(`<h2>Пожаловаться</h2><form class="form" id="report-form">${opts}
-    <label>Комментарий (необязательно)<textarea name="comment" rows="3" maxlength="1000"></textarea></label>
-    <div class="row"><button type="button" class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-accent">Отправить</button></div></form>`);
-  $("#report-form", m.el).onsubmit = async (e) => {
-    e.preventDefault();
-    const f = new FormData(e.target);
-    if (!f.get("reason")) return toast("Выбери причину", true);
-    try {
-      await api("POST", "/api/reports", { target_type: targetType, target_id: targetId, reason: f.get("reason"), comment: f.get("comment") || null });
-      m.close();
-      toast("Жалоба отправлена. Спасибо, что следишь за порядком 🙏");
-    } catch (_) { /* toast уже показан */ }
-  };
-}
-
-function shareDialog(imgUrl, pageUrl) {
-  const abs = new URL(pageUrl, location.origin).href;
-  const m = modal(`<h2>Поделиться в сторис</h2>
-    <img src="${esc(imgUrl)}" alt="Картинка для сторис" loading="lazy">
-    <div class="row">
-      <button class="btn btn-ghost" id="copy-link">Скопировать ссылку</button>
-      <a class="btn btn-accent" href="${esc(imgUrl)}" download="bulboz-story.png">Скачать картинку</a>
-    </div>`);
-  $("#copy-link", m.el).onclick = async () => {
-    try { await navigator.clipboard.writeText(abs); toast("Ссылка скопирована"); } catch (_) { toast(abs); }
-  };
-}
-
-// ---------------------------------------------------------------- feed (swipe)
-// голосование за вопрос/холивар прямо из ленты (своё — только смотреть)
-function cardVoteHtml(q) {
-  const own = ME && ME.user.id === q.author_id;
-  const t = own ? "Свой вопрос поднимать нельзя" : "";
-  return `<span class="card-vote" data-qid="${q.id}" data-my="${q.my_vote ?? 0}">
-    <button class="cv-btn ${q.my_vote === 1 ? "on-up" : ""}" data-cvote="1" aria-label="Поднять" title="${t || "Поднять"}"${own ? " disabled" : ""}>▲</button>
-    <b class="cv-score" title="Рейтинг: голоса + 2×ответы + 0.5×комментарии">${esc(q.rating)}</b>
-    <button class="cv-btn ${q.my_vote === -1 ? "on-down" : ""}" data-cvote="-1" aria-label="Опустить" title="${t || "Опустить"}"${own ? " disabled" : ""}>▼</button></span>`;
-}
-
-function feedCard(q) {
-  const a = q.top_answer;
-  const room = q.room ? `<a class="room-link" href="/r/${encodeURIComponent(q.room.slug)}">#${esc(q.room.title)}</a>` : "";
-  let preview = `<div class="answer-preview"><span class="muted">Ответов пока нет — будь первым 👀</span></div>`;
-  if (a) {
-    const tag = a.is_best ? `<span class="scheme-badge">🔥 Схема</span>` : `<span class="muted">Лучший ответ</span>`;
-    const side = a.debate_side && q.debate ? ` <span class="side-badge side-${a.debate_side}">${esc(q.debate[a.debate_side])}</span>` : "";
-    preview = `<div class="answer-preview">${tag}${side} <span class="muted">· @${esc(a.author?.username)} · ${signed(a.score)}</span><p>${esc(mdPlain(a.content.body))}</p></div>`;
-  }
-  const cover = q.cover_url ? `<img class="card-cover" src="${esc(q.cover_url)}" alt="" loading="lazy">` : "";
-  return `<article class="card ${q.cover_url ? "has-cover" : ""}" data-href="/q/${q.id}" tabindex="-1">
-    <div><span class="kind">${KIND[q.kind] || esc(q.kind)}</span>${room}</div>
-    <div class="card-main">
-      ${cover}
-      <h2>${esc(q.title)}</h2>
-      ${q.body ? `<p class="card-desc">${esc(mdPlain(q.body))}</p>` : ""}
-      ${preview}
-    </div>
-    <div class="meta-row">${cardVoteHtml(q)}<span>${answersWord(q.answers_count)}</span><span>@${esc(q.author?.username)}</span><span class="open-hint">Открыть →</span></div>
-  </article>`;
-}
-
-function initFeed(extraParams = {}) {
-  const feed = $("#feed");
-  let tab = $("#feed-tabs")?.dataset.preset || "hot", offset = 0, loading = false, done = false;
-  $$("#feed-tabs button").forEach((x) => x.classList.toggle("active", x.dataset.tab === tab));
-
-  async function load(reset = false) {
-    if (loading || (done && !reset)) return;
-    loading = true;
-    if (reset) { offset = 0; done = false; feed.innerHTML = ""; feed.scrollTop = 0; }
-    const params = new URLSearchParams({ tab, offset, ...extraParams });
-    try {
-      const data = await api("GET", `/api/feed?${params}`);
-      if (!data.items.length && offset === 0) {
-        feed.innerHTML = `<div class="card empty-card"><div><h2>Тут пока пусто</h2><p>Задай первый вопрос — стань легендой.</p><a class="btn btn-accent" href="/ask">+ Спросить</a></div></div>`;
-      } else {
-        feed.insertAdjacentHTML("beforeend", data.items.map(feedCard).join(""));
-      }
-      if (data.next_offset == null) done = true; else offset = data.next_offset;
-    } finally { loading = false; }
-  }
-
-  // открыть вопрос по клику (но не по клику на ссылку внутри карточки)
-  feed.addEventListener("click", async (e) => {
-    const vb = e.target.closest("[data-cvote]");
-    if (vb) {
-      e.stopPropagation();
-      if (!requireLogin() || vb.disabled) return;
-      const box = vb.closest(".card-vote"), qid = box.dataset.qid, v = Number(vb.dataset.cvote), mine = Number(box.dataset.my);
-      $$(".cv-btn", box).forEach((b) => (b.disabled = true));
-      try {
-        const r = mine === v ? await api("DELETE", `/api/questions/${qid}/vote`) : await api("PUT", `/api/questions/${qid}/vote`, { value: v });
-        box.dataset.my = r.my_vote ?? 0;
-        $(".cv-score", box).textContent = r.rating;
-        $("[data-cvote='1']", box).classList.toggle("on-up", r.my_vote === 1);
-        $("[data-cvote='-1']", box).classList.toggle("on-down", r.my_vote === -1);
-        box.classList.remove("bump"); void box.offsetWidth; box.classList.add("bump");
-      } catch (_) {} finally { $$(".cv-btn", box).forEach((b) => (b.disabled = false)); }
-      return;
-    }
-    if (e.target.closest("a, button")) return;
-    const card = e.target.closest(".card[data-href]");
-    if (card) location.href = card.dataset.href;
-  });
-  // подгрузка при приближении к концу
-  feed.addEventListener("scroll", () => {
-    if (feed.scrollTop + feed.clientHeight * 2 >= feed.scrollHeight) load();
-  });
-  // клавиатура: ↑/↓/j/k — листать, Enter — открыть
-  document.addEventListener("keydown", (e) => {
-    if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
-    const cards = $$(".card", feed);
-    if (!cards.length) return;
-    // карточки разной высоты: текущая — та, чей верх ближе всего к верху ленты
-    let idx = 0, best = Infinity;
-    cards.forEach((c, i) => { const dist = Math.abs(c.offsetTop - feed.scrollTop); if (dist < best) { best = dist; idx = i; } });
-    if (e.key === "ArrowDown" || e.key === "j") { e.preventDefault(); cards[Math.min(idx + 1, cards.length - 1)].scrollIntoView({ behavior: "smooth", block: "start" }); }
-    if (e.key === "ArrowUp" || e.key === "k") { e.preventDefault(); cards[Math.max(idx - 1, 0)].scrollIntoView({ behavior: "smooth", block: "start" }); }
-    if (e.key === "Enter" && cards[idx]?.dataset.href) location.href = cards[idx].dataset.href;
-  });
-  $$("#feed-tabs button").forEach((b) => (b.onclick = () => {
-    $$("#feed-tabs button").forEach((x) => x.classList.toggle("active", x === b));
-    tab = b.dataset.tab;
-    load(true);
-  }));
-  load(true);
-}
-
-// ---------------------------------------------------------------- question page
-async function pageQuestion() {
-  const root = $("#question");
-  const qid = Number(root.dataset.qid);
-  let data;
-
-  async function reload() {
-    try {
-      data = await api("GET", `/api/questions/${qid}`, undefined, { quiet: true });
-    } catch (e) {
-      root.innerHTML = `<div class="panel"><h1>Вопрос не найден</h1><p class="muted">Возможно, его скрыл модератор или удалил автор.</p><a class="btn" href="/">В ленту</a></div>`;
-      return;
-    }
-    render();
-  }
-
-  function voteButtons(a) {
-    if (!ME) return `<span class="score">${signed(a.score)}</span>`;
-    if (ME.user.id === a.author_id) return `<span class="score" title="Свой ответ оценивать нельзя">${signed(a.score)}</span>`;
-    if (data.you_are_author) {
-      return `<button class="btn btn-sm vote ${a.my_vote === 5 ? "on-fire" : ""}" data-vote="5" title="Лучший ответ: +5 и статус «Схема»">🔥 +5</button>
-              <span class="score">${signed(a.score)}</span>
-              <button class="btn btn-sm vote ${a.my_vote === -1 ? "on-down" : ""}" data-vote="-1" title="Мимо: −1">👎 −1</button>`;
-    }
-    return `<button class="btn btn-sm vote ${a.my_vote === 1 ? "on-up" : ""}" data-vote="1" aria-label="Плюс">▲ +1</button>
-            <span class="score">${signed(a.score)}</span>
-            <button class="btn btn-sm vote ${a.my_vote === -1 ? "on-down" : ""}" data-vote="-1" aria-label="Минус">▼ −1</button>`;
-  }
-
-  function commentsHtml(a) {
-    const items = a.comments.map((c) => {
-      const mine = ME && ME.user.id === c.author_id;
-      return `<li class="comment" data-cid="${c.id}"><div class="md">${c.body_html}</div>
-        <div class="c-meta">${userLink(c.author)} · ${esc(fmtDate(c.created_at))}${c.edited_at ? " · изменено" : ""}
-          ${mine ? `<button class="link-btn" data-c-edit="${c.id}">изменить</button><button class="link-btn" data-c-del="${c.id}">удалить</button>` : ""}
-          ${ME && !mine ? `<button class="link-btn" data-c-report="${c.id}">пожаловаться</button>` : ""}
-          ${perm("content.hide") ? `<button class="link-btn" data-c-hide="${c.id}">скрыть</button>` : ""}</div></li>`;
-    }).join("");
-    const form = ME && !ME.ban ? `<form class="comment-form" data-aid="${a.id}"><textarea name="body" maxlength="200" rows="1" required placeholder="Комментарий (до 200 символов, markdown)"></textarea><span class="c-count">0/200</span><button class="btn btn-sm">➤</button></form>` : "";
-    return `<div class="comments">${items ? `<ul>${items}</ul>` : ""}${form}</div>`;
-  }
-
-  function qVoteHtml(q) {
-    const can = ME && ME.user.id !== q.author_id;
-    if (!can) return `<div class="q-vote"><span class="score" title="Рейтинг вопроса">★ ${esc(q.rating)}</span><small>${signed(q.votes_score)} голосов</small></div>`;
-    return `<div class="q-vote"><button class="btn btn-sm ${q.my_vote === 1 ? "on-up" : ""}" data-qvote="1" aria-label="Поднять вопрос">▲</button>
-      <span class="score" title="Рейтинг вопроса: голоса + 2×ответы + 0.5×комментарии">★ ${esc(q.rating)}</span>
-      <button class="btn btn-sm ${q.my_vote === -1 ? "on-down" : ""}" data-qvote="-1" aria-label="Опустить вопрос">▼</button></div>`;
-  }
-
-  function answerHtml(a) {
-    const q = data.question;
-    const side = a.debate_side && q.debate ? `<span class="side-badge side-${a.debate_side}">${esc(q.debate[a.debate_side])}</span>` : "";
-    const modBtn = perm("content.hide") ? `<button class="link-btn" data-hide="${a.id}">Скрыть</button>` : "";
-    return `<div class="answer ${a.is_best ? "best" : ""}" id="a${a.id}" data-aid="${a.id}">
-      <div class="byline">${userLink(a.author)} ${a.is_best ? `<span class="scheme-badge">🔥 Схема</span>` : ""} ${side} <span>· ${esc(fmtDate(a.created_at))}</span></div>
-      <div class="text md">${a.body_html}</div>${a.edited_at ? `<div class="edited">изменено ${esc(fmtDate(a.edited_at))}</div>` : ""}
-      <div class="actions">${voteButtons(a)}<span class="spacer"></span>
-        ${ME && ME.user.id === a.author_id ? `<button class="link-btn" data-edit-a="${a.id}">Изменить</button><button class="link-btn" data-del-a="${a.id}">Удалить</button>` : ""}
-        <button class="link-btn" data-share="${a.id}">📤 В сторис</button>
-        <button class="link-btn" data-report="${a.id}">Пожаловаться</button>${modBtn}</div>
-      ${commentsHtml(a)}
-    </div>`;
-  }
-
-  function debateHtml() {
-    const q = data.question, d = data.debate_votes;
-    if (!d) return "";
-    const total = d.a + d.b;
-    return `<div class="debate-bar">
-      <div class="bar"><div class="a" style="width:${d.a_pct}%">${esc(q.debate.a)} · ${d.a_pct}%</div><div class="b" style="width:${d.b_pct}%">${d.b_pct}% · ${esc(q.debate.b)}</div></div>
-      <div class="btns"><button class="btn btn-sm ${d.my_side === "a" ? "mine" : ""}" data-side="a">Я за «${esc(q.debate.a)}»</button><button class="btn btn-sm ${d.my_side === "b" ? "mine" : ""}" data-side="b">Я за «${esc(q.debate.b)}»</button></div>
-      <p class="muted" style="font-size:13px;margin:6px 0 0">${total} ${plural(total, "голос", "голоса", "голосов")}</p>
-    </div>`;
-  }
-
-  function formHtml() {
-    const q = data.question;
-    if (!ME) return `<div class="panel"><a class="btn btn-accent" href="/login?next=${encodeURIComponent(here())}">Войди, чтобы ответить</a></div>`;
-    if (ME.ban) return "";
-    const sides = q.debate ? `<div class="side-pick">Твоя сторона: <label><input type="radio" name="debate_side" value="a" required> ${esc(q.debate.a)}</label><label><input type="radio" name="debate_side" value="b"> ${esc(q.debate.b)}</label></div>` : "";
-    return `<form class="panel answer-form" id="answer-form">
-      <h2 style="margin-top:0">Твой ответ</h2>
-      <textarea class="input" name="body" maxlength="5000" required placeholder="Пиши по делу — автор может поставить +5, и ответ станет «Схемой»"></textarea>
-      <div class="row">${sides}<span class="spacer" style="flex:1"></span><span class="muted" id="ans-count" style="font-size:13px">0/5000</span><button class="btn btn-accent">Ответить</button></div>
-    </form>`;
-  }
-
-  function render() {
-    const q = data.question;
-    document.title = `${q.title} — schematoz-bulboz.org`;
-    const room = q.room ? ` · <a href="/r/${encodeURIComponent(q.room.slug)}">#${esc(q.room.title)}</a>` : "";
-    const hint = data.you_are_author && data.answers.length
-      ? `<div class="author-hint">Ты автор вопроса: ставь <b>🔥 +5</b> лучшему ответу (он станет «Схемой») или <b>👎 −1</b>, если ответ мимо. Остальные могут ставить только ±1.</div>` : "";
-    const qMod = perm("content.hide") ? `<button class="link-btn" data-hide-q="${q.id}">Скрыть вопрос</button>` : "";
-    root.innerHTML = `
-      <div class="panel q-head">
-        ${q.cover_url ? `<img class="q-cover" src="${esc(q.cover_url)}" alt="">` : ""}
-        <div class="q-top"><span class="kind">${KIND[q.kind] || esc(q.kind)}</span>${qVoteHtml(q)}</div>
-        <h1>${esc(q.title)}</h1>
-        ${q.body ? `<div class="body md">${q.body_html}</div>` : ""}${q.edited_at ? `<div class="edited">изменено ${esc(fmtDate(q.edited_at))}</div>` : ""}
-        <div class="byline">${userLink(q.author)} <span>· ${esc(fmtDate(q.created_at))}</span>${room}<span class="spacer" style="flex:1"></span>
-          ${data.you_are_author ? `<button class="link-btn" data-edit-q>Изменить</button><button class="link-btn" data-del-q>Удалить</button>` : ""}
-          <button class="link-btn" data-report-q="${q.id}">Пожаловаться</button>${qMod}</div>
-        ${debateHtml()}
-      </div>
-      <h2 class="answers-title">${answersWord(data.answers.length)}</h2>
-      ${hint}
-      ${data.answers.map(answerHtml).join("") || `<p class="muted">Пока никто не ответил. Твой ответ может стать первым!</p>`}
-      ${formHtml()}`;
-    bind();
-    if (location.hash && $(location.hash)) $(location.hash).scrollIntoView();
-  }
-
-  function bind() {
-    $$("[data-vote]", root).forEach((btn) => (btn.onclick = async () => {
-      const aid = Number(btn.closest(".answer").dataset.aid);
-      const value = Number(btn.dataset.vote);
-      const a = data.answers.find((x) => x.id === aid);
-      try {
-        if (a.my_vote === value) {
-          await api("DELETE", `/api/answers/${aid}/vote`);
-        } else {
-          await api("PUT", `/api/answers/${aid}/vote`, { value });
-          if (value === 5) toast("🔥 Ответ стал «Схемой»! Автор получил +5");
-        }
-        await reload();
-      } catch (_) { /* toast уже показан */ }
-    }));
-    $$("[data-side]", root).forEach((btn) => (btn.onclick = async () => {
-      if (!requireLogin()) return;
-      try { await api("PUT", `/api/questions/${qid}/debate-vote`, { side: btn.dataset.side }); await reload(); } catch (_) {}
-    }));
-    $$("[data-qvote]", root).forEach((b) => (b.onclick = async () => {
-      if (!requireLogin()) return;
-      const v = Number(b.dataset.qvote);
-      try {
-        if (data.question.my_vote === v) await api("DELETE", `/api/questions/${qid}/vote`);
-        else await api("PUT", `/api/questions/${qid}/vote`, { value: v });
-        await reload();
-      } catch (_) {}
-    }));
-    $$(".comment-form", root).forEach((f) => {
-      const ta = f.elements.body;
-      mdToolbar(ta);
-      ta.oninput = () => { $(".c-count", f).textContent = `${ta.value.length}/200`; ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
-      ta.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); f.requestSubmit ? f.requestSubmit() : f.dispatchEvent(new Event("submit", { cancelable: true })); } };
-      f.onsubmit = async (e) => {
-        e.preventDefault();
-        if (!ta.value.trim()) return;
-        try { await api("POST", `/api/answers/${f.dataset.aid}/comments`, { body: ta.value }); await reload(); } catch (_) {}
-      };
-    });
-    const findComment = (cid) => data.answers.flatMap((a) => a.comments).find((c) => c.id === cid);
-    $$("[data-c-edit]", root).forEach((b) => (b.onclick = () => {
-      const c = findComment(Number(b.dataset.cEdit));
-      const m = modal(`<h2>Изменить комментарий</h2><form class="form edit-box" id="edit-form"><textarea class="input" name="body" rows="3" maxlength="200" required>${esc(c.body)}</textarea>
-        <div class="row"><button type="button" class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-accent">Сохранить</button></div></form>`);
-      mdToolbar($("textarea", m.el));
-      $("#edit-form", m.el).onsubmit = async (e) => {
-        e.preventDefault();
-        try { await api("PATCH", `/api/comments/${c.id}`, { body: e.target.elements.body.value }); m.close(); await reload(); } catch (_) {}
-      };
-    }));
-    $$("[data-c-del]", root).forEach((b) => (b.onclick = async () => {
-      if (!confirm("Удалить комментарий?")) return;
-      try { await api("DELETE", `/api/comments/${b.dataset.cDel}`); await reload(); } catch (_) {}
-    }));
-    $$("[data-c-report]", root).forEach((b) => (b.onclick = () => reportDialog("comment", Number(b.dataset.cReport))));
-    $$("[data-c-hide]", root).forEach((b) => (b.onclick = async () => {
-      if (!confirm("Скрыть комментарий?")) return;
-      try { await api("POST", `/mod/content/comment/${b.dataset.cHide}/hide`, {}); toast("Комментарий скрыт"); await reload(); } catch (_) {}
-    }));
-    $$("[data-edit-a]", root).forEach((b) => (b.onclick = () => {
-      const aid = Number(b.dataset.editA), a = data.answers.find((x) => x.id === aid);
-      const m = modal(`<h2>Изменить ответ</h2><form class="form edit-box" id="edit-form"><textarea class="input" name="body" rows="6" maxlength="5000" required>${esc(a.content.body)}</textarea>
-        <div class="row"><button type="button" class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-accent">Сохранить</button></div></form>`);
-      mdToolbar($("textarea", m.el));
-      $("#edit-form", m.el).onsubmit = async (e) => {
-        e.preventDefault();
-        try { await api("PATCH", `/api/answers/${aid}`, { body: e.target.elements.body.value }); m.close(); toast("Сохранено"); await reload(); } catch (_) {}
-      };
-    }));
-    $$("[data-del-a]", root).forEach((b) => (b.onclick = async () => {
-      if (!confirm("Удалить ответ? Репутация, полученная за него, останется.")) return;
-      try { await api("DELETE", `/api/answers/${b.dataset.delA}`); toast("Ответ удалён"); await reload(); } catch (_) {}
-    }));
-    $$("[data-edit-q]", root).forEach((b) => (b.onclick = () => {
-      const q = data.question, locked = data.answers.length > 0;
-      const m = modal(`<h2>Изменить вопрос</h2><form class="form edit-box" id="edit-form">
-        <label>Заголовок<input class="input" name="title" maxlength="200" minlength="5" value="${esc(q.title)}" ${locked ? "disabled" : ""}></label>
-        ${locked ? `<p class="muted" style="font-size:13px">На вопрос уже ответили — заголовок менять нельзя, но можно дополнить подробности.</p>` : ""}
-        <label>Подробности<textarea class="input" name="body" rows="5" maxlength="5000">${esc(q.body || "")}</textarea></label>
-        <div class="row"><button type="button" class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-accent">Сохранить</button></div></form>`);
-      mdToolbar($("textarea[name=body]", m.el));
-      $("#edit-form", m.el).onsubmit = async (e) => {
-        e.preventDefault();
-        const el = e.target.elements, body = { body: el.body.value };
-        if (!locked) body.title = el.title.value;
-        try { await api("PATCH", `/api/questions/${qid}`, body); m.close(); toast("Сохранено"); await reload(); } catch (_) {}
-      };
-    }));
-    $$("[data-del-q]", root).forEach((b) => (b.onclick = async () => {
-      if (!confirm("Удалить вопрос вместе с ответами?")) return;
-      try { await api("DELETE", `/api/questions/${qid}`); toast("Вопрос удалён"); location.href = "/"; } catch (_) {}
-    }));
-    $$("[data-report]", root).forEach((b) => (b.onclick = () => reportDialog("answer", Number(b.dataset.report))));
-    $$("[data-report-q]", root).forEach((b) => (b.onclick = () => reportDialog("question", Number(b.dataset.reportQ))));
-    $$("[data-share]", root).forEach((b) => (b.onclick = () => shareDialog(`/api/share/answer/${b.dataset.share}.png`, `/q/${qid}#a${b.dataset.share}`)));
-    $$("[data-hide]", root).forEach((b) => (b.onclick = async () => {
-      if (!confirm("Скрыть этот ответ?")) return;
-      try { await api("POST", `/mod/content/answer/${b.dataset.hide}/hide`, {}); toast("Ответ скрыт"); await reload(); } catch (_) {}
-    }));
-    $$("[data-hide-q]", root).forEach((b) => (b.onclick = async () => {
-      if (!confirm("Скрыть весь вопрос?")) return;
-      try { await api("POST", `/mod/content/question/${b.dataset.hideQ}/hide`, {}); toast("Вопрос скрыт"); await reload(); } catch (_) {}
-    }));
-    const form = $("#answer-form", root);
-    if (form) {
-      const ta = $("textarea", form);
-      mdToolbar(ta);
-      ta.oninput = () => ($("#ans-count").textContent = `${ta.value.length}/5000`);
-      const status = document.createElement("small"); status.className = "muted draft-status"; form.appendChild(status);
-      const auto = draftAutosave({ kind: "answer", questionId: Number(qid), status, collect: () => {
-        const f = new FormData(form); return { body: f.get("body") || "", extra: { debate_side: f.get("debate_side") || null } };
-      } });
-      api("GET", `/api/drafts/answer/${qid}`, undefined, { quiet: true }).then(({ draft: d }) => {
-        if (!d || ta.value) return;
-        ta.value = d.body; ta.oninput();
-        if (d.extra?.debate_side) { const r = $(`input[name=debate_side][value="${d.extra.debate_side}"]`, form); if (r) r.checked = true; }
-        status.textContent = `Черновик восстановлен (от ${fmtDate(d.updated_at)})`;
-      }).catch(() => {});
-      form.addEventListener("input", () => auto.touch());
-      form.onsubmit = async (e) => {
-        e.preventDefault(); auto.stop();
-        const f = new FormData(form);
-        const body = { body: f.get("body"), content_type: "text" };
-        if (f.get("debate_side")) body.debate_side = f.get("debate_side");
-        const btn = $("button", form); btn.disabled = true;
-        try {
-          const r = await api("POST", `/api/questions/${qid}/answers`, body);
-          toast("Ответ опубликован!");
-          newBadgesToast(r.new_badges);
-          await reload();
-          $(`#a${r.answer.id}`)?.scrollIntoView({ behavior: "smooth" });
-        } catch (_) { btn.disabled = false; }
-      };
-    }
-  }
-
-  await reload();
-}
-
-// ---------------------------------------------------------------- ask
-async function pageAsk() {
-  const form = $("#ask-form");
-  const kind = form.elements.kind, title = form.elements.title, roomSel = form.elements.room_id;
-  const params = new URLSearchParams(location.search);
-  kind.onchange = () => ($(".debate-fields", form).hidden = kind.value !== "debate");
-  if (perm("debate.create")) { const o = $("#debate-opt"); o.hidden = false; o.disabled = false; }
-  mdToolbar(form.elements.body);
-  let coverUrl = null;
-  const coverIn = $("#cover-input"), prev = $("#cover-preview");
-  coverIn.onchange = async () => {
-    const file = coverIn.files[0]; coverIn.value = "";
-    if (!file) return;
-    try {
-      const r = await uploadImage(file);
-      coverUrl = r.url; $("img", prev).src = r.url; prev.hidden = false; $("#cover-pick").hidden = true;
-    } catch (_) {}
-  };
-  $("#cover-remove").onclick = () => { coverUrl = null; prev.hidden = true; $("#cover-pick").hidden = false; };
-  title.oninput = () => ($('.counter[data-for="title"]').textContent = `${title.value.length}/300`);
-  const { items } = await api("GET", "/api/rooms");
-  roomSel.insertAdjacentHTML("beforeend", items.map((r) => `<option value="${r.id}">${esc(r.title)}</option>`).join(""));
-  if (params.get("room")) { const r = items.find((x) => x.slug === params.get("room")); if (r) roomSel.value = r.id; }
-  // черновик: ?draft=ID — продолжаем; иначе новый появится при первой правке
-  let draftId = Number(params.get("draft")) || null;
-  if (draftId) {
-    try {
-      const { draft: d } = await api("GET", `/api/drafts/${draftId}`);
-      title.value = d.title; form.elements.body.value = d.body;
-      const x = d.extra || {};
-      if (x.kind && [...kind.options].some((o) => o.value === x.kind && !o.disabled)) kind.value = x.kind;
-      if (x.room_id) roomSel.value = x.room_id;
-      if (x.side_a) form.elements.side_a.value = x.side_a;
-      if (x.side_b) form.elements.side_b.value = x.side_b;
-      if (x.cover_url) { coverUrl = x.cover_url; $("img", prev).src = coverUrl; prev.hidden = false; $("#cover-pick").hidden = true; }
-      kind.onchange(); title.oninput();
-    } catch (_) { draftId = null; }
-  }
-  const status = document.createElement("span"); status.className = "muted draft-status";
-  status.textContent = draftId ? "Черновик загружен" : "Черновик сохранится сам";
-  $("button[type=submit]", form).insertAdjacentElement("afterend", status);
-  const auto = draftAutosave({ kind: "question", draftId, status, collect: () => {
-    const f = new FormData(form);
-    return { title: f.get("title") || "", body: f.get("body") || "", extra: { kind: f.get("kind"), room_id: f.get("room_id") ? Number(f.get("room_id")) : null,
-      side_a: f.get("side_a") || null, side_b: f.get("side_b") || null, cover_url: coverUrl } };
-  } });
-  form.addEventListener("input", () => auto.touch()); form.addEventListener("change", () => auto.touch());
-  const coverSet = coverIn.onchange; coverIn.onchange = async () => { await coverSet(); auto.touch(); };
-  const coverDel = $("#cover-remove").onclick; $("#cover-remove").onclick = () => { coverDel(); auto.touch(); };
-  form.onsubmit = async (e) => {
-    e.preventDefault();
-    const f = new FormData(form);
-    const body = { kind: f.get("kind"), title: f.get("title"), body: f.get("body") || null, room_id: f.get("room_id") ? Number(f.get("room_id")) : null, cover_url: coverUrl };
-    if (body.kind === "debate") { body.side_a = f.get("side_a") || null; body.side_b = f.get("side_b") || null; }
-    auto.stop(); if (auto.id) body.draft_id = auto.id;
-    try {
-      const r = await api("POST", "/api/questions", body);
-      location.href = `/q/${r.question.id}`;
-    } catch (_) {}
-  };
-}
-
-// ---------------------------------------------------------------- rooms
-function joinButton(r) {
-  if (r.joined == null) return `<a class="btn btn-sm btn-ghost" href="/login?next=${encodeURIComponent(here())}">Вступить</a>`;
-  return `<button class="btn btn-sm ${r.joined ? "btn-ghost" : "btn-accent"}" data-join="${esc(r.slug)}" data-joined="${r.joined ? 1 : 0}">${r.joined ? "Ты в комнате ✓" : "Вступить"}</button>`;
-}
-
-function bindJoin(root, after) {
-  $$("[data-join]", root).forEach((b) => (b.onclick = async () => {
-    const joined = b.dataset.joined === "1";
-    try {
-      await api(joined ? "DELETE" : "POST", `/api/rooms/${encodeURIComponent(b.dataset.join)}/join`);
-      after();
-    } catch (_) {}
-  }));
-}
-
-async function pageRooms() {
-  const root = $("#rooms");
-  async function render() {
-    const { items } = await api("GET", "/api/rooms");
-    const groups = {};
-    items.forEach((r) => { const k = r.category?.title || "Разное"; (groups[k] ||= []).push(r); });
-    root.innerHTML = Object.entries(groups).map(([title, rooms]) => `<div class="room-group"><h2>${esc(title)}</h2>
-      ${rooms.map((r) => `<div class="room-row"><div><a class="title" href="/r/${encodeURIComponent(r.slug)}">#${esc(r.title)}</a><div class="count">${r.member_count} ${plural(r.member_count, "участник", "участника", "участников")}</div></div>${joinButton(r)}</div>`).join("")}
-    </div>`).join("");
-    bindJoin(root, render);
-  }
-  await render();
-}
-
-async function pageRoom() {
-  const head = $("#room-head");
-  const slug = head.dataset.slug;
-  async function renderHead() {
-    try {
-      const { room } = await api("GET", `/api/rooms/${encodeURIComponent(slug)}`, undefined, { quiet: true });
-      document.title = `#${room.title} — schematoz-bulboz.org`;
-      head.innerHTML = `<h1>#${esc(room.title)}</h1><span class="muted">${room.member_count} уч.</span>${joinButton(room)}<a class="btn btn-sm btn-accent" href="/ask?room=${encodeURIComponent(slug)}">+ Спросить</a>`;
-      bindJoin(head, renderHead);
-    } catch (_) {
-      head.innerHTML = `<h1>Комната не найдена</h1>`;
-    }
-  }
-  await renderHead();
-  initFeed({ room: slug });
 }
 
 // ---------------------------------------------------------------- profile
@@ -700,47 +169,44 @@ function profileHTML(d, { preview = false } = {}) {
   const hidden = new Set(d.is_owner || preview ? [] : c.hidden_sections);
   const ownHidden = new Set(c.hidden_sections || []);
   const tag = (sec) => (d.is_owner || preview) && ownHidden.has(sec) ? ` <span class="hidden-tag" title="Этот раздел видишь только ты">🙈 скрыто</span>` : "";
-  const ST = { expert: "⚡ Эксперт", connoisseur: "Знаток", newbie: "Новичок" };
   const statsParts = [];
-  if (u.streak_days != null && !hidden.has("streak")) statsParts.push(`<div class="stat"><b>🔥 ${u.streak_days}</b><span>дней стрик</span></div>`);
-  statsParts.push(`<div class="stat" title="${u.rating_tier ? "У админов и модераторов рейтинг бесконечный" : "Бульбоз-индекс: активность, ответы, их оценки, «Схемы», вопросы и комментарии"}"><b>★ ${esc(u.rating_display)}</b><span>рейтинг${u.rating_tier === 2 ? " · админ" : u.rating_tier === 1 ? " · модер" : ""}</span></div>`);
-  statsParts.push(`<div class="stat"><b>${u.reputation}</b><span>репутация</span></div>`);
-  if (st.schemes != null) statsParts.push(`<div class="stat"><b>${st.schemes}</b><span>схем</span></div>`);
-  if (st.answers != null) statsParts.push(`<div class="stat"><b>${st.answers}</b><span>ответов</span></div>`);
+  if (u.streak_days != null && !hidden.has("streak")) statsParts.push(`<div class="stat"><b>🔥 ${u.streak_days}</b><span>дней ухода подряд</span></div>`);
+  if (st.codex != null) {
+    statsParts.push(`<div class="stat"><b>🧬 ${st.codex}/${st.codex_total}</b><span>мутаций в коллекции</span></div>`);
+    statsParts.push(`<div class="stat"><b>🍄 ${st.alive}</b><span>живых · 🧊 ${st.frozen} на полке</span></div>`);
+    statsParts.push(`<div class="stat" title="${esc(st.best_stage)}"><b>${st.best_xp}</b><span>рекорд XP</span></div>`);
+    if (st.sprouts) statsParts.push(`<div class="stat"><b>🌱 ${st.sprouts}</b><span>отростков</span></div>`);
+  }
+  const role = u.role === "admin" ? ` <span class="urating tier-admin">админ</span>` : u.role === "moderator" ? ` <span class="urating tier-mod">модер</span>` : "";
   const showcase = (d.badges || []).filter((b) => b.showcase);
-  const meta = [c.pronouns && esc(c.pronouns), c.city && `📍 ${esc(c.city)}`, u.created_at && `с нами с ${new Date(u.created_at).toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}`].filter(Boolean);
+  const meta = [c.pronouns && esc(c.pronouns), c.city && `📍 ${esc(c.city)}`, u.created_at && `грибовод с ${new Date(u.created_at).toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}`].filter(Boolean);
+  const pk = d.pinned_kombucha;
   return `<div class="profile-skin ${profileSkin(c).cls}" style="${profileSkin(c).style}">
     <div class="panel profile-card">
       ${c.banner_url ? `<div class="profile-banner" style="background-image:url('${esc(c.banner_url)}')"></div>` : `<div class="profile-banner empty"></div>`}
       <div class="profile-head">${avatarHTML(u, "lg")}
-        <div class="ph-main"><h1>${esc(u.display_name || u.username)} ${c.status_emoji ? `<span class="status-emoji">${esc(c.status_emoji)}</span>` : ""}</h1>
+        <div class="ph-main"><h1>${esc(u.display_name || u.username)} ${c.status_emoji ? `<span class="status-emoji">${esc(c.status_emoji)}</span>` : ""}${role}</h1>
           <div class="muted">@${esc(u.username)}${meta.length ? " · " + meta.join(" · ") : ""}</div>
           <div class="level">Уровень ${u.level} · ${esc(u.level_name)}</div>
           ${c.status_text ? `<div class="status-line">${esc(c.status_text)}</div>` : ""}
           ${showcase.length ? `<div class="showcase">${showcase.map((b) => `<span class="sc-badge" title="${esc(b.title)}: ${esc(b.description)}">${esc(b.emoji)} ${esc(b.title)}</span>`).join("")}</div>` : ""}
         </div></div>
       ${u.bio ? `<p class="bio">${esc(u.bio)}</p>` : ""}
-      ${c.interests.length ? `<div class="interests">${c.interests.map((t) => `<a class="chip" href="/search?q=${encodeURIComponent(t)}">#${esc(t)}</a>`).join("")}</div>` : ""}
+      ${c.interests.length ? `<div class="interests">${c.interests.map((t) => `<span class="chip">#${esc(t)}</span>`).join("")}</div>` : ""}
       ${c.links.length ? `<div class="plinks">${c.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="nofollow noopener ugc">🔗 ${esc(l.title)}</a>`).join("")}</div>` : ""}
-      <div class="stats">${statsParts.join("")}</div>
-      ${u.streak_freeze_available && !hidden.has("streak") ? `<div class="freeze">❄️ Заморозка стрика доступна: если пропустишь один день на этой неделе, 🔥 не сгорит</div>` : ""}
-      <div class="follow-row">${st.followers != null ? `<span><b id="followers-n">${st.followers}</b> подписчиков</span><span><b>${st.following}</b> подписок</span>${tag("follows")}` : ""}
-        ${preview ? "" : d.i_follow == null ? "" : `<button class="btn btn-sm ${d.i_follow ? "btn-ghost" : "btn-accent"}" id="follow-btn">${d.i_follow ? "Отписаться" : "Подписаться"}</button>`}
-        ${!preview && !ME && d.i_follow == null ? `<a class="btn btn-sm btn-accent" href="/login?next=${encodeURIComponent(here())}">Подписаться</a>` : ""}</div>
-      ${preview ? "" : `<button class="btn btn-sm btn-ghost" id="share-profile">📤 Поделиться в сторис</button>${d.is_owner ? ` <a class="btn btn-sm btn-accent" href="/settings">🎨 Настроить профиль</a>` : ""}`}
+      <div class="stats">${statsParts.join("")}${tag("stats")}</div>
+      ${u.streak_freeze_available && !hidden.has("streak") ? `<div class="freeze">❄️ Заморозка стрика доступна: пропустишь один день ухода на этой неделе — 🔥 не сгорит</div>` : ""}
+      ${preview || !d.is_owner ? "" : `<a class="btn btn-sm btn-accent" href="/settings">🎨 Настроить профиль</a>`}
     </div>
     ${d.about_html ? `<div class="panel"><h2 style="margin-top:0">О себе</h2><div class="md">${d.about_html}</div></div>` : ""}
-    ${d.pinned_answer ? `<a class="panel pinned" href="/q/${d.pinned_answer.question_id}#a${d.pinned_answer.answer_id}"><div class="kind">📌 Закреплённый ответ${d.pinned_answer.is_best ? " · 🔥 Схема" : ""}</div><b>${esc(d.pinned_answer.question_title)}</b><div class="md">${d.pinned_answer.body_html}</div></a>` : ""}
-    ${hidden.has("topics") ? "" : `<div class="panel"><h2 style="margin-top:0">За что репутация${tag("topics")}</h2>
-      ${d.topics.length ? d.topics.map((t) => `<div class="topic"><span class="st ${t.status}">${ST[t.status]}</span>
-        <div>${t.room_slug ? `<a href="/r/${encodeURIComponent(t.room_slug)}">#${esc(t.title)}</a>` : esc(t.title)}</div>
-        <div class="nums"><b>${t.schemes}</b> ${plural(t.schemes, "схема", "схемы", "схем")} · ${t.points} очк.<br>${t.plus} 👍 / ${t.minus} 👎</div></div>`).join("")
-        : `<p class="muted">Пока нет оценённых ответов.</p>`}
-      <p class="muted" style="font-size:13px">«Схема» — ответ, которому автор вопроса поставил +5. Эксперт в теме: 15+ схем и меньше 15% минусов.</p></div>`}
+    ${pk ? `<div class="panel pinned-kb"><div class="kind">📌 Любимый гриб</div><div class="pinned-kb-row"><div class="pinned-kb-art">${kombuchaSVG({ ...pk, id: "pin" + pk.id }, { small: true })}</div>
+      <div><b>«${esc(pk.name)}»</b><div class="muted">${esc(pk.stage.title)} · ${pk.xp} XP · поколение ${pk.generation}${pk.alive ? "" : " · 🪦 закис"}${pk.frozen ? " · 🧊" : ""}</div>
+      ${pk.mutations.length ? `<div class="kb-card-muts">${pk.mutations.slice(0, 6).map(mutChip).join("")}</div>` : ""}
+      ${preview ? "" : `<a class="btn btn-sm btn-ghost" href="/g/${pk.id}">📖 Дневник</a>`}</div></div></div>` : ""}
+    ${hidden.has("garden") || !(d.garden || []).length ? "" : `<div class="panel"><h2 style="margin-top:0">🫙 Банки на подоконнике${tag("garden")}</h2>
+      <div class="kb-shelf">${d.garden.map((k) => kombuchaCard(k, preview ? "" : `<div class="kb-card-foot"><a href="/g/${k.id}">📖 Дневник</a>${k.alive ? "" : "<small>🪦</small>"}</div>`)).join("")}</div></div>`}
     ${hidden.has("badges") ? "" : `<div class="panel"><h2 style="margin-top:0">Бейджи${tag("badges")}</h2>
-      ${d.badges.length ? `<div class="badges">${d.badges.map((b) => `<div class="badge${b.showcase ? " on-show" : ""}"><div class="e">${esc(b.emoji)}</div><b>${esc(b.title)}</b><span>${esc(b.description)}</span></div>`).join("")}</div>` : `<p class="muted">Пока нет. Ответь на пару вопросов 😉</p>`}</div>`}
-    ${hidden.has("best_answers") ? "" : `<div class="panel"><h2 style="margin-top:0">Лучшие ответы${tag("best_answers")}</h2>
-      ${d.best_answers.length ? d.best_answers.map((b) => `<a class="best-item" href="/q/${b.question_id}#a${b.answer_id}"><b>${esc(b.question_title)}</b><small>${esc(b.body)}</small></a>`).join("") : `<p class="muted">Схем пока нет.</p>`}</div>`}
+      ${d.badges.length ? `<div class="badges">${d.badges.map((b) => `<div class="badge${b.showcase ? " on-show" : ""}"><div class="e">${esc(b.emoji)}</div><b>${esc(b.title)}</b><span>${esc(b.description)}</span></div>`).join("")}</div>` : `<p class="muted">Пока нет. Поухаживай за грибом 😉</p>`}</div>`}
   </div>`;
 }
 
@@ -749,23 +215,11 @@ async function pageProfile() {
   const username = root.dataset.username;
   let d;
   try { d = await api("GET", `/api/users/${encodeURIComponent(username)}`, undefined, { quiet: true }); }
-  catch (_) { root.innerHTML = `<div class="panel"><h1>Пользователь не найден</h1></div>`; return; }
+  catch (_) { root.innerHTML = `<div class="panel"><h1>Грибовод не найден</h1></div>`; return; }
   const u = d.user;
   document.title = `${u.display_name || "@" + u.username} — schematoz-bulboz.org`;
   root.innerHTML = profileHTML(d) + `<div id="profile-extras"></div>`;
   profileExtras(d);
-  let following = d.i_follow;
-  const fb = $("#follow-btn");
-  if (fb) fb.onclick = async () => {
-    try {
-      const r = await api(following ? "DELETE" : "PUT", `/api/users/${encodeURIComponent(u.username)}/follow`);
-      following = r.following;
-      const n = $("#followers-n"); if (n) n.textContent = r.followers;
-      fb.textContent = following ? "Отписаться" : "Подписаться";
-      fb.className = `btn btn-sm ${following ? "btn-ghost" : "btn-accent"}`;
-    } catch (_) {}
-  };
-  $("#share-profile").onclick = () => shareDialog(`/api/share/user/${encodeURIComponent(u.username)}.png`, `/u/${encodeURIComponent(u.username)}`);
 }
 
 // ---------------------------------------------------------------- настройки профиля
@@ -781,7 +235,7 @@ async function pageSettings() {
   const opts = (obj, cur) => Object.entries(obj).map(([k, v]) => `<option value="${esc(k)}"${k === cur ? " selected" : ""}>${esc(v)}</option>`).join("");
   const field = (label, control, hint = "") => `<div class="st-field"><span class="st-label">${label}</span>${control}${hint ? `<small class="st-hint">${hint}</small>` : ""}</div>`;
   const text = (name, val, max, ph = "") => `<input class="input" name="${name}" maxlength="${max}" placeholder="${esc(ph)}" value="${esc(val)}">`;
-  const lvl = d.user.level, unlimited = d.user.rating_tier > 0;
+  const lvl = d.user.level, unlimited = d.user.role !== "user";
   const SECTIONS_UI = [["basic", "👤", "Основное"], ["media", "🖼", "Аватар"], ["look", "🎨", "Оформление"], ["links", "🏷", "Интересы"], ["show", "🏆", "Витрина"], ["privacy", "🙈", "Приватность"]];
   $("#st-nav").innerHTML = SECTIONS_UI.map(([id, e, t]) => `<a href="#st-${id}">${e} ${t}</a>`).join("");
   form.innerHTML = `
@@ -792,7 +246,7 @@ async function pageSettings() {
         ${field("Статус-эмодзи", text("status_emoji", s.status_emoji, 8, "😎"), "Только эмодзи")}
         ${field("Город", text("city", s.city, L.city, "Казань"))}
       </div>
-      ${field("Статус", text("status_text", s.status_text, L.status_text, "готовлюсь к ЕГЭ 📚"))}
+      ${field("Статус", text("status_text", s.status_text, L.status_text, "ращу легенду банки 🍄"))}
       ${field("Короткое био", `<textarea class="input" name="bio" rows="2" maxlength="${L.bio}">${esc(s.bio)}</textarea>`, `До ${L.bio} символов, видно под именем`)}
       ${field("О себе", `<textarea class="input" name="about" rows="5" maxlength="${L.about}">${esc(s.about)}</textarea>`, `Markdown, до ${L.about} символов. Отдельный блок на профиле`)}
     </section>
@@ -840,14 +294,13 @@ async function pageSettings() {
     <section class="st-card" id="st-show"><h2>🏆 Витрина и закреп</h2>
       <div class="st-field"><span class="st-label">Бейджи в шапке профиля</span>
         <div class="st-options">${d.badges.length ? d.badges.map((b) => `<label class="st-opt"><input type="checkbox" name="showcase" value="${esc(b.code)}"${s.showcase_badges.includes(b.code) ? " checked" : ""}>
-          <span class="st-opt-body"><span class="st-emoji">${esc(b.emoji)}</span><span>${esc(b.title)}</span></span></label>`).join("") : `<span class="muted">Бейджей пока нет: ответь на пару вопросов</span>`}</div>
+          <span class="st-opt-body"><span class="st-emoji">${esc(b.emoji)}</span><span>${esc(b.title)}</span></span></label>`).join("") : `<span class="muted">Бейджей пока нет: поухаживай за грибом</span>`}</div>
         <small class="st-hint">До ${L.showcase_badges} штук</small></div>
-      ${field("Закреплённый ответ", `<select class="input" name="pinned_answer_id"><option value="">— не закреплять —</option>${d.answers.map((a) => `<option value="${a.id}"${a.id === s.pinned_answer_id ? " selected" : ""}>${esc(a.question_title.slice(0, 80))}</option>`).join("")}</select>`, d.answers.length ? "" : "Появится, когда ответишь на вопрос")}
+      ${field("Любимый гриб", `<select class="input" name="pinned_kombucha_id"><option value="">— не закреплять —</option>${d.kombuchas.map((k) => `<option value="${k.id}"${k.id === s.pinned_kombucha_id ? " selected" : ""}>«${esc(k.name)}» · ${esc(k.stage)}</option>`).join("")}</select>`, "Покажется большой карточкой в профиле")}
     </section>
 
     <section class="st-card" id="st-privacy"><h2>🙈 Приватность</h2>
       <p class="muted st-lead">Отмеченные разделы видишь только ты. Сервер не отдаёт их даже через API.</p>
-      <label class="st-check st-toggle"><input type="checkbox" name="wall_closed"${s.wall_closed ? " checked" : ""}> 🔒 Закрыть стену: писать могу только я</label>
       <div class="st-toggles">${Object.entries(O.sections).map(([k, v]) => `<label class="st-check st-toggle"><input type="checkbox" name="hidden" value="${esc(k)}"${s.hidden_sections.includes(k) ? " checked" : ""}> Скрыть: ${esc(v)}</label>`).join("")}</div>
     </section>
 
@@ -874,8 +327,8 @@ async function pageSettings() {
       accent: f.accent_on.checked ? f.accent.value : null, font: f.font.value, card_style: f.card_style.value, layout: f.layout.value,
       interests: f.interests.value.split(",").map((x) => x.trim()).filter(Boolean),
       links: links.filter((l) => l.url.trim()),
-      showcase_badges: all("showcase"), hidden_sections: all("hidden"), wall_closed: f.wall_closed.checked,
-      pinned_answer_id: f.pinned_answer_id.value ? Number(f.pinned_answer_id.value) : null,
+      showcase_badges: all("showcase"), hidden_sections: all("hidden"),
+      pinned_kombucha_id: f.pinned_kombucha_id.value ? Number(f.pinned_kombucha_id.value) : null,
       avatar_url: avatar || null, banner_url: banner || null,
     };
   };
@@ -885,9 +338,9 @@ async function pageSettings() {
     const custom = { ...base.custom, ...v, links: v.links.map((l) => ({ ...l, title: l.title || l.url })), interests: v.interests.slice(0, L.interests) };
     const badges = base.badges.map((b) => ({ ...b, showcase: v.showcase_badges.includes(b.code) }))
       .sort((a, b) => (v.showcase_badges.indexOf(a.code) + 1 || 99) - (v.showcase_badges.indexOf(b.code) + 1 || 99));
-    const pin = v.pinned_answer_id ? (base.pinned_answer?.answer_id === v.pinned_answer_id ? base.pinned_answer
-      : { answer_id: v.pinned_answer_id, question_id: 0, question_title: d.answers.find((a) => a.id === v.pinned_answer_id)?.question_title || "", body_html: "<p class='muted'>текст появится после сохранения</p>" }) : null;
-    $("#preview").innerHTML = profileHTML({ ...base, user, custom, badges, pinned_answer: pin,
+    const pin = v.pinned_kombucha_id ? (base.pinned_kombucha?.id === v.pinned_kombucha_id ? base.pinned_kombucha
+      : (base.garden || []).find((k) => k.id === v.pinned_kombucha_id) || null) : null;
+    $("#preview").innerHTML = profileHTML({ ...base, user, custom, badges, pinned_kombucha: pin,
       about_html: v.about ? `<p>${esc(v.about).replace(/\n/g, "<br>")}</p>` : "" }, { preview: true });
     $("#av-prev").innerHTML = avatarHTML(user, "lg");
     $("#bn-prev").style.backgroundImage = banner ? `url('${banner}')` : "";
@@ -1052,11 +505,11 @@ function modlogTable(items) {
     ${items.map((a) => `<tr><td>${esc(fmtDate(a.created_at))}</td><td>#${a.actor_id}</td><td><code>${esc(a.action)}</code></td><td>${esc(a.target_type)} ${a.target_id ?? ""}</td><td><small class="muted">${esc(JSON.stringify(a.payload || {}))}</small></td></tr>`).join("")}</table>`;
 }
 
-async function banDialog(userId, username, reportId) {
+async function banDialog(userId, username) {
   const canPerm = perm("ban.permanent");
   const m = modal(`<h2>Бан @${esc(username)}</h2><form class="form" id="ban-form">
     <label>Срок<select name="days"><option value="1">1 день</option><option value="7" selected>7 дней</option><option value="30">30 дней</option>${canPerm ? `<option value="perm">Навсегда</option>` : ""}</select></label>
-    <label>Причина (увидит пользователь)<input name="reason" required placeholder="Спам (п. 2 Правил)"></label>
+    <label>Причина (увидит пользователь)<input name="reason" required placeholder="Автокликер в мини-играх (п. 2 Правил)"></label>
     <div class="row"><button type="button" class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-danger">Забанить</button></div></form>`);
   return new Promise((resolve) => {
     $("#ban-form", m.el).onsubmit = async (e) => {
@@ -1064,7 +517,7 @@ async function banDialog(userId, username, reportId) {
       const f = new FormData(e.target);
       const days = f.get("days") === "perm" ? null : Number(f.get("days"));
       try {
-        await api("POST", "/mod/bans", { user_id: userId, reason: f.get("reason"), days, report_id: reportId || null });
+        await api("POST", "/mod/bans", { user_id: userId, reason: f.get("reason"), days });
         m.close(); toast("Бан выдан"); resolve(true);
       } catch (_) {}
     };
@@ -1072,34 +525,24 @@ async function banDialog(userId, username, reportId) {
 }
 
 async function pageMod() {
-  if (denied("report.review")) return;
+  if (denied("ban.temporary")) return;
   const show = initPanel({
-    async reports(panel) {
-      const { items } = await api("GET", "/mod/reports");
-      if (!items.length) { panel.innerHTML = `<p class="muted">Очередь пуста. Можно выдохнуть ☕</p>`; return; }
-      panel.innerHTML = items.map((r) => {
-        const t = r.target;
-        const link = t?.question_id ? `<a href="/q/${t.question_id}" target="_blank">открыть</a>` : "";
-        return `<div class="item" data-rid="${r.id}">
-          <div class="head"><span class="pill ${r.priority >= 90 ? "p0" : ""}">${esc(REPORT_REASONS[r.reason] || r.reason)}</span>
-            <span>${esc(r.target_type)} #${r.target_id}</span><span class="muted">· жалоб: ${r.same_target_count} · ${esc(fmtDate(r.created_at))}</span> ${link}</div>
-          ${t ? `<div class="quote">${esc(t.text)}</div><div class="muted" style="font-size:13px">Автор: @${esc(t.author)}${t.status ? ` · статус: ${esc(t.status)}` : ""}</div>` : `<p class="muted">Объект удалён</p>`}
-          ${r.comment ? `<p style="font-size:14px">💬 ${esc(r.comment)}</p>` : ""}
-          <div class="btns" style="margin-top:10px">
-            ${r.target_type !== "user" ? `<button class="btn btn-sm btn-danger" data-act="hide">Скрыть контент</button>` : ""}
-            <button class="btn btn-sm btn-ghost" data-act="reject">Нарушений нет</button>
-            ${t ? `<button class="btn btn-sm btn-ghost" data-act="ban" data-uid="${t.author_id}" data-uname="${esc(t.author)}">Бан автора…</button>` : ""}
-          </div></div>`;
-      }).join("");
-      $$("[data-act]", panel).forEach((b) => (b.onclick = async () => {
-        const rid = Number(b.closest(".item").dataset.rid);
-        try {
-          if (b.dataset.act === "ban") { await banDialog(Number(b.dataset.uid), b.dataset.uname, rid); return; }
-          const r = await api("POST", `/mod/reports/${rid}/resolve`, { decision: b.dataset.act });
-          toast(`Готово, закрыто жалоб: ${r.closed}`);
-          show("reports");
-        } catch (_) {}
-      }));
+    async users(panel) {
+      panel.innerHTML = `<input class="input" id="mod-q" placeholder="Ник игрока (от 2 букв)"><div id="mod-users" style="margin-top:10px"></div>`;
+      const q = $("#mod-q", panel), box = $("#mod-users", panel);
+      let tm;
+      const run = async () => {
+        const { items } = await api("GET", `/mod/users?q=${encodeURIComponent(q.value.trim())}`);
+        box.innerHTML = items.length ? items.map((u) => `<div class="item"><div class="head"><a href="/u/${encodeURIComponent(u.username)}" target="_blank"><b>@${esc(u.username)}</b></a>
+          ${u.ban ? `<span class="pill p0">бан ${u.ban.ends_at ? "до " + esc(fmtDate(u.ban.ends_at)) : "навсегда"}</span><span class="muted">${esc(u.ban.reason)}</span>` : ""}</div>
+          <div class="btns" style="margin-top:8px">${u.ban ? `<button class="btn btn-sm btn-ghost" data-lift="${u.ban.id}">Снять бан</button>`
+            : `<button class="btn btn-sm btn-danger" data-ban="${u.id}" data-uname="${esc(u.username)}">Бан…</button>`}</div></div>`).join("")
+          : `<p class="muted">${q.value.trim().length < 2 ? "Введи хотя бы 2 буквы" : "Никого не нашли"}</p>`;
+        $$("[data-ban]", box).forEach((b) => (b.onclick = async () => { if (await banDialog(Number(b.dataset.ban), b.dataset.uname)) run(); }));
+        $$("[data-lift]", box).forEach((b) => (b.onclick = async () => { try { await api("POST", `/mod/bans/${b.dataset.lift}/lift`, {}); toast("Бан снят"); run(); } catch (_) {} }));
+      };
+      q.oninput = () => { clearTimeout(tm); tm = setTimeout(run, 300); };
+      run();
     },
     async appeals(panel) {
       const { items } = await api("GET", "/mod/appeals");
@@ -1221,7 +664,7 @@ async function pageAdmin() {
     async kombucha(panel) { await kbDebugPanel(panel); },
     async analytics(panel) {
       const a = await api("GET", "/admin/analytics");
-      const L = { users_total: "Всего юзеров", users_24h: "Новых за 24 ч", dau: "DAU", questions_24h: "Вопросов за 24 ч", answers_24h: "Ответов за 24 ч", reports_open: "Открытых жалоб" };
+      const L = { users_total: "Всего грибоводов", users_24h: "Новых за 24 ч", dau: "DAU", kombuchas_alive: "Живых грибов", kombuchas_born_24h: "Посажено за 24 ч", games_24h: "Игр за 24 ч", wood_earned_24h: "$₽ начислено за 24 ч" };
       panel.innerHTML = `<div class="kv">${Object.entries(L).map(([k, v]) => `<div class="stat"><b>${a[k]}</b><span>${v}</span></div>`).join("")}</div>`;
     },
     async users(panel) {
@@ -1260,15 +703,6 @@ async function pageAdmin() {
         } catch (_) {}
       };
     },
-    async features(panel) {
-      const { value } = await api("GET", "/admin/settings/features");
-      const L = { ANSWER_TEXT_ENABLED: "Текстовые ответы", ANSWER_VOICE_ENABLED: "Голосовые ответы (заготовка — ещё не реализованы!)", ANSWER_VIDEO_ENABLED: "Видео-ответы (заготовка — ещё не реализованы!)" };
-      panel.innerHTML = Object.entries(value).map(([k, on]) => `<label class="toggle"><input type="checkbox" data-flag="${esc(k)}" ${on ? "checked" : ""}> <span>${esc(L[k] || k)}<br><code>${esc(k)}</code></span></label>`).join("");
-      $$("[data-flag]", panel).forEach((i) => (i.onchange = async () => {
-        const val = {}; $$("[data-flag]", panel).forEach((x) => (val[x.dataset.flag] = x.checked));
-        try { await api("PUT", "/admin/settings/features", { value: val }); toast("Флаги обновлены"); } catch (_) { i.checked = !i.checked; }
-      }));
-    },
     async legal(panel) {
       const PAGES = { faq: "FAQ — частые вопросы", rules: "Правила сообщества", terms: "Пользовательское соглашение", privacy: "Политика конфиденциальности", requisites: "Реквизиты" };
       panel.innerHTML = `<select class="input" id="legal-slug">${Object.entries(PAGES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
@@ -1292,26 +726,6 @@ async function pageAdmin() {
       $("#legal-slug").onchange = load;
       await load();
     },
-    async rooms(panel) {
-      const [{ items: cats }, { items: rooms }] = await Promise.all([api("GET", "/api/categories"), api("GET", "/api/rooms")]);
-      panel.innerHTML = `<form class="panel form" id="room-form"><h3 style="margin-top:0">Новая комната</h3>
-          <label>Slug (латиница)<input name="slug" required pattern="[a-z0-9-]{2,64}"></label>
-          <label>Название<input name="title" required></label>
-          <label>Категория<select name="category_id">${cats.map((c) => `<option value="${c.id}">${esc(c.title)}</option>`).join("")}</select></label>
-          <button class="btn btn-accent">Создать</button></form>
-        <form class="panel form" id="cat-form"><h3 style="margin-top:0">Новая категория</h3>
-          <label>Slug<input name="slug" required pattern="[a-z0-9-]{2,64}"></label><label>Название<input name="title" required></label>
-          <button class="btn">Создать</button></form>
-        <table class="list">${rooms.map((r) => `<tr><td><a href="/r/${encodeURIComponent(r.slug)}">#${esc(r.title)}</a></td><td>${esc(r.category?.title || "")}</td><td>${r.member_count} уч.</td></tr>`).join("")}</table>`;
-      $("#room-form").onsubmit = async (e) => {
-        e.preventDefault(); const f = new FormData(e.target);
-        try { await api("POST", "/admin/rooms", { slug: f.get("slug"), title: f.get("title"), category_id: Number(f.get("category_id")) }); toast("Комната создана"); this.rooms(panel); } catch (_) {}
-      };
-      $("#cat-form").onsubmit = async (e) => {
-        e.preventDefault(); const f = new FormData(e.target);
-        try { await api("POST", "/admin/categories", { slug: f.get("slug"), title: f.get("title") }); toast("Категория создана"); this.rooms(panel); } catch (_) {}
-      };
-    },
     async modlog(panel) {
       const { items } = await api("GET", "/admin/modlog");
       panel.innerHTML = modlogTable(items);
@@ -1321,18 +735,11 @@ async function pageAdmin() {
 
 // ---------------------------------------------------------------- notifications
 const NOTIF = {
-  answer: (p) => ["💬", `@${esc(p.username)} ответил(а) на твой вопрос «${esc(p.question_title)}»`, `/q/${p.question_id}#a${p.answer_id}`],
-  scheme: (p) => ["🔥", `Твой ответ стал «Схемой» в вопросе «${esc(p.question_title)}» (+5)`, `/q/${p.question_id}#a${p.answer_id}`],
   badge: (p) => [esc(p.emoji || "🏅"), `Новый бейдж: ${esc(p.title)}`, ME ? `/u/${encodeURIComponent(ME.user.username)}` : "#"],
-  comment: (p) => ["💭", `@${esc(p.username)} прокомментировал(а) твой ответ в «${esc(p.question_title)}»`, `/q/${p.question_id}#a${p.answer_id}`],
-  follow: (p) => ["👋", `@${esc(p.username)} подписался(ась) на тебя`, `/u/${encodeURIComponent(p.username)}`],
   ban: (p) => ["⛔", `Аккаунт заблокирован. Причина: ${esc(p.reason || "—")}`, "/banned"],
   trade: (p) => [p.accepted ? "🤝" : p.gift ? "🎁" : "🔄", p.accepted ? `@${esc(p.username)} принял(а) твоё предложение обмена` : p.gift ? `@${esc(p.username)} дарит тебе чайный гриб` : `@${esc(p.username)} предлагает обмен грибами`, "/market#trades"],
+  kombucha: (p) => ["🍄", esc(p.text || p.message || "Новости с подоконника"), p.kombucha_id ? `/g/${p.kombucha_id}` : "/"],
   sale: (p) => ["💰", `@${esc(p.username)} купил(а) твой гриб «${esc(p.kombucha_name)}» — +${p.amount} $₽`, "/wallet"],
-  task: (p) => ({ new_submission: ["📋", `@${esc(p.username)} откликнулся на задание «${esc(p.title)}»`],
-    approved: ["✅", `Задание «${esc(p.title)}» засчитано: +${p.amount} $₽`], rejected: ["❌", `Отклик на «${esc(p.title)}» отклонён: ${esc(p.reason || "")}`],
-    dispute_lost: ["⚖️", `Модератор подтвердил отказ по заданию «${esc(p.title)}»`] }[p.result] || ["📋", esc(p.title)]).concat([`/tasks/${p.task_id}`]),
-  wall: (p) => ["📝", `@${esc(p.username)} написал(а) у тебя на стене: «${esc(p.preview)}»`, ME ? `/u/${encodeURIComponent(ME.user.username)}#wall` : "#"],
   appeal: (p) => ["⚖️", p.decision === "accept" || p.decision === "approve" ? "Апелляцию приняли — блокировка снята" : `Апелляцию отклонили${p.comment ? ": " + esc(p.comment) : ""}`, "/banned"],
 };
 
@@ -1342,29 +749,12 @@ async function pageNotifications() {
   root.innerHTML = d.items.length ? d.items.map((n) => {
     const [e, text, href] = (NOTIF[n.kind] || (() => ["🔔", esc(n.kind), "#"]))(n.payload || {});
     return `<a class="notif ${n.is_read ? "" : "unread"}" href="${href}"><span class="e">${e}</span><span>${text}<small>${esc(fmtDate(n.created_at))}</small></span></a>`;
-  }).join("") : `<p class="muted">Пока тихо. Ответь на пару вопросов — и тут станет шумно 😉</p>`;
+  }).join("") : `<p class="muted">Пока тихо. Гриб растёт, рынок молчит 🍄</p>`;
   $("#read-all").onclick = async () => {
     const r = await api("POST", "/api/notifications/read", {});
     setBell(r.unread);
     $$(".notif.unread", root).forEach((x) => x.classList.remove("unread"));
   };
-}
-
-// ---------------------------------------------------------------- search
-async function pageSearch() {
-  const form = $("#search-form"), out = $("#search-results");
-  async function run(q) {
-    if (q.trim().length < 2) { out.innerHTML = ""; return; }
-    history.replaceState(null, "", `/search?q=${encodeURIComponent(q)}`);
-    try {
-      const d = await api("GET", `/api/search?q=${encodeURIComponent(q)}`);
-      out.innerHTML = d.items.length
-        ? d.items.map((q) => `<a class="best-item" href="/q/${q.id}"><b>${esc(q.title)}</b><small>${answersWord(q.answers_count)} · @${esc(q.author?.username)}</small></a>`).join("")
-        : `<p class="muted">Ничего не нашли. Может, самое время <a href="/ask">спросить</a>?</p>`;
-    } catch (_) {}
-  }
-  form.onsubmit = (e) => { e.preventDefault(); run(form.elements.q.value); };
-  if (form.elements.q.value) run(form.elements.q.value);
 }
 
 // ---------------------------------------------------------------- мини-игра «Чайный гриб»
@@ -1978,7 +1368,7 @@ async function pageKombucha() {
   loadTop();
   if (!ME) {
     root.innerHTML = `<div class="panel kb-guest">${kombuchaSVG({ name: "Гриша", mood: "happy", alive: true, stats: { tea: 70, clean: 100, sweet: 70, happy: 80 }, stage: { size: 3, title: "Блинчик" }, mutations: [{ code: "sparkle" }] })}
-      <p>Чтобы завести свой гриб, войди в аккаунт.</p><a class="btn btn-accent" href="/login?next=/kombucha">Войти</a></div>`;
+      <p>Чтобы завести свой гриб, войди в аккаунт.</p><a class="btn btn-accent" href="/login?next=/">Войти</a></div>`;
     $("#kb-codex").innerHTML = "";
     return;
   }
@@ -2045,7 +1435,7 @@ async function pageKombucha() {
           <button class="btn kb-talk" data-act="talk"${k.cooldowns.talk ? " disabled" : ""}>💭 Поговорить с грибом${k.cooldowns.talk ? ` · через ${fmtLeft(k.cooldowns.talk)}` : " — о философии"}</button>
           ${k.alive && !k.frozen ? `<button class="btn kb-med-btn" data-games>🎮 Игры гриба</button>` : ""}
           <div id="kb-quote"></div>
-          <button class="btn btn-accent kb-daily" data-act="daily"${k.cooldowns.daily ? " disabled" : ""}>🏆 Схема дня${k.cooldowns.daily ? ` · через ${fmtLeft(k.cooldowns.daily)}` : ": забрать бонус за ответы"}</button>
+          <button class="btn btn-accent kb-daily" data-act="daily"${k.cooldowns.daily ? " disabled" : ""}>🏆 Бонус дня${k.cooldowns.daily ? ` · через ${fmtLeft(k.cooldowns.daily)}` : ": опыт за игры и $₽ за уход"}</button>
           ${sprout}
           <button class="link-btn kb-freeze" data-freeze title="Заморозить: гриб перестанет требовать ухода и встанет на полку в профиле">🧊 Заморозить и поставить на полку</button>`
         : `<p>Прожил ${k.age_days} дн. и набрал ${k.xp} XP. Покойся с миром, ${esc(k.name)}.</p>
@@ -2206,7 +1596,7 @@ async function pageMarket() {
   const load = async () => {
     const d = await api("GET", `/api/market?sort=${sort}${rarity ? `&rarity=${rarity}` : ""}`);
     list.innerHTML = d.items.length ? d.items.map((k) => kombuchaCard(k, `<div class="kb-card-foot"><a href="/u/${encodeURIComponent(k.owner)}">@${esc(k.owner)}</a>
-      ${ME && ME.user.username === k.owner ? `<span class="muted">твой</span>` : `<button class="btn btn-accent btn-sm" data-buy="${k.id}" data-price="${k.price}">Купить · ${k.price} $₽</button>`}</div>`)).join("")
+      ${ME && ME.user.username === k.owner ? `<span class="muted">твой · ${k.price} $₽</span>` : `<button class="btn btn-accent btn-sm" data-buy="${k.id}" data-price="${k.price}">Купить · ${k.price} $₽</button>`}</div>`)).join("")
       : `<p class="muted">На рынке пусто. Заморозь гриб и выстави его первым!</p>`;
     list.querySelectorAll("[data-buy]").forEach((b) => (b.onclick = async () => {
       if (!ME) { location.href = "/login?next=/market"; return; }
@@ -2233,137 +1623,21 @@ async function pageMarket() {
   try { await Promise.all([load(), loadTrades()]); } catch (_) {}
 }
 
-// ---------------------------------------------------------------- полка и стена в профиле
+// ---------------------------------------------------------------- полка в профиле
 async function profileExtras(d) {
   const u = d.user, hidden = new Set(d.is_owner ? [] : d.custom.hidden_sections);
   const box = $("#profile-extras");
   if (!box) return;
   const parts = [];
   if (!hidden.has("shelf")) parts.push(`<div class="panel" id="shelf"><h2 style="margin-top:0">🧊 Полка с грибами</h2><div class="kb-shelf" id="shelf-list"><p class="muted">Загружаем…</p></div></div>`);
-  if (!hidden.has("wall")) parts.push(`<div class="panel" id="wall"><h2 style="margin-top:0">📝 Стена</h2><div id="wall-form"></div><div id="wall-list"></div><button class="btn btn-ghost btn-sm" id="wall-more" hidden>Ещё</button></div>`);
   box.innerHTML = parts.join("");
   if (!hidden.has("shelf")) {
     try {
       const s = await api("GET", `/api/users/${encodeURIComponent(u.username)}/shelf`, undefined, { quiet: true });
       $("#shelf-list").innerHTML = s.items.length ? s.items.map((k) => kombuchaCard(k, k.price != null ? `<a class="btn btn-sm btn-accent" href="/market">🏷 ${k.price} $₽</a>` : "")).join("")
-        : `<p class="muted">${d.is_owner ? "Пусто. Заморозь гриб на <a href=\"/kombucha\">странице гриба</a> — и он встанет сюда." : "Пока пусто."}</p>`;
+        : `<p class="muted">${d.is_owner ? "Пусто. Заморозь гриб на <a href=\"/\">странице гриба</a> — и он встанет сюда." : "Пока пусто."}</p>`;
     } catch (_) {}
   }
-  if (hidden.has("wall")) return;
-  let before = null;
-  const list = $("#wall-list");
-  const post = (p) => `<div class="wall-post" data-id="${p.id}">${avatarHTML(p.author)}<div class="wp-body"><div class="wp-head">${userLink(p.author)} <small class="muted">${esc(fmtDate(p.created_at))}</small>
-      ${p.can_delete ? `<button class="link-btn wp-del" data-del="${p.id}" title="Удалить">✕</button>` : ""}</div><div class="md">${p.body_html}</div></div></div>`;
-  const load = async (more = false) => {
-    const w = await api("GET", `/api/users/${encodeURIComponent(u.username)}/wall${before ? `?before=${before}` : ""}`, undefined, { quiet: true });
-    if (!more) $("#wall-form").innerHTML = w.can_post ? `<form class="wall-form"><textarea class="input" maxlength="500" rows="2" placeholder="Напиши что-нибудь на стене @${esc(u.username)}…"></textarea><div class="wall-form-foot"><small class="muted"><span id="wall-n">0</span>/500</small><button class="btn btn-accent btn-sm">Отправить</button></div></form>`
-      : w.closed ? `<p class="muted">🔒 Хозяин закрыл стену.</p>` : ME ? "" : `<p class="muted"><a href="/login?next=${encodeURIComponent(here())}">Войди</a>, чтобы написать на стене.</p>`;
-    const html = w.items.map(post).join("");
-    if (more) list.insertAdjacentHTML("beforeend", html); else list.innerHTML = html || `<p class="muted">Здесь пока тихо. Будь первым!</p>`;
-    before = w.next_before; $("#wall-more").hidden = !before;
-    const f = $("#wall-form form");
-    if (f && !more) {
-      const ta = f.querySelector("textarea");
-      ta.oninput = () => ($("#wall-n").textContent = ta.value.length);
-      f.onsubmit = async (e) => {
-        e.preventDefault();
-        if (!ta.value.trim()) return;
-        try { await api("POST", `/api/users/${encodeURIComponent(u.username)}/wall`, { body: ta.value.trim() }); ta.value = ""; before = null; load(); } catch (_) {}
-      };
-    }
-  };
-  list.addEventListener("click", async (e) => {
-    const b = e.target.closest("[data-del]");
-    if (!b || !confirm("Удалить запись?")) return;
-    try { await api("DELETE", `/api/wall/${b.dataset.del}`); b.closest(".wall-post").remove(); } catch (_) {}
-  });
-  $("#wall-more").onclick = () => load(true);
-  try { await load(); } catch (_) {}
-  if (location.hash === "#wall") $("#wall")?.scrollIntoView();
-}
-
-// ---------------------------------------------------------------- задания за $₽
-const TASK_ST = { open: "🟢 открыто", done: "✅ все места заняты", closed: "⏹ закрыто автором", expired: "⌛ срок вышел", removed: "⛔ снято модератором" };
-const SUB_ST = { pending: "⏳ на проверке", approved: "✅ засчитано", rejected: "❌ отклонено", disputed: "⚖️ спор у модератора" };
-function taskCard(t) {
-  return `<a class="task-card panel" href="/tasks/${t.id}"><div class="task-top"><b class="task-reward">+${t.reward} $₽</b><span class="muted">${TASK_ST[t.status] || t.status}</span></div>
-    <h3>${esc(t.title)}</h3><div class="muted task-meta">от @${esc(t.author.username)} · мест ${t.slots_left}/${t.slots} · до ${esc(fmtDate(t.deadline))}${t.pending ? ` · на проверке ${t.pending}` : ""}</div>
-    ${t.my_submission ? `<div class="task-mine">${SUB_ST[t.my_submission.status]}</div>` : ""}</a>`;
-}
-async function pageTasks() {
-  const root = $("#tasks-root");
-  const id = root.dataset.taskId;
-  if (id) return pageTask(root, id);
-  let tab = "open", sort = "new", rules;
-  const load = async () => {
-    const d = await api("GET", `/api/tasks?tab=${tab}&sort=${sort}`);
-    rules = d.rules;
-    $("#tasks-list").innerHTML = d.items.map(taskCard).join("") || `<p class="muted panel">${tab === "open" ? "Открытых заданий нет. Создай первое!" : "Пусто."}</p>`;
-  };
-  $$("[data-ttab]").forEach((b) => (b.onclick = () => { tab = b.dataset.ttab; $$("[data-ttab]").forEach((x) => x.classList.toggle("active", x === b)); load(); }));
-  $("#tasks-sort").onchange = (e) => { sort = e.target.value; load(); };
-  const f = $("#task-form");
-  let upd = null;
-  if (f) {
-    upd = () => {
-      const r = Number(f.elements.reward.value) || 0, n = Number(f.elements.slots.value) || 0, base = r * n;
-      const fee = Math.max(1, Math.round(base * (rules?.fee ?? 0.1)));
-      $("#task-cost").textContent = base ? `Спишется ${base + fee} $₽: ${r} × ${n} мест + ${fee} комиссии` : "";
-    };
-    f.addEventListener("input", upd);
-    f.onsubmit = async (e) => {
-      e.preventDefault();
-      const el = f.elements;
-      try {
-        const r = await api("POST", "/api/tasks", { title: el.title.value.trim(), body: el.body.value.trim(), proof: el.proof.value.trim(),
-          reward: Number(el.reward.value), slots: Number(el.slots.value), days: Number(el.days.value) });
-        setWood(r.wood); toast("📋 Задание опубликовано, $₽ в эскроу"); location.href = `/tasks/${r.task.id}`;
-      } catch (_) {}
-    };
-  }
-  if (ME?.permissions?.includes("content.hide")) $("#tasks-disputes-tab")?.removeAttribute("hidden");
-  $("#tasks-disputes-tab")?.addEventListener("click", async () => {
-    const d = await api("GET", "/api/mod/task-disputes");
-    $("#tasks-list").innerHTML = d.items.map((x) => `<div class="panel"><b>«${esc(x.task.title)}»</b> · ${x.task.reward} $₽ · исполнитель ${userLink(x.user)}
-      <div class="muted">Нужно прислать: ${esc(x.task.proof || "—")}</div><div class="md">${x.body_html}</div><div class="muted">Причина отказа: ${esc(x.reason || "—")}</div>
-      <button class="btn btn-accent btn-sm" data-dis="${x.id}" data-op="approve">Засчитать</button> <button class="btn btn-ghost btn-sm" data-dis="${x.id}" data-op="reject">Подтвердить отказ</button></div>`).join("") || `<p class="muted panel">Споров нет</p>`;
-    $$("[data-dis]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/mod/task-submissions/${b.dataset.dis}/${b.dataset.op}`, {}); b.closest(".panel").remove(); } catch (_) {} }));
-  });
-  try { await load(); upd?.(); } catch (_) {}
-}
-async function pageTask(root, id) {
-  const load = async () => {
-    let d;
-    try { d = await api("GET", `/api/tasks/${id}`, undefined, { quiet: true }); } catch (_) { root.innerHTML = `<div class="panel"><h1>Задание не найдено</h1><a href="/tasks">← Все задания</a></div>`; return; }
-    const t = d.task, mine = t.my_submission;
-    root.innerHTML = `<a href="/tasks" class="muted">← Все задания</a>
-      <article class="panel task-full"><div class="task-top"><b class="task-reward">+${t.reward} $₽</b><span>${TASK_ST[t.status]}</span></div>
-        <h1>${esc(t.title)}</h1><div class="muted">от ${userLink(t.author)} · мест ${t.slots_left}/${t.slots} · до ${esc(fmtDate(t.deadline))}</div>
-        <div class="md">${t.body_html}</div>${t.proof ? `<div class="task-proof">📎 Что прислать: ${esc(t.proof)}</div>` : ""}
-        ${d.is_author && t.status === "open" ? `<button class="btn btn-ghost btn-sm" id="task-close">⏹ Закрыть досрочно (вернуть остаток)</button>` : ""}
-        ${d.is_mod && t.status !== "removed" ? `<button class="btn btn-ghost btn-sm" id="task-remove">⛔ Снять (модератор)</button>` : ""}
-        ${t.refunded != null && d.is_author ? `<div class="muted">Возвращено тебе: ${t.refunded} $₽</div>` : ""}</article>
-      ${!ME ? `<p class="panel"><a href="/login?next=${encodeURIComponent(here())}">Войди</a>, чтобы выполнить задание.</p>`
-        : !d.is_author && !mine && t.status === "open" ? `<form class="panel" id="sub-form"><h2>Выполнить</h2><textarea class="input" name="body" rows="3" maxlength="1000" placeholder="Доказательство: ссылка, текст, описание…" required></textarea><button class="btn btn-accent">📤 Отправить на проверку</button>
-          <p class="muted">Автор проверит отклик. Если он не ответит за 72 часа, отклик засчитается сам. На отказ можно подать спор модератору.</p></form>` : ""}
-      ${mine ? `<div class="panel">Твой отклик: <b>${SUB_ST[mine.status]}</b>${mine.reason ? ` — ${esc(mine.reason)}` : ""} ${mine.status === "rejected" ? `<button class="btn btn-ghost btn-sm" data-sub="${mine.id}" data-op="dispute">⚖️ Оспорить</button>` : ""}</div>` : ""}
-      <section class="panel"><h2>${d.is_author ? "Отклики" : "Засчитанные"} (${d.submissions.length})</h2>
-        ${d.submissions.map((x) => `<div class="task-sub ${x.status}"><div>${userLink(x.user)} <span class="muted">${SUB_ST[x.status]} · ${esc(fmtDate(x.created_at))}</span></div><div class="md">${x.body_html}</div>
-          ${x.reason ? `<div class="muted">${esc(x.reason)}</div>` : ""}
-          ${d.is_author && x.status === "pending" ? `<button class="btn btn-accent btn-sm" data-sub="${x.id}" data-op="approve">✅ Засчитать (+${t.reward} $₽)</button> <button class="btn btn-ghost btn-sm" data-sub="${x.id}" data-op="reject">❌ Отклонить</button>` : ""}</div>`).join("") || `<p class="muted">Пока никого.</p>`}</section>`;
-    $("#sub-form")?.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      try { await api("POST", `/api/tasks/${id}/submit`, { body: e.target.elements.body.value.trim() }); toast("📤 Отправлено на проверку"); load(); } catch (_) {}
-    });
-    $$("[data-sub]", root).forEach((b) => (b.onclick = async () => {
-      let reason = null;
-      if (b.dataset.op === "reject") { reason = prompt("Почему отклоняешь? Исполнитель сможет оспорить."); if (!reason) return; }
-      try { await api("POST", `/api/task-submissions/${b.dataset.sub}/${b.dataset.op}`, { reason }); load(); } catch (_) {}
-    }));
-    $("#task-close")?.addEventListener("click", async () => { if (confirm("Закрыть задание? Невыплаченный остаток вернётся (комиссия — нет).")) { try { await api("POST", `/api/tasks/${id}/close`, {}); load(); } catch (_) {} } });
-    $("#task-remove")?.addEventListener("click", async () => { const r = prompt("Причина снятия:", "нарушение правил"); if (r) { try { await api("POST", `/api/mod/tasks/${id}/remove`, { reason: r }); load(); } catch (_) {} } });
-  };
-  await load();
 }
 
 // ---------------------------------------------------------------- «Деревянные» ($₽)
@@ -2402,50 +1676,6 @@ function pageFaq() {
 }
 
 // ---------------------------------------------------------------- boot
-// ---------------------------------------------------------------- черновики (автосейв) и дневник гриба
-// Автосохранение формы: через 1.2 с после последней правки. Черновик ответа — один на вопрос (upsert по POST).
-function draftAutosave({ kind, questionId = null, draftId = null, collect, status }) {
-  let id = draftId, timer = 0, lastJson = "", saving = false;
-  const say = (t) => { if (status) status.textContent = t; };
-  const save = async () => {
-    const d = collect(); const json = JSON.stringify(d);
-    if (json === lastJson || saving) return;
-    if (!(d.title || "").trim() && !(d.body || "").trim()) return;
-    saving = true; say("Сохраняем…");
-    try {
-      const r = id && kind === "question" ? await api("PUT", `/api/drafts/${id}`, d, { quiet: true })
-        : await api("POST", "/api/drafts", { ...d, kind, question_id: questionId }, { quiet: true });
-      id = r.draft.id; lastJson = json;
-      say(`Черновик сохранён · ${new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`);
-      if (kind === "question" && !new URLSearchParams(location.search).get("draft")) {
-        const u = new URL(location.href); u.searchParams.set("draft", id); history.replaceState(null, "", u);
-      }
-    } catch (_) { say("Черновик не сохранился — попробуем ещё раз"); }
-    saving = false;
-  };
-  return { touch() { clearTimeout(timer); timer = setTimeout(save, 1200); }, get id() { return id; }, flush: save, stop() { clearTimeout(timer); } };
-}
-
-async function pageDrafts() {
-  const box = $("#drafts-list");
-  const render = async () => {
-    const { items, max } = await api("GET", "/api/drafts");
-    if (!items.length) { box.innerHTML = `<p class="muted">Черновиков нет. Начни писать вопрос или ответ — он сохранится сам.</p>`; return; }
-    box.innerHTML = `<p class="muted">${items.length} из ${max}</p>` + items.map((d) => {
-      const href = d.kind === "question" ? `/ask?draft=${d.id}` : `/q/${d.question_id}#answer-form`;
-      const head = d.kind === "question" ? `❓ ${esc(d.title || "Без заголовка")}` : `💬 Ответ на «${esc(d.question_title || "вопрос")}»`;
-      const snip = (d.body || "").slice(0, 160);
-      return `<div class="draft-row"><a class="draft-main" href="${href}"><b>${head}</b>${snip ? `<span class="muted">${esc(snip)}${d.body.length > 160 ? "…" : ""}</span>` : ""}
-        <small class="muted">изменён ${esc(fmtDate(d.updated_at))}</small></a><button class="link-btn" data-del="${d.id}" title="Удалить">🗑</button></div>`;
-    }).join("");
-    $$("[data-del]", box).forEach((b) => (b.onclick = async () => {
-      if (!confirm("Удалить черновик навсегда?")) return;
-      try { await api("DELETE", `/api/drafts/${b.dataset.del}`); toast("Черновик удалён"); render(); } catch (_) {}
-    }));
-  };
-  await render();
-}
-
 async function pageDiary() {
   const root = $("#diary"), kid = root.dataset.kid, list = $("#diary-list"), more = $("#diary-more");
   let next = null, first = true;
@@ -2460,7 +1690,7 @@ async function pageDiary() {
       $(".kb-diary-head", root).innerHTML = `<div class="kb-diary-art">${kombuchaSVG({ ...k, id: "dy" + k.id }, { small: true })}</div>
         <div><h1>📖 Дневник гриба «${esc(k.name)}»</h1>
         <p class="muted">${esc(k.stage.title)} · ${k.xp} XP · поколение ${k.generation} · ${k.alive ? `живёт ${k.age_days} дн.` : "закис 🪦"}${k.frozen ? " · 🧊 заморожен" : ""}${k.owner ? ` · хозяин <a href="/u/${encodeURIComponent(k.owner)}">@${esc(k.owner)}</a>` : ""}</p>
-        <div class="row"><button class="btn btn-accent btn-sm" id="diary-share">🔗 Поделиться</button>${d.mine ? `<a class="btn btn-ghost btn-sm" href="/kombucha">🍄 К грибу</a>` : ""}</div></div>`;
+        <div class="row"><button class="btn btn-accent btn-sm" id="diary-share">🔗 Поделиться</button>${d.mine ? `<a class="btn btn-ghost btn-sm" href="/">🍄 К грибу</a>` : ""}</div></div>`;
       $("#diary-share").onclick = async () => {
         const url = location.href.split("#")[0], title = `Дневник гриба «${k.name}»`;
         if (navigator.share) { try { await navigator.share({ title, url }); return; } catch (_) {} }
@@ -2475,9 +1705,20 @@ async function pageDiary() {
   await load();
 }
 
+async function pageHome() {
+  $("#home-art").innerHTML = kombuchaSVG({ id: "home", name: "Гриша", mood: "happy", alive: true, stats: { tea: 80, clean: 100, sweet: 70, happy: 90 },
+    stage: { size: 4, title: "Медуза" }, mutations: [{ code: "sparkle" }] });
+  try {
+    const t = await api("GET", "/api/kombucha/top", undefined, { quiet: true });
+    $("#home-top").innerHTML = t.items.length ? t.items.slice(0, 8).map((x) => kombuchaCard(x.kombucha,
+      `<div class="kb-card-foot"><a href="/g/${x.id}">📖 Дневник</a><small class="muted">@${esc(x.username)}</small></div>`)).join("")
+      : `<p class="muted">Пока ни одного гриба. Будь первым!</p>`;
+  } catch (_) {}
+}
+
 const PAGES = {
-  drafts: pageDrafts, diary: pageDiary, feed: () => initFeed(), debates: () => initFeed(), kombucha: pageKombucha, market: pageMarket, tasks: pageTasks, wallet: pageWallet, room: pageRoom, question: pageQuestion, ask: pageAsk, rooms: pageRooms,
-  profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, notifications: pageNotifications, search: pageSearch, mod: pageMod, admin: pageAdmin,
+  home: pageHome, diary: pageDiary, kombucha: pageKombucha, market: pageMarket, wallet: pageWallet,
+  profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, notifications: pageNotifications, mod: pageMod, admin: pageAdmin,
   settings: pageSettings, faq: pageFaq,
 };
 

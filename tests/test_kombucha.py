@@ -143,11 +143,15 @@ def test_danger_timer(app, make_user, no_mutations):
     assert k["alive"] and k["stats"]["sweet"] == 0 and 11 * 3600 < k["dies_in"] <= 12 * 3600   # закиснет через 12 ч
 
 
-def test_daily_bonus_counts_answers(qa, no_mutations):
-    c = qa["answerer_c"]
+def test_daily_bonus_counts_care(make_user, no_mutations):
+    c, _ = make_user()
     kid = _first(c)["id"]
+    c.post(f"/api/kombucha/{kid}/pet", json={})
+    c.post(f"/api/kombucha/{kid}/clean", json={})
     r = c.post(f"/api/kombucha/{kid}/daily", json={}).get_json()
-    assert r["kombucha"]["xp"] == 10   # 5 + 5 за один ответ
+    assert r["kombucha"]["xp"] == 1 + 8 + 5            # игр не было — только база 5 XP
+    wtx = [t for t in c.get("/api/wallet").get_json()["items"] if t["reason"] == "daily_bonus"]
+    assert wtx[0]["delta"] == 5 + 2                     # 5 + по 1 $₽ за каждый уход за сутки
     assert c.post(f"/api/kombucha/{kid}/daily", json={}).status_code == 429
 
 
@@ -331,34 +335,18 @@ def test_quotes_remote_parser_and_fallback(app, monkeypatch):
 
 
 # ---------------------------------------------------------------- «Деревянные»
-def test_wood_for_activity(qa, make_user):
-    c = qa["answerer_c"]
-    w = c.get("/api/wallet").get_json()
-    reasons = {t["reason"] for t in w["items"]}
-    assert "answer" in reasons and w["balance"] >= 5
-    # вход раз в день: /auth/me начисляет один раз
+def test_wood_only_from_care_games_and_login(make_user, no_mutations):
+    c, _ = make_user()
     me1 = c.get("/api/auth/me").get_json()
     me2 = c.get("/api/auth/me").get_json()
     assert me1["wood_daily"] >= 10 and me2["wood_daily"] == 0 and me2["wood"] == me1["wood"]
-    # комментарий
-    before = me2["wood"]
-    c.post(f"/api/answers/{qa['a']['id']}/comments", json={"body": "дополню"})
-    assert c.get("/api/wallet").get_json()["balance"] == before + 1
-    # схема: автор вопроса ставит +5
-    qa["author_c"].put(f"/api/answers/{qa['a']['id']}/vote", json={"value": 5})
-    assert any(t["reason"] == "scheme" and t["delta"] == 20 for t in c.get("/api/wallet").get_json()["items"])
-
-
-def test_wood_debate_vote_once(make_user):
-    mod, _ = make_user("moderator")
-    q = mod.post("/api/questions", json={"kind": "debate", "title": "Шаверма или шаурма?", "side_a": "Шаверма",
-                                         "side_b": "Шаурма"}).get_json()["question"]
-    c, _ = make_user()
-    b0 = c.get("/api/wallet").get_json()["balance"]
-    c.put(f"/api/questions/{q['id']}/debate-vote", json={"side": "a"})
-    c.put(f"/api/questions/{q['id']}/debate-vote", json={"side": "b"})
-    c.put(f"/api/questions/{q['id']}/debate-vote", json={"side": "a"})
-    assert c.get("/api/wallet").get_json()["balance"] == b0 + 2
+    kid = _first(c)["id"]
+    c.post(f"/api/kombucha/{kid}/pet", json={})
+    reasons = {t["reason"] for t in c.get("/api/wallet").get_json()["items"]}
+    assert reasons == {"daily_login", "kombucha_care"}
+    from app.services import wood
+    assert set(wood.EARN) == {"daily_login", "kombucha_care", "daily_bonus", "mutation", "sprout",
+                              "minigame", "meditation", "sale"}
 
 
 def test_wood_daily_cap(app, make_user):
@@ -366,9 +354,9 @@ def test_wood_daily_cap(app, make_user):
     c, u = make_user()
 
     async def fn(s):
-        return [await wood.earn(s, u["id"], "comment", i) for i in range(35)]
+        return [await wood.earn(s, u["id"], "kombucha_care", i) for i in range(35)]
     got = _db(app, fn)
-    assert sum(got) == 30 and got[-1] == 0
+    assert sum(got) == 20 and got[-1] == 0
 
 
 def test_top_and_guest(app, make_user, no_mutations):
@@ -376,24 +364,13 @@ def test_top_and_guest(app, make_user, no_mutations):
     kid = _first(c)["id"]
     c.post(f"/api/kombucha/{kid}/pet", json={})
     top = app.test_client().get("/api/kombucha/top").get_json()["items"]
-    assert top[0]["xp"] == 1
+    assert top[0]["kombucha"]["xp"] == 1
     cl = app.test_client()
     assert cl.get("/api/kombucha").status_code == 401
     assert cl.get("/api/wallet").status_code == 401
-    assert cl.get("/kombucha").status_code == 200
+    assert cl.get("/kombucha").status_code in (301, 302)
     html = cl.get("/").get_data(as_text=True)
-    assert 'href="/debates"' in html and 'href="/kombucha"' in html
-
-
-def test_feed_has_my_vote(qa):
-    qid = qa["q"]["id"]
-    c = qa["other_c"]
-    assert c.put(f"/api/questions/{qid}/vote", json={"value": 1}).status_code == 200
-    item = next(i for i in c.get("/api/feed?tab=new").get_json()["items"] if i["id"] == qid)
-    assert item["my_vote"] == 1
-    anon = next(i for i in qa["author_c"].get("/api/feed?tab=new").get_json()["items"] if i["id"] == qid)
-    assert anon["my_vote"] is None
-
+    assert 'id="home-top"' in html and 'href="/market"' in html and 'href="/debates"' not in html
 
 
 def test_all_quotes_are_russian():
@@ -445,7 +422,7 @@ def test_max_three_mutations_per_stage():
         mp.setattr(kb.rng, "random", lambda: 0.0)                  # любой шанс срабатывает
         from app.services.kombucha_mutations import Mutation
         mp.setattr(Mutation, "check", lambda self, ctx: True)
-        ctx = Ctx(action="pet", k=k, hour=12, weekday=1, answers_24h=0)
+        ctx = Ctx(action="pet", k=k, hour=12, weekday=1)
         got = kb.roll_mutation(ctx)
         assert got is not None and got.stage == 1                  # третья на стадии 1 ещё можно
         k.mutations.append({"code": got.code})

@@ -858,3 +858,16 @@ body.kb-med-on { overflow: hidden; }
 .kb-diary-row p { margin: 0 0 2px; }
 .kb-diary-row.died p, .kb-diary-row.rescued p { font-weight: 600; }
 .kb-diary-row.mutation .e, .kb-diary-row.stage .e { box-shadow: 0 0 0 2px #7fff9a55; }
+
+/* ---- лендинг тамагочи */
+.home-hero { display: flex; gap: 28px; align-items: center; flex-wrap: wrap; padding: 28px; }
+.home-art { width: 220px; flex: none; margin: 0 auto; animation: home-bob 3s ease-in-out infinite; }
+@keyframes home-bob { 50% { transform: translateY(-8px) rotate(-1.5deg); } }
+.home-text { flex: 1; min-width: 260px; }
+.home-text h1 { font-size: 34px; margin: 0 0 10px; line-height: 1.1; }
+.home-lead { font-size: 17px; opacity: .9; }
+.home-cta { gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.home-features { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 14px 0; }
+.home-features .panel { margin: 0; }
+.home-features .e { font-size: 30px; }
+.home-features h3 { margin: 6px 0 4px; }

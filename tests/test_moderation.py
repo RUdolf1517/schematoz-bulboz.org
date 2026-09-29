@@ -5,31 +5,20 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 
-def test_report_hide_and_modlog(qa, make_user):
+def test_mod_user_search_ban_lift_and_modlog(make_user):
     mod_c, mod = make_user("moderator")
     admin_c, _ = make_user("admin")
-    aid = qa["a"]["id"]
-    r = qa["other_c"].post("/api/reports", json={"target_type": "answer", "target_id": aid,
-                                                  "reason": "self_harm"})
-    assert r.status_code == 201
-    assert qa["other_c"].post("/api/reports", json={"target_type": "answer", "target_id": aid,
-                                                     "reason": "spam"}).status_code == 409
-    qa["author_c"].post("/api/reports", json={"target_type": "answer", "target_id": aid, "reason": "spam"})
-
-    queue = mod_c.get("/mod/reports").json["items"]
-    assert queue[0]["reason"] == "self_harm"  # приоритет P0 наверху
-    r = mod_c.post(f"/mod/reports/{queue[0]['id']}/resolve", json={"decision": "hide"})
-    assert r.status_code == 200 and r.json["closed"] == 2
-    answers = qa["other_c"].get(f"/api/questions/{qa['q']['id']}").json["answers"]
-    assert answers == []
-
+    _, v = make_user(username="griboed_42")
+    assert mod_c.get("/mod/users?q=g").json["items"] == []
+    items = mod_c.get("/mod/users?q=griboed").json["items"]
+    assert [u["username"] for u in items] == ["griboed_42"] and items[0]["ban"] is None
+    ban_id = mod_c.post("/mod/bans", json={"user_id": v["id"], "reason": "автокликер", "days": 3}).json["ban_id"]
+    assert mod_c.get("/mod/users?q=griboed").json["items"][0]["ban"]["id"] == ban_id
+    assert mod_c.post(f"/mod/bans/{ban_id}/lift").status_code == 200
+    assert mod_c.get("/mod/users?q=griboed").json["items"][0]["ban"] is None
     own = [a["action"] for a in mod_c.get("/mod/log").json["items"]]
-    assert "content.hide" in own and "report.hide" in own
-    full = admin_c.get("/admin/modlog").json["items"]
-    assert {a["actor_id"] for a in full} == {mod["id"]}
-
-    assert mod_c.post(f"/mod/content/answer/{aid}/restore").status_code == 200
-    assert len(qa["other_c"].get(f"/api/questions/{qa['q']['id']}").json["answers"]) == 1
+    assert own == ["ban.lift", "ban.issue"]
+    assert {a["actor_id"] for a in admin_c.get("/admin/modlog").json["items"]} == {mod["id"]}
 
 
 def test_ban_blocks_and_revokes_session(make_user):
@@ -37,7 +26,7 @@ def test_ban_blocks_and_revokes_session(make_user):
     victim_c, victim = make_user()
     r = mod_c.post("/mod/bans", json={"user_id": victim["id"], "reason": "спам", "days": 7})
     assert r.status_code == 201
-    assert victim_c.post("/api/questions", json={"title": "Я вернулся?"}).status_code == 401
+    assert victim_c.post("/api/trades", json={}).status_code == 401   # сессии отозваны
 
 
 def test_admin_permanent_ban_and_roles(make_user):

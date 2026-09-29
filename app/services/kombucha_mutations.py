@@ -26,8 +26,8 @@ class Ctx:
     k: object                 # Kombucha
     hour: int                 # час по Москве
     weekday: int = 0          # 0 = понедельник
-    answers_24h: int = 0
-    debate_24h: int = 0
+    games_24h: int = 0
+    med_24h: int = 0
     was_in_danger: bool = False
     streak_days: int = 0
 
@@ -43,7 +43,7 @@ CONDS: dict[str, tuple[Callable[[Ctx], bool], str]] = {
     "tea": (lambda c: c.action == "tea", "Подливай заварку"),
     "clean": (lambda c: c.action == "clean", "Мой банку"),
     "pet": (lambda c: c.action == "pet", "Болтай с грибом"),
-    "daily": (lambda c: c.action == "daily", "Забирай «Схему дня»"),
+    "daily": (lambda c: c.action == "daily", "Забирай «Бонус дня»"),
     "night": (lambda c: 0 <= c.hour < 5, "Ночью, с 0 до 5"),
     "morning": (lambda c: 5 <= c.hour < 10, "Утром, с 5 до 10"),
     "evening": (lambda c: 18 <= c.hour < 24, "Вечером, с 18 до 24"),
@@ -53,9 +53,9 @@ CONDS: dict[str, tuple[Callable[[Ctx], bool], str]] = {
     "all_high": (lambda c: min(_stats(c)) >= 80, "Идеальный уход: всё 80+"),
     "gen2": (lambda c: c.k.generation >= 2, "Гриб второго поколения и старше"),
     "sprout": (lambda c: c.k.parent_id is not None, "Только у отростков"),
-    "streak": (lambda c: c.streak_days >= 3, "Стрик ответов 3+ дня"),
-    "answers": (lambda c: c.action == "daily" and c.answers_24h >= 3, "«Схема дня» после 3+ ответов"),
-    "debate": (lambda c: c.action == "daily" and c.debate_24h >= 1, "«Схема дня» после голоса в холиваре"),
+    "streak": (lambda c: c.streak_days >= 3, "Стрик ухода 3+ дня"),
+    "answers": (lambda c: c.action == "daily" and c.games_24h >= 3, "«Бонус дня» после 3+ мини-игр"),
+    "debate": (lambda c: c.action == "daily" and c.med_24h >= 1, "«Бонус дня» после медитации"),
     "many_muts": (lambda c: len(c.k.mutations or []) >= 5, "Когда у гриба уже 5+ мутаций"),
     "sweet_high": (lambda c: c.action == "sugar" and c.k.sweet > 80, "Сахар, когда и так сладко"),
     "tea_low": (lambda c: c.action == "tea" and c.k.tea < 30, "Заварка, когда её почти нет"),

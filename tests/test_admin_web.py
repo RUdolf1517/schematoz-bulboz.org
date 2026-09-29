@@ -15,23 +15,15 @@ def test_captcha_settings_validated_and_applied(app, make_user):
     assert (engine.categories, engine.question_count, engine.max_errors) == (["math"], 3, 0)
 
 
-def test_features_validation(make_user):
-    admin_c, _ = make_user("admin")
-    assert admin_c.put("/admin/settings/features", json={"value": {"HACK": True}}).status_code == 400
-    assert admin_c.put("/admin/settings/features", json={"value": {"ANSWER_VOICE_ENABLED": "yes"}}).status_code == 400
-    assert admin_c.get("/admin/settings/features").json["value"]["ANSWER_TEXT_ENABLED"] is True
-
-
-def test_admin_users_search_and_duplicate_room(make_user):
+def test_admin_users_search(make_user):
     admin_c, _ = make_user("admin")
     make_user(username="findme_1")
     items = admin_c.get("/admin/users?q=findme").json["items"]
     assert [u["username"] for u in items] == ["findme_1"]
     assert admin_c.get("/admin/users?q=%25").json["items"] == []   # % экранируется
-    assert admin_c.post("/admin/rooms", json={"slug": "genshin", "title": "Дубль"}).status_code == 409
 
 
-@pytest.mark.parametrize("path", ["/", "/q/1", "/rooms", "/r/genshin", "/u/someone", "/login", "/register",
+@pytest.mark.parametrize("path", ["/", "/market", "/faq", "/u/someone", "/login", "/register",
                                   "/banned", "/mod", "/admin", "/rules"])
 def test_pages_render_with_header_and_footer(app, path):
     r = app.test_client().get(path)
@@ -47,12 +39,17 @@ def test_header_shows_user_menu_when_logged_in(make_user):
     assert 'id="user-menu"' in html and 'id="login-btn"' not in html
 
 
-def test_ask_requires_login(app):
-    r = app.test_client().get("/ask")
-    assert r.status_code == 302 and r.headers["Location"].endswith("/login?next=/ask")
+@pytest.mark.parametrize("path", ["/q/1", "/ask", "/rooms", "/tasks", "/search"])
+def test_qa_pages_gone(app, path):
+    assert app.test_client().get(path).status_code == 404
 
 
-@pytest.mark.parametrize("nxt,expected", [("/q/5", "/q/5"), ("https://evil.com", "/"), ("//evil.com", "/"),
+def test_kombucha_redirects_home(app):
+    r = app.test_client().get("/kombucha")
+    assert r.status_code in (301, 302) and r.headers["Location"].endswith("/")
+
+
+@pytest.mark.parametrize("nxt,expected", [("/market", "/market"), ("https://evil.com", "/"), ("//evil.com", "/"),
                                           ("javascript:alert(1)", "/")])
 def test_no_open_redirect(app, nxt, expected):
     c = app.test_client()

@@ -209,8 +209,11 @@ async def kombucha_top():
         rows = (await s.execute(
             select(Kombucha, User.username).join(User, User.id == Kombucha.user_id)
             .where(Kombucha.alive.is_(True)).order_by(Kombucha.xp.desc(), Kombucha.id).limit(10))).all()
-    return {"items": [{"username": u, "name": k.name, "xp": k.xp, "generation": k.generation,
-                       "stage": kb.stage_for(k.xp)["title"], "mutations": len(k.mutations or [])}
+        for k, _ in rows:
+            kb.tick(k)
+    return {"items": [{"id": k.id, "username": u, "name": k.name, "xp": k.xp, "generation": k.generation,
+                       "stage": kb.stage_for(k.xp)["title"], "mutations": len(k.mutations or []),
+                       "kombucha": kb.public_out(k, u)}
                       for k, u in rows]}
 
 

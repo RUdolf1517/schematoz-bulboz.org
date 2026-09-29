@@ -121,54 +121,6 @@ class KombuchaTrade(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class WallPost(Base):
-    """Запись на стене профиля. Писать может любой вошедший; удалить — автор, хозяин стены или модератор."""
-    __tablename__ = "wall_posts"
-    __table_args__ = (Index("ix_wall_posts_owner", "owner_id", text("id DESC")),)
-    id: Mapped[int] = mapped_column(primary_key=True)
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    author_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    body: Mapped[str] = mapped_column(String(500))
-    deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
-class Task(Base):
-    """Задание за «Деревянные». Награда × мест + 10% комиссии списываются при создании (эскроу).
-    status: open → (closed | expired | removed | done). Невыплаченный остаток возвращается автору (refunded)."""
-    __tablename__ = "tasks"
-    __table_args__ = (Index("ix_tasks_status", "status", text("id DESC")), Index("ix_tasks_author", "author_id"))
-    id: Mapped[int] = mapped_column(primary_key=True)
-    author_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    title: Mapped[str] = mapped_column(String(120))
-    body: Mapped[str] = mapped_column(String(2000))
-    proof: Mapped[str] = mapped_column(String(300), default="", server_default="")   # что прислать в доказательство
-    reward: Mapped[int]                      # за одно выполнение
-    slots: Mapped[int]
-    slots_left: Mapped[int]                  # ещё не выплаченные места
-    fee: Mapped[int] = mapped_column(default=0, server_default="0")
-    status: Mapped[str] = mapped_column(String(16), default="open", server_default="open")
-    deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    refunded: Mapped[int | None]             # сколько вернули автору (None — ещё не рассчитались)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
-class TaskSubmission(Base):
-    """Отклик исполнителя. status: pending | approved | rejected | disputed.
-    Автор не ответил за 72 ч — засчитывается автоматически. На отказ можно подать спор модераторам."""
-    __tablename__ = "task_submissions"
-    __table_args__ = (UniqueConstraint("task_id", "user_id", name="uq_task_submission_user"),
-                      Index("ix_task_submissions_status", "status", "created_at"))
-    id: Mapped[int] = mapped_column(primary_key=True)
-    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    body: Mapped[str] = mapped_column(String(1000))
-    status: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending")
-    reason: Mapped[str | None] = mapped_column(String(300))      # почему отклонено / решение модератора
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
 class KombuchaEvent(Base):
     """Дневник гриба: «родился», «вырос», «мутировал», «чуть не помер»… Публичный, им можно поделиться.
     Смерть пишется лениво (tick() работает без сессии) — её досчитывает services/kombucha_diary.py."""
@@ -181,20 +133,3 @@ class KombuchaEvent(Base):
     emoji: Mapped[str] = mapped_column(String(16), default="📝", server_default="📝")
     data: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
-class Draft(Base):
-    """Черновик вопроса или ответа. Сохраняется сам (автосейв из формы), живёт, пока не опубликуешь."""
-    __tablename__ = "drafts"
-    __table_args__ = (Index("ix_drafts_user", "user_id", text("updated_at DESC")),
-                      Index("uq_drafts_answer", "user_id", "question_id", unique=True,
-                            postgresql_where=text("kind = 'answer'")))
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    kind: Mapped[str] = mapped_column(String(16))                       # question | answer
-    question_id: Mapped[int | None] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"))
-    title: Mapped[str] = mapped_column(String(300), default="", server_default="")
-    body: Mapped[str] = mapped_column(String(5000), default="", server_default="")
-    extra: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))  # kind, room_id, cover, стороны…
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

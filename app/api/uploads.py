@@ -17,7 +17,7 @@ UPLOADS_PER_HOUR = 60
 
 
 @bp.post("/uploads")
-@require_perm("answer.create")  # грузить могут все, кто может писать (забаненные — нет)
+@require_perm("kombucha.play")  # грузить могут все игроки (забаненные — нет)
 async def upload_image():
     f = request.files.get("file")
     if f is None:
