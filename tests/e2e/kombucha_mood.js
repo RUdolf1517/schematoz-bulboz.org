@@ -42,7 +42,7 @@ const check = (n, ok, extra = "") => console.log(`${ok ? "✅" : "❌"} ${n}${ok
   check("лицо на диске (не над ним) и масштабировано", /scale\(/.test(face.getAttribute("transform")), face.getAttribute("transform"));
   check("значок настроения на банке", !!doc.querySelector(".kb-main .kb-mood-badge text"));
   check("подпись настроения", txt(d, ".kb-mood").length > 3, txt(d, ".kb-mood"));
-  check("облачко — цитата", txt(d, "#kb-say").startsWith("Как говорил"), txt(d, "#kb-say"));
+  check("облачко — цитата", (txt(d, "#kb-say").length > 3 && !/Как говорил|процитировал/.test(txt(d, "#kb-say"))), txt(d, "#kb-say"));
   const cx = doc.querySelector("details.kb-codex-box");
   check("коллекция свёрнута по умолчанию", cx && !cx.open);
   cx.querySelector("summary").click(); await sleep(200);

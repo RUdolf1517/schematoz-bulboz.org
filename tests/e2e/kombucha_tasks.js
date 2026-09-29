@@ -41,9 +41,9 @@ const check = (n, ok, extra = "") => console.log(`${ok ? "✅" : "❌"} ${n}${ok
   check("гриб: кнопки Погладить и Поговорить", txt(d, ".kb-actions").includes("Погладить") && !!doc().querySelector('[data-act="talk"]'));
   check("гриб: 240 мутаций", doc().querySelectorAll(".kb-cx").length === 240);
   doc().querySelector('[data-act="talk"]').click(); await sleep(1500);
-  check("гриб: философская цитата", !!doc().querySelector(".kb-quote.philo cite") && txt(d, ".kb-quote").length > 20, txt(d, "#kb-say"));
+  check("гриб: философская фраза от первого лица", txt(d, "#kb-say").length > 5 && !/процитировал|Как говорил/.test(txt(d, "#kb-say")), txt(d, "#kb-say"));
   doc().querySelector('[data-act="pet"]').click(); await sleep(1500);
-  check("гриб: цитата сомнительной личности", !!doc().querySelector(".kb-quote.dubious"), txt(d, "#kb-say"));
+  check("гриб: спорная фраза от первого лица", txt(d, "#kb-say").length > 3 && !/Как говорил/.test(txt(d, "#kb-say")), txt(d, "#kb-say"));
   check("гриб: блок деления раз в неделю", txt(d, ".kb-sprout").includes("раз в неделю"));
   doc().querySelector("[data-freeze]").click(); await sleep(1200);
   doc().querySelector("[data-trade]").click(); await sleep(400);

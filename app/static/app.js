@@ -1421,6 +1421,33 @@ function kbMutFx(k, w, h, top, level) {
   return L;
 }
 
+// Полноэкранный просмотр гриба: только банка, весь интерфейс сайта скрыт. Выход — Esc, клик/тап или кнопка.
+function kbFullscreen(getK) {
+  if ($(".kb-fs")) return;
+  const k = getK();
+  if (!k) return;
+  const el = document.createElement("div");
+  el.className = "kb-fs";
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-label", `Гриб ${k.name} во весь экран`);
+  el.innerHTML = `<div class="kb-fs-art">${kombuchaSVG({ ...k, id: "fs" + k.id })}</div><div class="kb-fs-hint">Esc или тап — выйти</div>`;
+  document.body.appendChild(el);
+  document.body.classList.add("kb-fs-on");
+  const close = () => {
+    document.removeEventListener("keydown", onKey);
+    document.removeEventListener("fullscreenchange", onFs);
+    el.remove();
+    document.body.classList.remove("kb-fs-on");
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  const onFs = () => { if (!document.fullscreenElement) close(); };
+  el.onclick = close;
+  document.addEventListener("keydown", onKey);
+  el.requestFullscreen?.().then(() => document.addEventListener("fullscreenchange", onFs)).catch(() => {});
+  setTimeout(() => el.classList.add("hint-off"), 2500);
+}
+
 function kombuchaSVG(k, { small = false } = {}) {
   const st = k.stats, size = k.stage.size;
   const muts = new Set((k.mutations || []).map((m) => m.code));
@@ -1569,6 +1596,7 @@ async function pageKombucha() {
           ${sp.healthy ? "" : `<span>🦠 сначала вылечи плесень</span>`}</div>`;
     return `<div class="panel kb-main ${k.alive ? "" : "is-dead"}">
       <div class="kb-scene">
+        <button class="kb-fs-btn" data-fs title="Смотреть гриб во весь экран">⛶</button>
         <div class="kb-say" id="kb-say">${esc(k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
         ${kombuchaSVG(k)}
       </div>
@@ -1649,6 +1677,9 @@ async function pageKombucha() {
       if (r) { sel = r.kombucha.id; await load(); toast("🌱 Гриб посажен"); }
     }));
     const btn = (sel_) => $(sel_, root);
+    if (btn("[data-fs]")) btn("[data-fs]").onclick = () => kbFullscreen(() => cur());
+    const fsOpen = $(".kb-fs-art");
+    if (fsOpen && cur()) fsOpen.innerHTML = kombuchaSVG({ ...cur(), id: "fs" + cur().id });     // полноэкранный вид обновляется вместе с данными
     if (btn("[data-rename]")) btn("[data-rename]").onclick = async () => {
       const name = ask("Как назовём гриб? Имя должно быть уникальным на весь сайт.", k.name);
       if (!name || name === k.name) return;
@@ -1694,13 +1725,9 @@ async function pageKombucha() {
     // В облачке — только цитаты. Исключение — сахарная кома: там гриб стонет.
     const kk = r.kombucha;
     if (kk.mood === "sticky") say(action === "sugar" ? r.message : kk.phrase);
-    else if (action === "pet") say(r.message);            // «Погладить» — сама цитата
+    else if (action === "pet" || action === "talk") say(r.message);   // гриб говорит сам, от первого лица
     else { say(kk.phrase); if (r.message && action !== "talk") toast(r.message); }
-    if (r.quote) {
-      const q = r.quote, box = $("#kb-quote");
-      if (box) box.innerHTML = `<blockquote class="kb-quote ${action === "talk" ? "philo" : "dubious"}">${q.intro ? `<div class="muted">${esc(q.intro)}</div>` : ""}
-        ${q.lines.map((l) => `<p><b>${esc(l.who)}:</b> ${esc(l.text)}</p>`).join("")}<cite>${esc(q.book || "")}${q.remote ? " 🌐" : ""}</cite></blockquote>`;
-    }
+    if (r.quote && kk.mood !== "sticky") { const b = $("#kb-say"); if (b) b.title = r.quote.lines.map((l) => l.who).join(", ") + (r.quote.book ? ` — ${r.quote.book}` : ""); }
     if (r.mutation) toast(`🧬 ${r.mutation.rarity_title} мутация: ${r.mutation.emoji} «${r.mutation.title}» #${r.mutation.serial}!${r.mutation.first_time ? " +15 $₽ за новую находку" : ""}`);
     if (r.new_badges?.length) newBadgesToast(r.new_badges);
     if (r.stage_up) toast(`🎉 Гриб вырос: теперь это «${r.kombucha.stage.title}»!`);

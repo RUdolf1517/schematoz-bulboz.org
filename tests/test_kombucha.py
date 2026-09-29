@@ -413,10 +413,10 @@ def test_bubble_quotes_unless_sugar_coma(app, make_user, no_mutations):
     for stats in ({}, {"sweet": 10.0}, {"clean": 10.0}):          # доволен, голоден, грязно — всё равно цитата
         _edit(app, kid, **{"sweet": 70.0, "tea": 70.0, "clean": 90.0, "happy": 70.0, **stats})
         ph = _first(c)["phrase"]
-        assert ph.startswith("Как говорил ") and any(t in ph for t in texts), ph
+        assert ph in texts, ph                                     # от первого лица: только сама фраза
     _edit(app, kid, sweet=99.0)
     k = _first(c)
-    assert k["mood"] == "sticky" and not k["phrase"].startswith("Как говорил")
+    assert k["mood"] == "sticky" and k["phrase"] not in texts
     assert k["phrase"] in kb.TALK["sticky"]
 
 
@@ -485,3 +485,17 @@ def test_admin_kombucha_debug(make_user, no_mutations):
     assert len(_first(c)["mutations"]) == 6
     cat = {m["code"]: m for m in _state(c)["catalog"]}
     assert cat[codes[0]]["issued"] == 0
+
+
+
+def test_quotes_first_person(app, make_user):
+    from app.services import quotes
+    with app.app_context():
+        for _ in range(60):
+            for q in (quotes.dubious(remote=False), quotes.philosophy()):
+                sp = quotes.as_speech(q)
+                assert sp and not any(w in sp for w in ("Как говорил", "процитировал", "Гриб ")), sp
+                assert "intro" not in q
+    names = {w for w, _, _ in quotes.DUBIOUS}
+    for must in ("Владимир Маяковский", "Бенито Муссолини", "Освальд Мосли"):
+        assert must in names

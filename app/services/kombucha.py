@@ -399,7 +399,7 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
             msg = rng.choice(TALK["sticky"]) if mood(k) == "sticky" else quotes.as_speech(quote)
         elif action == "talk":
             quote = quotes.philosophy()
-            msg = quote["intro"] + " " + quotes.as_text(quote)
+            msg = quotes.as_speech(quote)
             k.talk_count = (k.talk_count or 0) + 1
             if k.talk_count >= 30:
                 await kb_achievements.award(s, user.id, "kb_philo")

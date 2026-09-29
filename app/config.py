@@ -40,8 +40,7 @@ class Config:
     QUOTES_REMOTE = _bool("QUOTES_REMOTE", True)
     # принимаются только русские цитаты (проверка на кириллицу)
     QUOTES_DUBIOUS_URLS = os.environ.get("QUOTES_DUBIOUS_URLS", "")
-    QUOTES_PHILO_URLS = os.environ.get(
-        "QUOTES_PHILO_URLS", "https://api.forismatic.com/api/1.0/?method=getQuote&format=json&lang=ru")
+    QUOTES_PHILO_URLS = os.environ.get("QUOTES_PHILO_URLS", "")  # обычные афоризмы — не «спорные», по умолчанию выкл.
     KREMLE_AUTO_GUARD = _bool("KREMLE_AUTO_GUARD", True)  # детект спец. трафика на всех роутах
     KREMLE_CATEGORIES = ["math", "physics", "russian", "literature"]
     KREMLE_QUESTION_COUNT = int(os.environ.get("KREMLE_QUESTION_COUNT", "5"))

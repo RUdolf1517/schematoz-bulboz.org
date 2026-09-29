@@ -39,15 +39,15 @@ const cyr = (t) => { const l = [...t].filter((c) => /\p{L}/u.test(c)); return l.
   f.dispatchEvent(new d.window.Event("submit", { cancelable: true })); await sleep(1200);
   d = await open("/kombucha", 2000);
   const doc = d.window.document;
-  check("облачко при загрузке — цитата", txt(d, "#kb-say").startsWith("Как говорил"), txt(d, "#kb-say"));
+  check("облачко при загрузке — цитата", (txt(d, "#kb-say").length > 3 && !/Как говорил|процитировал/.test(txt(d, "#kb-say"))), txt(d, "#kb-say"));
   for (const a of ["tea", "clean", "pet", "sugar"]) {
     doc.querySelector(`[data-act="${a}"]`).click(); await sleep(1500);
     const say = txt(d, "#kb-say"), mood = doc.querySelector(".kb-mood")?.className || "";
-    const ok = mood.includes("sticky") ? !say.startsWith("Как говорил") : say.startsWith("Как говорил");
+    const ok = say.length > 3 && !/Как говорил|процитировал/.test(say);
     check(`облачко после «${a}» — ${mood.includes("sticky") ? "сахарная кома" : "цитата"}, по-русски`, ok && cyr(say), say);
   }
   doc.querySelector('[data-act="talk"]').click(); await sleep(1500);
-  check("«Поговорить» — цитата философа по-русски", cyr(txt(d, ".kb-quote")), txt(d, ".kb-quote"));
+  check("«Поговорить» — гриб сам говорит философскую фразу", cyr(txt(d, "#kb-say")) && !/процитировал/.test(txt(d, "#kb-say")), txt(d, "#kb-say"));
   const muts = doc.querySelector("details.kb-muts-box");
   check("мутации на грибе свёрнуты (или их ещё нет)", !muts || !muts.open);
   const cx = doc.querySelector("details.kb-codex-box");
