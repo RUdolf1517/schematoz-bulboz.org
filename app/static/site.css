@@ -758,3 +758,34 @@ body.kb-fs-on > *:not(.kb-fs) { display: none !important; }
 .kb-fs-art .kb-mood-badge { display: none; }
 .kb-fs-hint { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); color: #fff9; font-size: 13px; transition: opacity .6s; }
 .kb-fs.hint-off .kb-fs-hint { opacity: 0; }
+/* «Медитация гриба» — ритм-тапалка */
+.kb-med-btn { width: 100%; margin-top: 10px; font-weight: 700; }
+body.kb-med-on { overflow: hidden; }
+.kb-med { position: fixed; inset: 0; z-index: 10001; background: radial-gradient(circle at 50% 45%, #253040, #0a0c12 75%);
+  color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  user-select: none; -webkit-user-select: none; touch-action: manipulation; cursor: pointer; padding: 16px; }
+.kb-med-x { position: absolute; top: 12px; right: 12px; width: 40px; height: 40px; border-radius: 50%; border: 1px solid #fff4;
+  background: #0006; color: #fff; font-size: 18px; cursor: pointer; }
+.kb-med-top { font-size: 16px; }
+.kb-med-stage { position: relative; width: min(70vw, 320px); aspect-ratio: 1; display: grid; place-items: center; }
+.kb-med-grib { width: 62%; transition: transform .12s ease-out; }
+.kb-med-grib .kb-svg { width: 100%; height: auto; }
+.kb-med-grib.beat { animation: kb-med-beat .28s ease-out; }
+@keyframes kb-med-beat { 0% { transform: scale(1); } 35% { transform: scale(1.09); filter: drop-shadow(0 0 14px #9fe7ff); } 100% { transform: scale(1); } }
+.kb-med-target, .kb-med-ring { position: absolute; inset: 6%; border-radius: 50%; pointer-events: none; }
+.kb-med-target { border: 4px solid #ffffff55; box-shadow: 0 0 18px #7fd3ff33 inset; }
+.kb-med-ring { border: 4px solid #8fe3ff; opacity: 0; animation: kb-med-ring linear forwards; }
+@keyframes kb-med-ring { 0% { transform: scale(2.2); opacity: 0; } 15% { opacity: .9; } 100% { transform: scale(1); opacity: 1; } }
+.kb-med-judge { min-height: 34px; font-size: 26px; font-weight: 800; }
+.kb-med-judge.pop { animation: kb-med-pop .25s ease-out; }
+.kb-med-judge.perfect { color: #ffe066; } .kb-med-judge.good { color: #8fe3ff; } .kb-med-judge.miss { color: #ff8080; }
+.kb-med-judge.count { color: #fff; font-size: 34px; }
+@keyframes kb-med-pop { 0% { transform: scale(1.35); } 100% { transform: scale(1); } }
+.kb-med-combo { min-height: 20px; color: #ffd27a; font-weight: 700; }
+.kb-med-bar { width: min(80vw, 360px); height: 6px; border-radius: 3px; background: #ffffff1f; overflow: hidden; }
+.kb-med-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #7fd3ff, #c79bff); }
+.kb-med-help { max-width: 360px; text-align: center; font-size: 13px; }
+.kb-med-result { text-align: center; background: #0008; border: 1px solid #fff2; border-radius: 16px; padding: 14px 20px; max-width: 420px; cursor: default; }
+.kb-med-result h2 { margin: 0 0 6px; }
+.kb-med-acc { font-size: 20px; margin: 4px 0; }
+.kb-med-mut { color: #ffe066; font-weight: 700; }

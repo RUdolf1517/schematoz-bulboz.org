@@ -72,6 +72,28 @@ async def kombucha_act(kid: int, action: str):
         return state
 
 
+@bp.post("/kombucha/<int:kid>/meditate/start")
+@login_required
+async def kombucha_meditate_start(kid: int):
+    from ..services import meditation
+    async with session_scope() as s:
+        k = await kb.get_own(s, g.user.id, kid)
+        return meditation.start(g.user.id, k)
+
+
+@bp.post("/kombucha/<int:kid>/meditate/finish")
+@login_required
+async def kombucha_meditate_finish(kid: int):
+    from ..services import meditation
+    data = json_body()
+    async with session_scope() as s:
+        user = await s.get(User, g.user.id, with_for_update=True)
+        k = await kb.get_own(s, user.id, kid)
+        res = await meditation.finish(s, user, k, str(data.get("token") or ""), data.get("taps"))
+        await s.flush()
+        return {"result": res, "kombucha": kb.out(k), "wood_balance": await wood.balance(s, user.id)}
+
+
 @bp.patch("/kombucha/<int:kid>")
 @login_required
 async def kombucha_rename(kid: int):

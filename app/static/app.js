@@ -1433,6 +1433,98 @@ function kbMutFx(k, w, h, top, level) {
   return L;
 }
 
+// ---- «Медитация гриба»: ритм-тапалка. Ритм и подсчёт — на сервере; здесь только показ и сбор тапов.
+async function kbMeditate(k, onDone) {
+  let T;
+  try { T = await api("POST", `/api/kombucha/${k.id}/meditate/start`); } catch (_) { return; }
+  const el = document.createElement("div");
+  el.className = "kb-med";
+  el.innerHTML = `<button class="kb-med-x" title="Прервать">✕</button>
+    <div class="kb-med-top"><b>🧘 ${esc(T.title)}</b> <span class="muted">${T.bpm} уд/мин</span></div>
+    <div class="kb-med-stage">
+      <div class="kb-med-grib">${kombuchaSVG({ ...k, id: "med" + k.id }, { small: true })}</div>
+      <div class="kb-med-target"></div><div class="kb-med-rings"></div>
+    </div>
+    <div class="kb-med-judge" aria-live="polite"></div>
+    <div class="kb-med-combo"></div>
+    <div class="kb-med-bar"><i></i></div>
+    <p class="kb-med-help muted">Тапай по экрану (или жми пробел), когда кольцо сойдётся с кругом — в такт бульканью гриба.</p>`;
+  document.body.appendChild(el);
+  document.body.classList.add("kb-med-on");
+  const $m = (q) => el.querySelector(q);
+  const rings = $m(".kb-med-rings"), judge = $m(".kb-med-judge"), combo = $m(".kb-med-combo"), grib = $m(".kb-med-grib"), bar = $m(".kb-med-bar i");
+  const APPROACH = 1300;
+  const taps = [], hit = new Set();
+  let t0 = performance.now(), raf = 0, done = false, streak = 0, spawned = 0;
+  const now = () => performance.now() - t0;
+  const show = (text, cls) => { if (cls === "count" && judge.textContent === text) return; judge.textContent = text; judge.className = `kb-med-judge ${cls}`; void judge.offsetWidth; judge.classList.add("pop"); };
+  const tap = (e) => {
+    if (done || e.target.closest(".kb-med-x")) return;
+    e.preventDefault?.();
+    const t = Math.round(now());
+    taps.push(t);
+    // локальная подсказка (итог всё равно считает сервер)
+    let best = -1, bd = 1e9;
+    T.beats.forEach((b, i) => { if (!hit.has(i) && Math.abs(t - b) < bd) { bd = Math.abs(t - b); best = i; } });
+    if (best >= 0 && bd <= T.good_ms + 40) {
+      hit.add(best); streak++;
+      show(bd <= T.perfect_ms + 30 ? "Идеально ✨" : "Хорошо 👍", bd <= T.perfect_ms + 30 ? "perfect" : "good");
+    } else { streak = 0; show("Мимо", "miss"); }
+    combo.textContent = streak >= 3 ? `комбо ×${streak}` : "";
+  };
+  const key = (e) => { if (e.code === "Space" || e.key === "Enter") tap(e); if (e.key === "Escape") abort(); };
+  const cleanup = () => {
+    cancelAnimationFrame(raf);
+    document.removeEventListener("keydown", key);
+    el.remove(); document.body.classList.remove("kb-med-on");
+  };
+  const abort = () => { done = true; cleanup(); toast("Медитация прервана — гриб слегка обиделся"); };
+  const loop = () => {
+    const t = now();
+    // отсчёт
+    if (t < T.beats[0] - APPROACH) show(String(Math.ceil((T.beats[0] - APPROACH - t) / 1000) || "…"), "count");
+    // новые кольца
+    while (spawned < T.beats.length && T.beats[spawned] - APPROACH <= t) {
+      const r = document.createElement("div");
+      r.className = "kb-med-ring";
+      r.style.animationDuration = `${APPROACH}ms`;
+      rings.appendChild(r);
+      setTimeout(() => r.remove(), APPROACH + 250);
+      const bt = T.beats[spawned];
+      setTimeout(() => { grib.classList.remove("beat"); void grib.offsetWidth; grib.classList.add("beat"); }, Math.max(0, bt - t));
+      spawned++;
+    }
+    // пропущенные удары
+    T.beats.forEach((b, i) => { if (!hit.has(i) && t - b > T.good_ms + 60 && !hit.has("m" + i)) { hit.add("m" + i); streak = 0; combo.textContent = ""; show("Мимо", "miss"); } });
+    bar.style.width = `${Math.min(100, (t / T.length) * 100)}%`;
+    if (t >= T.length) return finish();
+    raf = requestAnimationFrame(loop);
+  };
+  const finish = async () => {
+    done = true;
+    cancelAnimationFrame(raf);
+    judge.textContent = "Гриб осмысляет…"; judge.className = "kb-med-judge count";
+    let r;
+    try { r = await api("POST", `/api/kombucha/${k.id}/meditate/finish`, { token: T.token, taps }); }
+    catch (_) { cleanup(); return; }
+    const R = r.result;
+    el.querySelector(".kb-med-stage").insertAdjacentHTML("afterend", `<div class="kb-med-result">
+      <h2>${esc(R.grade)}</h2>
+      <p class="kb-med-acc">Точность: <b>${Math.round(R.accuracy * 100)}%</b></p>
+      <p class="muted">✨ идеально ${R.perfect} · 👍 хорошо ${R.good} · мимо ${R.miss}${R.extra ? ` · лишних тапов ${R.extra}` : ""}</p>
+      <p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за сегодня уже собраны · </span>`}💛 +${R.happy} счастья${R.xp ? ` · +${R.xp} опыта` : ""}</p>
+      ${R.mutation ? `<p class="kb-med-mut">🧬 ${esc(R.mutation.rarity_title)} мутация: ${esc(R.mutation.emoji)} «${esc(R.mutation.title)}» #${R.mutation.serial}</p>` : R.accuracy >= 0.75 ? `<p class="muted">Мутация в этот раз не пришла — шанс растёт с точностью.</p>` : `<p class="muted">С 75% точности появляется шанс мутации.</p>`}
+      <button class="btn btn-accent" data-close>Готово</button></div>`);
+    el.querySelectorAll(".kb-med-help, .kb-med-combo, .kb-med-judge, .kb-med-bar").forEach((x) => x.remove());
+    el.querySelector("[data-close]").onclick = cleanup;
+    onDone?.(r);
+  };
+  el.addEventListener("pointerdown", tap);
+  document.addEventListener("keydown", key);
+  $m(".kb-med-x").onclick = abort;
+  raf = requestAnimationFrame(loop);
+}
+
 // Полноэкранный просмотр гриба: только банка, весь интерфейс сайта скрыт. Выход — Esc, клик/тап или кнопка.
 function kbFullscreen(getK) {
   if ($(".kb-fs")) return;
@@ -1635,6 +1727,7 @@ async function pageKombucha() {
           <div class="kb-actions">${BTN.map(([a, e, t]) => { const cd = k.cooldowns[a];
             return `<button class="btn kb-act" data-act="${a}"${cd ? " disabled" : ""}><span class="e">${e}</span><span>${t}</span>${cd ? `<small>через ${fmtLeft(cd)}</small>` : ""}</button>`; }).join("")}</div>
           <button class="btn kb-talk" data-act="talk"${k.cooldowns.talk ? " disabled" : ""}>💭 Поговорить с грибом${k.cooldowns.talk ? ` · через ${fmtLeft(k.cooldowns.talk)}` : " — о философии"}</button>
+          ${k.alive && !k.frozen ? `<button class="btn kb-med-btn" data-meditate>🧘 Медитация гриба</button>` : ""}
           <div id="kb-quote"></div>
           <button class="btn btn-accent kb-daily" data-act="daily"${k.cooldowns.daily ? " disabled" : ""}>🏆 Схема дня${k.cooldowns.daily ? ` · через ${fmtLeft(k.cooldowns.daily)}` : ": забрать бонус за ответы"}</button>
           ${sprout}
@@ -1690,6 +1783,11 @@ async function pageKombucha() {
     }));
     const btn = (sel_) => $(sel_, root);
     if (btn("[data-fs]")) btn("[data-fs]").onclick = () => kbFullscreen(() => cur());
+    if (btn("[data-meditate]")) btn("[data-meditate]").onclick = () => kbMeditate(cur(), async (r) => {
+      S.items = S.items.map((x) => (x.id === r.kombucha.id ? r.kombucha : x));
+      S.wood = r.wood_balance; render();
+      if (r.result.mutation) toast(`🧬 Медитация открыла мутацию: ${r.result.mutation.emoji} «${r.result.mutation.title}» #${r.result.mutation.serial}!`);
+    });
     const fsOpen = $(".kb-fs-art");
     if (fsOpen && cur()) fsOpen.innerHTML = kombuchaSVG({ ...cur(), id: "fs" + cur().id });     // полноэкранный вид обновляется вместе с данными
     if (btn("[data-rename]")) btn("[data-rename]").onclick = async () => {
