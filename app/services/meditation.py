@@ -25,6 +25,7 @@ import time
 
 from ..errors import ApiError
 from ..extensions import get_redis
+from . import antibot
 from . import kombucha as kb
 from . import kombucha_diary as diary
 from . import wood
@@ -114,6 +115,17 @@ def score(beats: list[int], taps: list[int]) -> dict:
     return {"accuracy": round(acc, 3), "perfect": perfect, "good": good, "miss": miss, "extra": extra, "shift_ms": shift}
 
 
+def _offsets(beats: list[int], taps: list) -> list[float]:
+    """Отклонения тапов от ближайшего такта (только попадания в окно GOOD_MS)."""
+    out = []
+    for tp in taps:
+        if isinstance(tp, (int, float)) and beats:
+            d = min((tp - b for b in beats), key=abs)
+            if abs(d) <= GOOD_MS:
+                out.append(d)
+    return out
+
+
 def _roll_mutation(k, acc: float):
     if acc < MUT_FROM_ACC:
         return None
@@ -129,7 +141,7 @@ def _roll_mutation(k, acc: float):
     return rng.choices(pool, weights=[RARITY_WEIGHT[m.rarity] for m in pool])[0]
 
 
-async def finish(s, user, k, token: str, taps) -> dict:
+async def finish(s, user, k, token: str, taps, meta=None) -> dict:
     r = get_redis()
     raw = r.getdel(f"med:{token}") if hasattr(r, "getdel") else None
     if raw is None and not hasattr(r, "getdel"):
@@ -146,6 +158,9 @@ async def finish(s, user, k, token: str, taps) -> dict:
     if not isinstance(taps, list) or len(taps) > BEATS * 4:
         raise ApiError("Некорректные тапы", 400, "validation_error")
     res = score(track["beats"], taps)
+    reason = antibot.verdict(antibot.check_client(meta), antibot.check_offsets(_offsets(track["beats"], taps)))
+    if reason:
+        res = {**res, "accuracy": 0.0, "suspect": reason, "bot_flags": antibot.register(user.id, reason)}
     acc = res["accuracy"]
     r.set(f"med:cd:{k.id}", 1, ex=COOLDOWN)
 

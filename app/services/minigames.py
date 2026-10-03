@@ -29,6 +29,7 @@ import time
 
 from ..errors import ApiError
 from ..extensions import get_redis
+from . import antibot
 from . import kombucha as kb
 from . import kombucha_diary as diary
 from . import wood
@@ -311,7 +312,37 @@ async def finish(s, user, k, game: str, token: str, data: dict) -> dict:
         raise ApiError("Нет такой игры", 404, "not_found")
     if elapsed < min_ms:
         raise ApiError("Слишком быстро — игру нужно пройти по-честному", 400, "mg_too_fast")
+    res = _antibot(user.id, game, seed, data, res)
     return await reward(s, user, k, game, token, res)
+
+
+def bot_reason(game: str, seed: int, data: dict, res: dict) -> str | None:
+    """Поведенческие признаки автокликера (см. services/antibot.py)."""
+    reason = antibot.check_client(data.get("meta"))
+    taps = data.get("taps") if isinstance(data.get("taps"), list) else []
+    if game == "sugar":
+        items = {it["id"]: it for it in gen_sugar(seed)["items"]}
+        reac = [tp["t"] - items[tp["id"]]["t"] for tp in taps
+                if isinstance(tp, dict) and tp.get("id") in items and isinstance(tp.get("t"), (int, float))]
+        reason = antibot.verdict(reason, antibot.check_reactions(reac))
+    elif game == "flies":
+        flies = {f["id"]: f for f in gen_flies(seed)["flies"]}
+        reac = [tp["t"] - flies[tp["id"]]["t"] for tp in taps
+                if isinstance(tp, dict) and tp.get("id") in flies and isinstance(tp.get("t"), (int, float))]
+        reason = antibot.verdict(reason, antibot.check_reactions(reac))
+    elif game == "pour":
+        # с помехами 6 идеальных наливов подряд человеку не выдать
+        if res.get("rounds") and all(r["points"] >= 0.99 for r in res["rounds"]):
+            reason = antibot.verdict(reason, "perfect_pour")
+    return reason
+
+
+def _antibot(user_id: int, game: str, seed: int, data: dict, res: dict) -> dict:
+    reason = bot_reason(game, seed, data, res)
+    if not reason:
+        return res
+    n = antibot.register(user_id, reason)
+    return {**res, "accuracy": 0.0, "suspect": reason, "bot_flags": n}
 
 
 async def reward(s, user, k, game: str, token: str, res: dict) -> dict:

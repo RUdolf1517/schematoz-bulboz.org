@@ -34,7 +34,9 @@ async def find_users():
         bans = {b.user_id: b for b in (await s.scalars(select(Ban).where(
             Ban.user_id.in_([u.id for u in users]), Ban.lifted_at.is_(None),
             (Ban.ends_at.is_(None)) | (Ban.ends_at > now)))).all()} if users else {}
+    from ..services import antibot
     return {"items": [{"id": u.id, "username": u.username, "display_name": u.display_name,
+                       "bot_flags": antibot.flags(u.id),
                        "ban": {"id": bans[u.id].id, "reason": bans[u.id].reason,
                                "ends_at": bans[u.id].ends_at.isoformat() if bans[u.id].ends_at else None}
                        if u.id in bans else None} for u in users]}

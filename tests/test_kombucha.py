@@ -251,7 +251,7 @@ def test_sprout_every_week(app, make_user, no_mutations):
     _edit(app, kid, xp=1600, care_days=2)
     r = c.post(f"/api/kombucha/{kid}/pet", json={}).get_json()
     assert r["sprout"]["planted"] and r["kombucha"]["sprout_progress"]["count"] == 1
-    assert r["kombucha"]["sprout_progress"]["next_in"] > 2 * 86400
+    assert r["kombucha"]["sprout_progress"]["next_in"] > 6 * 86400
     # неделя ещё не прошла — даже с 7 днями ухода не делится
     _edit(app, kid, care_days=2, last_care_day=None)
     r = c.post(f"/api/kombucha/{kid}/sugar", json={}).get_json()
@@ -259,7 +259,7 @@ def test_sprout_every_week(app, make_user, no_mutations):
 
     async def week_ago(s):
         k = await s.get(Kombucha, kid)
-        k.last_sprout_at -= td(days=3)
+        k.last_sprout_at -= td(days=7)
     _db(app, week_ago)
     _edit(app, kid, care_days=2, last_care_day=None)
     r = c.post(f"/api/kombucha/{kid}/tea", json={}).get_json()
@@ -476,3 +476,26 @@ def test_quotes_first_person(app, make_user):
     names = {w for w, _, _ in quotes.DUBIOUS}
     for must in ("Владимир Маяковский", "Бенито Муссолини", "Освальд Мосли"):
         assert must in names
+
+
+def test_sprout_max_three_times_every_7_days(app, make_user, no_mutations):
+    from datetime import timedelta as td
+    c, u = make_user()
+    kid = _first(c)["id"]
+    _give_wood(app, u["id"], 5000)
+    for _ in range(4):
+        c.post("/api/shop/jar", json={})
+    assert kb.SPROUT_EVERY == td(days=7) and kb.SPROUT_MAX == 3 and kb.MOLD_CHANCE == 0.10
+    counts = []
+    for i in range(4):
+        _edit(app, kid, xp=1600, care_days=2, last_care_day=None)
+        r = c.post(f"/api/kombucha/{kid}/" + ("pet", "sugar", "tea", "clean")[i], json={}).get_json()
+        counts.append(r["kombucha"]["sprout_progress"]["count"])
+
+        async def week_ago(s):
+            k = await s.get(Kombucha, kid)
+            if k.last_sprout_at:
+                k.last_sprout_at -= td(days=7)
+        _db(app, week_ago)
+    assert counts == [1, 2, 3, 3]                                  # 4-го деления нет
+    assert r["sprout"] is None and r["kombucha"]["sprout_progress"]["max"] == 3

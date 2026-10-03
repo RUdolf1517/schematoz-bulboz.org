@@ -2,6 +2,7 @@
 сервер отдаёт только каркас — один источник правды для веба и мобилки."""
 from __future__ import annotations
 
+import os
 from urllib.parse import urlparse
 
 from flask import Blueprint, abort, send_from_directory, current_app, redirect, render_template, request, session, url_for
@@ -32,6 +33,30 @@ def index():
     if not current_user_id():
         return page("home.html", "home")
     return page("kombucha.html", "kombucha")
+
+
+@bp.get("/sw.js")
+def service_worker():
+    """SW должен лежать в корне, чтобы управлять всем сайтом. Версия = хеш ассетов → старый кэш сбрасывается."""
+    import os
+    from flask import Response
+    with open(os.path.join(current_app.static_folder, "pwa", "sw.js"), encoding="utf-8") as f:
+        body = f.read().replace("__V__", current_app.jinja_env.globals.get("asset_v", "1"))
+    return Response(body, mimetype="application/javascript",
+                    headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+
+@bp.get("/manifest.webmanifest")
+def manifest():
+    r = send_from_directory(os.path.join(current_app.static_folder, "pwa"), "manifest.webmanifest",
+                            mimetype="application/manifest+json")
+    r.headers["Cache-Control"] = "public, max-age=3600"
+    return r
+
+
+@bp.get("/offline")
+def offline():
+    return page("offline.html", "offline")
 
 
 @bp.get("/media/<name>")

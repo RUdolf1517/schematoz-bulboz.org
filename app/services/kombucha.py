@@ -44,7 +44,7 @@ PERIOD = timedelta(hours=12)
 DROP = {"sweet": 20.0, "tea": 15.0, "clean": 10.0, "happy": 15.0}  # за каждые 12 часов
 DEATH_AFTER = timedelta(hours=48)   # 2 суток на нуле — время вернуться с выходных
 MOLD_CLEAN_BELOW = 20.0      # ниже этой чистоты может завестись плесень
-MOLD_CHANCE = 0.15           # шанс на каждой ступеньке
+MOLD_CHANCE = 0.10           # шанс на каждой ступеньке
 MOLD_EXTRA = {"clean": 10.0, "happy": 15.0}
 LOW_STAT = 15.0              # если хоть что-то ниже — опыт за уход /2
 STICKY_ABOVE = 85.0
@@ -60,7 +60,8 @@ ACTIONS = {
 }
 DAILY_COOLDOWN = timedelta(hours=20)
 SPROUT_CARE_DAYS = 3
-SPROUT_EVERY = timedelta(days=3)
+SPROUT_EVERY = timedelta(days=7)
+SPROUT_MAX = 3              # один гриб делится не больше 3 раз за жизнь
 
 STAGES = [  # (с какого опыта, название, размер 1..6)
     (0, "Спора", 1), (80, "Плёночка", 2), (250, "Блинчик", 3), (550, "Медуза", 4),
@@ -463,14 +464,14 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
     if stage_for(k.xp)["size"] == 6:
         await kb_achievements.award(s, user.id, "kb_legend")
 
-    # отросток: легенда делится раз в неделю, если 7 дней за ней ухаживали (счётчик обнуляется после деления)
+    # отросток: легенда делится раз в 7 дней (до SPROUT_MAX раз), если 3 дня за ней ухаживали (счётчик обнуляется после деления)
     if can_sprout(k, at):
         k.sprouted = True
         k.last_sprout_at = at
         k.care_days = 0
         k.sprout_count = (k.sprout_count or 0) + 1
         await wood.earn(s, user.id, "sprout", f"{k.id}:{k.sprout_count}")
-        if k.sprout_count >= 4:
+        if k.sprout_count >= SPROUT_MAX:
             await kb_achievements.award(s, user.id, "kb_split4")
         await kb_achievements.award(s, user.id, "kb_split")
         if (await jars_info(s, user))["free"] > 0:
@@ -487,6 +488,7 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
 def can_sprout(k: Kombucha, at: datetime | None = None) -> bool:
     at = at or now()
     return (k.alive and not k.frozen and not k.mold and not k.sprout_pending
+            and (k.sprout_count or 0) < SPROUT_MAX
             and stage_for(k.xp)["size"] == 6 and k.care_days >= SPROUT_CARE_DAYS
             and (k.last_sprout_at is None or at - k.last_sprout_at >= SPROUT_EVERY))
 
@@ -497,7 +499,7 @@ def sprout_progress(k: Kombucha, at: datetime | None = None) -> dict:
     if k.last_sprout_at:
         wait = max(int((k.last_sprout_at + SPROUT_EVERY - at).total_seconds()), 0)
     return {"care_days": min(k.care_days, SPROUT_CARE_DAYS), "need_days": SPROUT_CARE_DAYS,
-            "legend": stage_for(k.xp)["size"] == 6, "next_in": wait, "count": k.sprout_count or 0,
+            "legend": stage_for(k.xp)["size"] == 6, "next_in": wait, "count": k.sprout_count or 0, "max": SPROUT_MAX,
             "healthy": not k.mold}
 
 

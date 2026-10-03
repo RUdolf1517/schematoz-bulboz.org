@@ -95,12 +95,12 @@ def test_games_api_guards(make_user, monkeypatch):
     kid2 = c2.get("/api/kombucha").get_json()["items"][0]["id"]
     assert len(c.get("/api/kombucha/games").get_json()["items"]) == 5
     g = c.post(f"/api/kombucha/{kid}/game/sugar/start", json={}).get_json()
-    sugar = [{"id": it["id"], "t": it["t"] + 300} for it in g["items"] if it["kind"] == "sugar"]
+    sugar = [{"id": it["id"], "t": it["t"] + 260 + (it["id"] * 37) % 120} for it in g["items"] if it["kind"] == "sugar"]
     # слишком рано
     r = c.post(f"/api/kombucha/{kid}/game/sugar/finish", json={"token": g["token"], "taps": sugar})
     assert r.status_code == 400
     g = c.post(f"/api/kombucha/{kid}/game/sugar/start", json={}).get_json()
-    sugar = [{"id": it["id"], "t": it["t"] + 300} for it in g["items"] if it["kind"] == "sugar"]
+    sugar = [{"id": it["id"], "t": it["t"] + 260 + (it["id"] * 37) % 120} for it in g["items"] if it["kind"] == "sugar"]
     _ff(monkeypatch, g["length"] + 100)
     # чужой токен — 403, и чужую игру он не сжигает
     assert c2.post(f"/api/kombucha/{kid2}/game/sugar/finish", json={"token": g["token"], "taps": []}).status_code == 403
@@ -110,3 +110,47 @@ def test_games_api_guards(make_user, monkeypatch):
     assert res["kombucha"]["stats"]["sweet"] <= 90                              # игрой в сахарную кому не загнать
     assert c.post(f"/api/kombucha/{kid}/game/sugar/finish", json={"token": g["token"], "taps": sugar}).status_code == 400
     assert c.post(f"/api/kombucha/{kid}/game/nope/start", json={}).status_code == 404
+
+
+def test_autoclicker_gets_no_reward(app, make_user, monkeypatch):
+    from app.services import antibot, antispam
+    c, u = make_user()
+    kid = c.get("/api/kombucha").get_json()["items"][0]["id"]
+    for i in range(3):
+        g = c.post(f"/api/kombucha/{kid}/game/sugar/start", json={}).get_json()
+        bot = [{"id": it["id"], "t": it["t"] + 40} for it in g["items"] if it["kind"] == "sugar"]   # реакция 40 мс
+        _ff(monkeypatch, g["length"] + 100 + i)
+        R = c.post(f"/api/kombucha/{kid}/game/sugar/finish", json={"token": g["token"], "taps": bot}).get_json()["result"]
+        assert R["suspect"] == "fast_reactions" and R["accuracy"] == 0 and R["wood"] == 0 and R["bot_flags"] == i + 1
+        from app.services import minigames as mg
+        from app.extensions import get_redis
+        with app.test_request_context():
+            get_redis().delete(mg._cd_key(kid, "sugar"))
+    # 3 флага — следующая игра только после капчи
+    r = c.post(f"/api/kombucha/{kid}/game/flies/start", json={})
+    assert r.status_code == 403 and r.get_json()["error"] == "captcha_required"
+    users = make_user("moderator")[0].get(f"/mod/users?q={u['username']}").get_json()["items"]
+    assert users[0]["bot_flags"] == 3
+
+
+def test_antibot_checks():
+    from app.services import antibot as ab
+    human = [230, 310, 275, 198, 402, 260, 288]
+    assert ab.check_reactions(human) is None
+    assert ab.check_reactions([300] * 8) == "robotic_timing"
+    assert ab.check_reactions([60, 70, 80, 300, 90, 65]) == "fast_reactions"
+    assert ab.check_reactions([300, 310]) is None                   # мало данных — не судим
+    assert ab.check_offsets([0, 1, -1, 0, 1, 0, 0]) == "robotic_rhythm"
+    assert ab.check_offsets([12, -30, 25, -8, 40, 3, -19]) is None
+    assert ab.check_intervals([0, 500, 1000, 1500, 2000, 2500, 3000, 3500]) == "even_intervals"
+    assert ab.check_client({"synthetic": 4}) == "synthetic_events" and ab.check_client({"synthetic": 0}) is None
+
+
+def test_synthetic_events_flagged(make_user, monkeypatch):
+    c, _ = make_user()
+    kid = c.get("/api/kombucha").get_json()["items"][0]["id"]
+    g = c.post(f"/api/kombucha/{kid}/game/sugar/start", json={}).get_json()
+    taps = [{"id": it["id"], "t": it["t"] + 260 + (it["id"] * 37) % 120} for it in g["items"] if it["kind"] == "sugar"]
+    _ff(monkeypatch, g["length"] + 100)
+    R = c.post(f"/api/kombucha/{kid}/game/sugar/finish", json={"token": g["token"], "taps": taps, "meta": {"synthetic": 12}}).get_json()["result"]
+    assert R["suspect"] == "synthetic_events" and R["wood"] == 0

@@ -533,7 +533,7 @@ async function pageMod() {
       let tm;
       const run = async () => {
         const { items } = await api("GET", `/mod/users?q=${encodeURIComponent(q.value.trim())}`);
-        box.innerHTML = items.length ? items.map((u) => `<div class="item"><div class="head"><a href="/u/${encodeURIComponent(u.username)}" target="_blank"><b>@${esc(u.username)}</b></a>
+        box.innerHTML = items.length ? items.map((u) => `<div class="item"><div class="head"><a href="/u/${encodeURIComponent(u.username)}" target="_blank"><b>@${esc(u.username)}</b></a>${u.bot_flags ? `<span class="pill p0" title="Подозрительных партий в мини-играх за сутки">🤖 ${u.bot_flags}</span>` : ""}
           ${u.ban ? `<span class="pill p0">бан ${u.ban.ends_at ? "до " + esc(fmtDate(u.ban.ends_at)) : "навсегда"}</span><span class="muted">${esc(u.ban.reason)}</span>` : ""}</div>
           <div class="btns" style="margin-top:8px">${u.ban ? `<button class="btn btn-sm btn-ghost" data-lift="${u.ban.id}">Снять бан</button>`
             : `<button class="btn btn-sm btn-danger" data-ban="${u.id}" data-uname="${esc(u.username)}">Бан…</button>`}</div></div>`).join("")
@@ -951,13 +951,13 @@ function kbGameShell(title, help) {
       sh.timers.forEach(clearTimeout); cancelAnimationFrame(sh.raf);
       sh.say("Гриб считает…", "count");
       let r;
-      try { r = await api("POST", `/api/kombucha/${k.id}/game/${game}/finish`, body); } catch (_) { sh.close(); return; }
+      try { r = await api("POST", `/api/kombucha/${k.id}/game/${game}/finish`, { ...body, meta: kbMeta() }); } catch (_) { sh.close(); return; }
       sh.over = true;
       const R = r.result, ST = { tea: "🫖 заварка", sweet: "🍬 сахар", clean: "🧽 чистота" };
       const extra = { pour: `налито точно: ${R.rounds?.filter((x) => x.points >= 0.5).length || 0}/${R.rounds?.length || 6}${R.rounds?.some((x) => x.spilled) ? " · пролито: " + R.rounds.filter((x) => x.spilled).length : ""}`,
         memory: `цепочка: ${R.reached}/${R.total}`, sugar: `сахар ${R.caught} · ошибок ${R.wrong} · пропущено ${R.missed}`,
         flies: `отогнано мушек: ${R.swatted}` }[game] || "";
-      sh.area.innerHTML = `<div class="kb-med-result"><h2>${esc(R.grade)}</h2><p class="kb-med-acc">Точность: <b>${Math.round(R.accuracy * 100)}%</b></p>
+      sh.area.innerHTML = `<div class="kb-med-result"><h2>${esc(R.grade)}</h2><p class="kb-med-acc">Точность: <b>${Math.round(R.accuracy * 100)}%</b></p>${kbBotNote(R)}
         <p class="muted">${esc(extra)}</p>
         <p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за игры сегодня уже собраны · </span>`}💛 +${R.happy}${R.boost ? ` · ${ST[R.stat]} +${R.boost}` : ""}${R.xp ? ` · +${R.xp} опыта` : ""}</p>
         ${R.mutation ? `<p class="kb-med-mut">🧬 ${esc(R.mutation.rarity_title)} мутация: ${esc(R.mutation.emoji)} «${esc(R.mutation.title)}» #${R.mutation.serial}</p>`
@@ -973,7 +973,15 @@ function kbGameShell(title, help) {
   return sh;
 }
 
+// антиавтокликер: считаем синтетические (не от пользователя) события во время игры
+let kbSynthetic = 0;
+["pointerdown", "mousedown", "touchstart", "keydown", "click"].forEach((ev) =>
+  document.addEventListener(ev, (e) => { if (!e.isTrusted) kbSynthetic++; }, true));
+const kbMeta = () => ({ synthetic: kbSynthetic });
+const kbBotNote = (R) => R.suspect ? `<p class="kb-bot-note">🤖 Похоже на автокликер — за эту партию награды нет.${R.bot_flags >= 3 ? " Следующая игра — после капчи." : ""}</p>` : "";
+
 async function kbStart(k, game) {
+  kbSynthetic = 0;
   try { return await api("POST", `/api/kombucha/${k.id}/game/${game}/start`); } catch (_) { return null; }
 }
 
@@ -1139,6 +1147,7 @@ async function kbFlies(k, onDone) {
 // ---- «Медитация гриба»: ритм-тапалка. Ритм и подсчёт — на сервере; здесь только показ и сбор тапов.
 async function kbMeditate(k, onDone) {
   let T;
+  kbSynthetic = 0;
   try { T = await api("POST", `/api/kombucha/${k.id}/meditate/start`); } catch (_) { return; }
   const el = document.createElement("div");
   el.className = "kb-med";
@@ -1211,12 +1220,12 @@ async function kbMeditate(k, onDone) {
     cancelAnimationFrame(raf);
     judge.textContent = "Гриб осмысляет…"; judge.className = "kb-med-judge count";
     let r;
-    try { r = await api("POST", `/api/kombucha/${k.id}/meditate/finish`, { token: T.token, taps }); }
+    try { r = await api("POST", `/api/kombucha/${k.id}/meditate/finish`, { token: T.token, taps, meta: kbMeta() }); }
     catch (_) { cleanup(); return; }
     const R = r.result;
     el.querySelector(".kb-med-stage").insertAdjacentHTML("afterend", `<div class="kb-med-result">
       <h2>${esc(R.grade)}</h2>
-      <p class="kb-med-acc">Точность: <b>${Math.round(R.accuracy * 100)}%</b></p>
+      <p class="kb-med-acc">Точность: <b>${Math.round(R.accuracy * 100)}%</b></p>${kbBotNote(R)}
       <p class="muted">✨ идеально ${R.perfect} · 👍 хорошо ${R.good} · мимо ${R.miss}${R.extra ? ` · лишних тапов ${R.extra}` : ""}</p>
       <p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за сегодня уже собраны · </span>`}💛 +${R.happy} счастья${R.xp ? ` · +${R.xp} опыта` : ""}</p>
       ${R.mutation ? `<p class="kb-med-mut">🧬 ${esc(R.mutation.rarity_title)} мутация: ${esc(R.mutation.emoji)} «${esc(R.mutation.title)}» #${R.mutation.serial}</p>` : `<p class="muted">${{ limit: "На этой стадии у гриба уже 3 мутации — новые откроются на следующей стадии.", luck: "Мутация в этот раз не пришла — чем точнее, тем выше шанс (до 15%).", low: "С 75% точности появляется шанс мутации." }[R.mut_why] || ""}</p>`}
@@ -1399,10 +1408,11 @@ async function pageKombucha() {
     const sp = k.sprout_progress;
     const sprout = k.sprout_pending ? `<div class="kb-note">🌱 Отросток готов и ждёт свободную банку. <button class="link-btn" data-buy>Купить банку за ${S.prices.jar} $₽</button></div>`
       : !sp.legend ? `<div class="kb-note muted">🌱 Гриб делится только на последней стадии — «Легенда трёхлитровой банки». Сейчас: «${esc(st.title)}».</div>`
-      : `<div class="kb-sprout" title="Легенда делится раз в 3 дня, если 3 дня за ней ухаживали и на ней нет плесени"><span>🌱 Деление${sp.count ? ` (было ${sp.count})` : ""}:</span>
+      : sp.count >= sp.max ? `<div class="kb-note muted">🌳 Гриб уже разделился ${sp.max} раза — больше отростков не будет. Династия продолжается в малышах!</div>`
+      : `<div class="kb-sprout" title="Легенда делится раз в 7 дней, всего до ${sp.max} раз, если 3 дня за ней ухаживали и на ней нет плесени"><span>🌱 Деление ${sp.count}/${sp.max}:</span>
           <span class="${sp.legend ? "ok" : ""}">${sp.legend ? "✅" : "⏳"} стадия «Легенда»</span>
           <span class="${sp.care_days >= sp.need_days ? "ok" : ""}">${sp.care_days >= sp.need_days ? "✅" : "⏳"} дней ухода ${sp.care_days}/${sp.need_days}</span>
-          <span class="${sp.next_in ? "" : "ok"}">${sp.next_in ? `⏳ следующее через ${fmtLeft(sp.next_in)}` : "✅ раз в неделю"}</span>
+          <span class="${sp.next_in ? "" : "ok"}">${sp.next_in ? `⏳ следующее через ${fmtLeft(sp.next_in)}` : "✅ раз в 7 дней"}</span>
           ${sp.healthy ? "" : `<span>🦠 сначала вылечи плесень</span>`}</div>`;
     return `<div class="panel kb-main ${k.alive ? "" : "is-dead"}">
       <div class="kb-scene">
@@ -1728,3 +1738,19 @@ const PAGES = {
   const fn = PAGES[document.body.dataset.page];
   if (fn) fn();
 })();
+
+// ---------------------------------------------------------------- PWA
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  window.addEventListener("load", () => navigator.serviceWorker?.register("/sw.js", { scope: "/" }).catch(() => {}));
+}
+let kbInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault(); kbInstallPrompt = e;
+  if (localStorage.getItem("pwa-dismissed")) return;
+  const b = document.createElement("div");
+  b.className = "pwa-banner";
+  b.innerHTML = `<span>🍄 Поставь гриба на главный экран — так он не потеряется</span><button class="btn btn-accent btn-sm" data-i>Установить</button><button class="link-btn" data-x>✕</button>`;
+  document.body.appendChild(b);
+  b.querySelector("[data-i]").onclick = async () => { b.remove(); kbInstallPrompt.prompt(); await kbInstallPrompt.userChoice; kbInstallPrompt = null; };
+  b.querySelector("[data-x]").onclick = () => { b.remove(); localStorage.setItem("pwa-dismissed", "1"); };
+});

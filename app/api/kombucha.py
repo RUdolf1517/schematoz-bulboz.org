@@ -7,6 +7,7 @@ from flask import g, request
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from ..services.captcha import captcha_required
 from ..auth.rbac import login_required
 from ..auth.sessions import current_user_id
 from ..db import session_scope
@@ -75,6 +76,7 @@ async def kombucha_act(kid: int, action: str):
 
 @bp.post("/kombucha/<int:kid>/meditate/start")
 @login_required
+@captcha_required()  # после 3 партий автокликера за сутки
 async def kombucha_meditate_start(kid: int):
     from ..services import meditation
     async with session_scope() as s:
@@ -90,7 +92,7 @@ async def kombucha_meditate_finish(kid: int):
     async with session_scope() as s:
         user = await s.get(User, g.user.id, with_for_update=True)
         k = await kb.get_own(s, user.id, kid)
-        res = await meditation.finish(s, user, k, str(data.get("token") or ""), data.get("taps"))
+        res = await meditation.finish(s, user, k, str(data.get("token") or ""), data.get("taps"), data.get("meta"))
         await s.flush()
         return {"result": res, "kombucha": kb.out(k), "wood_balance": await wood.balance(s, user.id)}
 
@@ -104,6 +106,7 @@ async def kombucha_games():
 
 @bp.post("/kombucha/<int:kid>/game/<any(pour, memory, sugar, flies):game>/start")
 @login_required
+@captcha_required()  # после 3 партий автокликера за сутки
 async def kombucha_game_start(kid: int, game: str):
     from ..services import minigames
     async with session_scope() as s:

@@ -63,3 +63,15 @@ def test_no_open_redirect(app, nxt, expected):
 
 def test_demo_accounts_hidden_by_default(app):
     assert "admin-demo-2026" not in app.test_client().get("/login").get_data(as_text=True)
+
+
+def test_pwa_assets(app):
+    c = app.test_client()
+    m = c.get("/manifest.webmanifest")
+    assert m.status_code == 200 and m.get_json()["display"] == "standalone" and len(m.get_json()["icons"]) == 3
+    sw = c.get("/sw.js")
+    assert sw.status_code == 200 and "javascript" in sw.content_type and "__V__" not in sw.get_data(as_text=True)
+    assert c.get("/offline").status_code == 200
+    assert 'rel="manifest"' in c.get("/").get_data(as_text=True)
+    for f in ("icon-192.png", "icon-512.png", "maskable-512.png"):
+        assert c.get(f"/static/pwa/{f}").status_code == 200

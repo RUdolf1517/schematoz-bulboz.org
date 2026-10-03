@@ -38,7 +38,8 @@ def test_meditation_flow(make_user, monkeypatch):
     t = c.post(f"/api/kombucha/{kid}/meditate/start", json={}).get_json()
     _fast_forward(monkeypatch, t["length"] + 100)
     monkeypatch.setattr(med.rng, "random", lambda: 0.0)              # гарантируем мутацию при 100%
-    r = c.post(f"/api/kombucha/{kid}/meditate/finish", json={"token": t["token"], "taps": t["beats"]}).get_json()
+    human = [b + ((i * 29) % 50) - 25 for i, b in enumerate(t["beats"])]   # живой разброс ±25 мс
+    r = c.post(f"/api/kombucha/{kid}/meditate/finish", json={"token": t["token"], "taps": human}).get_json()
     res = r["result"]
     assert res["accuracy"] == 1.0 and res["wood"] == 10 and res["happy"] == 25 and res["mutation"] and res["mut_why"] == "got"
     assert r["kombucha"]["stats"]["happy"] >= min(100, happy0)
@@ -65,3 +66,12 @@ def test_meditation_foreign_and_limits(make_user, monkeypatch):
     t = c1.post(f"/api/kombucha/{k1}/meditate/start", json={}).get_json()
     bad = c1.post(f"/api/kombucha/{k1}/meditate/finish", json={"token": t["token"], "taps": list(range(500))})
     assert bad.status_code == 400
+
+
+def test_meditation_robot_rhythm_flagged(make_user, monkeypatch):
+    c, _ = make_user()
+    kid = c.get("/api/kombucha").get_json()["items"][0]["id"]
+    t = c.post(f"/api/kombucha/{kid}/meditate/start", json={}).get_json()
+    _fast_forward(monkeypatch, t["length"] + 100)
+    R = c.post(f"/api/kombucha/{kid}/meditate/finish", json={"token": t["token"], "taps": t["beats"]}).get_json()["result"]
+    assert R["suspect"] == "robotic_rhythm" and R["accuracy"] == 0 and R["wood"] == 0
