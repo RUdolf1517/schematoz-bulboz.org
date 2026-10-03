@@ -157,6 +157,10 @@ function avatarHTML(u, size = "") {
 }
 
 // классы/переменные темы профиля — только из белых списков (сервер валидирует тоже)
+// «с октября 2026» — родительный падеж (toLocaleDateString с month:"long" без дня даёт «октябрь 2026 г.»)
+const MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+function sinceRu(iso) { const d = new Date(iso); return `${MONTHS_GEN[d.getMonth()]} ${d.getFullYear()}`; }
+
 function profileSkin(c) {
   const cls = [`theme-${c.theme}`, `font-${c.font}`, `cards-${c.card_style}`, `layout-${c.layout}`].map((x) => x.replace(/[^\w-]/g, "")).join(" ");
   const style = c.accent && /^#[0-9a-f]{6}$/i.test(c.accent) ? `--accent:${c.accent};--accent2:${c.accent};` : "";
@@ -176,9 +180,10 @@ function profileHTML(d, { preview = false } = {}) {
     statsParts.push(`<div class="stat" title="${esc(st.best_stage)}"><b>${st.best_xp}</b><span>рекорд XP</span></div>`);
     if (st.sprouts) statsParts.push(`<div class="stat"><b>🌱 ${st.sprouts}</b><span>отростков</span></div>`);
   }
+  const lvl = u.role === "admin" ? `Уровень ∞ · Главный гриб` : `Уровень ${u.level} · ${esc(u.level_name)}`;
   const role = u.role === "admin" ? ` <span class="urating tier-admin">админ</span>` : "";
   const showcase = (d.badges || []).filter((b) => b.showcase);
-  const meta = [c.pronouns && esc(c.pronouns), c.city && `📍 ${esc(c.city)}`, u.created_at && `грибовод с ${new Date(u.created_at).toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}`].filter(Boolean);
+  const meta = [c.pronouns && esc(c.pronouns), c.city && `📍 ${esc(c.city)}`, u.created_at && `грибовод с ${sinceRu(u.created_at)}`].filter(Boolean);
   const pk = d.pinned_kombucha;
   return `<div class="profile-skin ${profileSkin(c).cls}" style="${profileSkin(c).style}">
     <div class="panel profile-card">
@@ -186,7 +191,7 @@ function profileHTML(d, { preview = false } = {}) {
       <div class="profile-head">${avatarHTML(u, "lg")}
         <div class="ph-main"><h1>${esc(u.display_name || u.username)} ${c.status_emoji ? `<span class="status-emoji">${esc(c.status_emoji)}</span>` : ""}${role}</h1>
           <div class="muted">@${esc(u.username)}${meta.length ? " · " + meta.join(" · ") : ""}</div>
-          <div class="level">Уровень ${u.level} · ${esc(u.level_name)}</div>
+          <div class="level">${lvl}</div>
           ${c.status_text ? `<div class="status-line">${esc(c.status_text)}</div>` : ""}
           ${showcase.length ? `<div class="showcase">${showcase.map((b) => `<span class="sc-badge" title="${esc(b.title)}: ${esc(b.description)}">${esc(b.emoji)} ${esc(b.title)}</span>`).join("")}</div>` : ""}
         </div></div>
