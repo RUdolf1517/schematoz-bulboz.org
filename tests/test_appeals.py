@@ -1,8 +1,7 @@
 def test_appeal_flow(make_user):
     admin_c, admin = make_user("admin")
-    mod_c, _ = make_user("moderator")
     victim_c, victim = make_user(username="victim")
-    ban_id = mod_c.post("/mod/bans", json={"user_id": victim["id"], "reason": "спам", "days": 7}).json["ban_id"]
+    ban_id = admin_c.post("/mod/bans", json={"user_id": victim["id"], "reason": "спам", "days": 7}).json["ban_id"]
 
     # забаненный может войти, но не может постить
     from tests.conftest import pass_captcha
@@ -16,11 +15,10 @@ def test_appeal_flow(make_user):
     assert victim_c.post(f"/api/bans/{ban_id}/appeal", json={"text": "Это был не спам, а ссылка на учебник"}).status_code == 200
     assert victim_c.post(f"/api/bans/{ban_id}/appeal", json={"text": "Ещё раз прошу разобраться"}).status_code == 409
 
-    # выдавший бан модератор апелляцию не видит и решить не может
-    assert mod_c.get("/mod/appeals").json["items"] == []
-    assert mod_c.post(f"/mod/appeals/{ban_id}/decide", json={"decision": "accept"}).status_code == 403
-    # другой (админ) — может
-    assert [a["ban_id"] for a in admin_c.get("/mod/appeals").json["items"]] == [ban_id]
+    # модераторов нет: админ разбирает и свои баны (помечены own)
+    items = admin_c.get("/mod/appeals").json["items"]
+    assert [a["ban_id"] for a in items] == [ban_id] and items[0]["own"] is True
+    assert victim_c.get("/mod/appeals").status_code == 403
     r = admin_c.post(f"/mod/appeals/{ban_id}/decide", json={"decision": "accept", "comment": "Разобрались"})
     assert r.json["appeal_status"] == "accepted"
     assert victim_c.get("/api/me/ban").json["ban"] is None

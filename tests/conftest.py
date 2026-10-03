@@ -64,7 +64,7 @@ _n = count(1)
 
 @pytest.fixture()
 def make_user(app):
-    """make_user(role='user'|'moderator'|'admin') -> (client, user_json)"""
+    """make_user(role='user'|'admin') -> (client, user_json)"""
     def _make(role: str = "user", username: str | None = None):
         client = app.test_client()
         name = username or f"user{next(_n)}"
@@ -79,7 +79,7 @@ def make_user(app):
             from app.db import session_scope
             from app.models import Role, UserRole
 
-            codes = {"moderator": ["moderator"], "admin": ["moderator", "admin"]}[role]
+            codes = {"admin": ["admin"]}[role]
 
             async def grant():
                 async with session_scope() as s:

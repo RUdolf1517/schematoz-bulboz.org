@@ -16,6 +16,17 @@ from ..models import Kombucha, KombuchaCodex, MutationCounter, User, WoodTx
 from ..services import kombucha as kb
 from ..services import wood
 from . import bp
+
+
+@bp.before_request
+async def _custom_quotes_cache():
+    """Цитаты из админки живут в Redis; после рестарта кэш поднимается из БД при первом запросе к грибу."""
+    if request.path.startswith("/api/kombucha"):
+        from ..services import quotes
+        try:
+            await quotes.ensure_custom()
+        except Exception:  # noqa: BLE001 — без кастомных цитат гриб всё равно говорит встроенными
+            pass
 from .utils import json_body
 
 NAME_RE = re.compile(r"^[\w\- .ёЁ]{2,32}$")

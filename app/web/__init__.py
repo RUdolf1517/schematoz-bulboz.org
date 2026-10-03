@@ -137,8 +137,9 @@ def banned():
 
 
 @bp.get("/mod")
-def mod_panel():
-    return page("mod.html", "mod")
+def mod():
+    """Модераторов больше нет — баны и апелляции живут в админке."""
+    return redirect("/admin#users", code=301)
 
 
 @bp.get("/admin")

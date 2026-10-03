@@ -241,3 +241,107 @@ async def kb_debug_edit(kid: int):
         log_action(s, g.user.id, "kombucha.debug", "kombucha", kid, **{c: str(v) for c, v in changed.items()})
         await s.flush()
         return {"kombucha": kb.out(k)}
+
+
+# ---------------------------------------------------------------- цитаты гриба
+QUOTE_PERM = "quotes.edit"
+
+
+def _quote_out(q) -> dict:
+    return {"id": q.id, "kind": q.kind, "text": q.body, "author": q.author, "source": q.source,
+            "enabled": q.enabled, "created_at": q.created_at.isoformat() if q.created_at else None}
+
+
+def _quote_fields(data: dict, partial: bool) -> dict:
+    from ..services import quotes
+    out = {}
+    if "kind" in data or not partial:
+        if data.get("kind") not in quotes.KINDS:
+            raise ApiError("kind: dubious | philo", 400, "validation_error", field="kind")
+        out["kind"] = data["kind"]
+    if "text" in data or not partial:
+        body = data.get("text")
+        body = body.strip() if isinstance(body, str) else ""
+        if not 3 <= len(body) <= 400:
+            raise ApiError("Цитата — от 3 до 400 символов", 400, "validation_error", field="text")
+        if not quotes.is_russian(body):
+            raise ApiError("Все цитаты гриба — только на русском", 400, "validation_error", field="text")
+        low = body.lower()
+        if low.startswith(("как говорил", "как сказал", "процитировал")):
+            raise ApiError("Гриб говорит от первого лица — без «как говорил…»", 400, "validation_error", field="text")
+        out["body"] = body
+    for f, n in (("author", 80), ("source", 120)):
+        if f in data:
+            v = data.get(f) or ""
+            if not isinstance(v, str) or len(v.strip()) > n:
+                raise ApiError(f"{f}: строка до {n} символов", 400, "validation_error", field=f)
+            out[f] = v.strip()
+    if "enabled" in data:
+        if not isinstance(data["enabled"], bool):
+            raise ApiError("enabled: true | false", 400, "validation_error", field="enabled")
+        out["enabled"] = data["enabled"]
+    return out
+
+
+@bp.get("/quotes")
+@require_perm(QUOTE_PERM)
+async def quotes_list():
+    from ..models import Quote
+    from ..services import quotes
+    kind = request.args.get("kind")
+    async with session_scope() as s:
+        stmt = select(Quote).order_by(Quote.id.desc())
+        if kind in quotes.KINDS:
+            stmt = stmt.where(Quote.kind == kind)
+        rows = (await s.scalars(stmt.limit(500))).all()
+    return {"items": [_quote_out(q) for q in rows], "kinds": quotes.KINDS,
+            "builtin": {"dubious": len(quotes.DUBIOUS), "philo": len(quotes.PHILO)}}
+
+
+@bp.post("/quotes")
+@require_perm(QUOTE_PERM)
+async def quotes_create():
+    from ..models import Quote
+    from ..services import quotes
+    f = _quote_fields(json_body(), partial=False)
+    async with session_scope() as s:
+        q = Quote(created_by=g.user.id, author=f.pop("author", ""), source=f.pop("source", ""), **f)
+        s.add(q)
+        await s.flush()
+        log_action(s, g.user.id, "quote.add", "quote", q.id, kind=q.kind)
+        await quotes.refresh_custom(s)
+        return {"quote": _quote_out(q)}, 201
+
+
+@bp.patch("/quotes/<int:qid>")
+@require_perm(QUOTE_PERM)
+async def quotes_edit(qid: int):
+    from ..models import Quote
+    from ..services import quotes
+    f = _quote_fields(json_body(), partial=True)
+    async with session_scope() as s:
+        q = await s.get(Quote, qid)
+        if q is None:
+            raise ApiError("Цитата не найдена", 404, "not_found")
+        for k, v in f.items():
+            setattr(q, k, v)
+        log_action(s, g.user.id, "quote.edit", "quote", qid, fields=sorted(f))
+        await s.flush()
+        await quotes.refresh_custom(s)
+        return {"quote": _quote_out(q)}
+
+
+@bp.delete("/quotes/<int:qid>")
+@require_perm(QUOTE_PERM)
+async def quotes_delete(qid: int):
+    from ..models import Quote
+    from ..services import quotes
+    async with session_scope() as s:
+        q = await s.get(Quote, qid)
+        if q is None:
+            raise ApiError("Цитата не найдена", 404, "not_found")
+        await s.delete(q)
+        log_action(s, g.user.id, "quote.delete", "quote", qid)
+        await s.flush()
+        await quotes.refresh_custom(s)
+    return {"ok": True}

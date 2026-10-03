@@ -102,7 +102,7 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
     check(`Q&A-страница ${p} удалена`, r.status === 404);
   }
   d = await open("/mod");
-  check("юзеру панель модерации закрыта", txt(d, "main").includes("Нет доступа"));
+  check("юзеру админка закрыта (/mod → /admin)", txt(d, "main").includes("Нет доступа"));
 
   // 5. Админ
   d.window.document.querySelector("#logout-btn").click(); await sleep(700);
@@ -112,8 +112,9 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   f2.dispatchEvent(new d.window.Event("submit", { cancelable: true }));
   await sleep(900);
   d = await open("/", 1200);
-  check("админ: пункты меню", !d.window.document.querySelector("#me-admin").hidden && !d.window.document.querySelector("#me-mod").hidden);
-  d = await open("/mod", 1300);
+  check("админ: пункт меню, модерации нет", !d.window.document.querySelector("#me-admin").hidden && !d.window.document.querySelector("#me-mod"));
+  d = await open("/admin", 1300);
+  d.window.document.querySelector('[data-tab="bans"]').click(); await sleep(800);
   const mq = d.window.document.querySelector("#mod-q");
   mq.value = "kotik"; mq.dispatchEvent(new d.window.Event("input")); await sleep(1300);
   check("мод-панель: поиск игрока", txt(d, "#mod-users").includes("@kotik"));
@@ -126,10 +127,10 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   d.window.document.querySelector("[data-lift]").click(); await sleep(1500);
   check("мод-панель: бан снят", !!d.window.document.querySelector("[data-ban]"));
   d.window.document.querySelector('[data-tab="appeals"]').click(); await sleep(900);
-  check("апелляции открываются", txt(d, "#panel").includes("Апелляций нет"));
+  check("апелляции открываются", txt(d, "#panel").includes("spamer777"));
   d = await open("/admin", 1200);
   check("админка: грибная аналитика", txt(d, "#panel").includes("Живых грибов"));
-  for (const tab of ["users", "captcha", "legal", "modlog", "kombucha"]) {
+  for (const tab of ["users", "quotes", "captcha", "legal", "modlog", "kombucha"]) {
     d.window.document.querySelector(`[data-tab="${tab}"]`).click(); await sleep(1200);
     check(`админка: вкладка ${tab}`, !txt(d, "#panel").includes("Не удалось") && !txt(d, "#panel").includes("Загружаем"), txt(d, "#panel").slice(0, 60));
   }

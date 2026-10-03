@@ -50,3 +50,16 @@ class Setting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class Quote(Base):
+    """Цитаты гриба, добавленные админом (дополняют встроенный корпус в services/quotes.py)."""
+    __tablename__ = "kombucha_quotes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), index=True)        # dubious — «Погладить»/облачко, philo — «Поговорить»
+    body: Mapped[str] = mapped_column(Text)                         # не `text` — затеняет sqlalchemy.text
+    author: Mapped[str] = mapped_column(String(80), default="")
+    source: Mapped[str] = mapped_column(String(120), default="")
+    enabled: Mapped[bool] = mapped_column(default=True, server_default="true")
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

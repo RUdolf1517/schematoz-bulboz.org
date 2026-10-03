@@ -24,7 +24,7 @@ def test_admin_users_search(make_user):
 
 
 @pytest.mark.parametrize("path", ["/", "/market", "/faq", "/u/someone", "/login", "/register",
-                                  "/banned", "/mod", "/admin", "/rules"])
+                                  "/banned", "/admin", "/rules"])
 def test_pages_render_with_header_and_footer(app, path):
     r = app.test_client().get(path)
     assert r.status_code == 200
@@ -75,3 +75,31 @@ def test_pwa_assets(app):
     assert 'rel="manifest"' in c.get("/").get_data(as_text=True)
     for f in ("icon-192.png", "icon-512.png", "maskable-512.png"):
         assert c.get(f"/static/pwa/{f}").status_code == 200
+
+
+def test_admin_quotes(app, make_user, monkeypatch):
+    admin_c, _ = make_user("admin")
+    c, _ = make_user()
+    body = {"kind": "dubious", "text": "Я пузырюсь, следовательно, существую.", "author": "Гриб Декарт", "source": "банка №1"}
+    assert c.post("/admin/quotes", json=body).status_code == 403
+    for bad in ({**body, "text": "I am a mushroom"}, {**body, "kind": "joke"}, {**body, "text": "Как говорил Ницше, бог умер"},
+                {**body, "text": "ок"}):
+        assert admin_c.post("/admin/quotes", json=bad).status_code == 400, bad
+    q = admin_c.post("/admin/quotes", json=body).get_json()["quote"]
+    assert q["enabled"] and admin_c.get("/admin/quotes?kind=dubious").get_json()["items"][0]["id"] == q["id"]
+
+    # гриб начинает говорить новой цитатой (весь пул — только она)
+    from app.services import quotes
+    monkeypatch.setattr(quotes, "DUBIOUS", [])
+    monkeypatch.setattr(quotes, "REMOTE_SHARE", 0)
+    kid = c.get("/api/kombucha").get_json()["items"][0]["id"]
+    r = c.post(f"/api/kombucha/{kid}/pet", json={}).get_json()
+    assert "Я пузырюсь" in str(r), r
+
+    assert admin_c.patch(f"/admin/quotes/{q['id']}", json={"enabled": False}).get_json()["quote"]["enabled"] is False
+    with app.test_request_context():
+        assert quotes._custom("dubious") == []
+    assert admin_c.patch(f"/admin/quotes/{q['id']}", json={"text": "Я снова тут."}).get_json()["quote"]["text"] == "Я снова тут."
+    assert admin_c.delete(f"/admin/quotes/{q['id']}").status_code == 200
+    assert admin_c.get("/admin/quotes").get_json()["items"] == []
+    assert "quote.add" in [a["action"] for a in admin_c.get("/admin/modlog").get_json()["items"]]

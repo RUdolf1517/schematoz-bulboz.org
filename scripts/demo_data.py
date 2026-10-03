@@ -4,7 +4,6 @@
 
 Аккаунты (пароли только для разработки — в проде не запускать!):
     admin / admin-demo-2026     — администратор (+ модератор)
-    moder / moder-demo-2026     — модератор
     dasha / demo-password       — обычный пользователь
     kotik_na_fizmate, artem, lena_2007 / demo-password
 """
@@ -24,8 +23,7 @@ from app.models import AppealStatus, Ban, Kombucha, Role, User, UserBadge, UserR
 
 ACCOUNTS = [
     # username, password, roles, birth_year
-    ("admin", "admin-demo-2026", ["user", "moderator", "admin"], 1998),
-    ("moder", "moder-demo-2026", ["user", "moderator"], 2002),
+    ("admin", "admin-demo-2026", ["user", "admin"], 1998),
     ("dasha", "demo-password", ["user"], 2009),
     ("kotik_na_fizmate", "demo-password", ["user"], 2006),
     ("artem", "demo-password", ["user"], 2004),
@@ -86,7 +84,7 @@ async def demo():
                     await kb.add_mutation(s, k, pool[(shift + i * 13 + st * 7) % len(pool)], now)
         await s.flush()
 
-        # бан с апелляцией (выдал admin → разбирать может moder)
+        # бан с апелляцией (выдал admin, разбирает тоже admin)
         s.add(Ban(user_id=u["spamer777"].id, issued_by=u["admin"].id, reason="Спам ссылками (п. 2 Правил)",
                   ends_at=now + timedelta(days=7), appeal_status=AppealStatus.PENDING,
                   appeal_text="Я больше не буду, это был не я, это брат с моего аккаунта", appeal_created_at=now))

@@ -6,8 +6,8 @@ from sqlalchemy.exc import DBAPIError
 
 
 def test_mod_user_search_ban_lift_and_modlog(make_user):
-    mod_c, mod = make_user("moderator")
-    admin_c, _ = make_user("admin")
+    mod_c, mod = make_user("admin")
+    admin_c = mod_c
     _, v = make_user(username="griboed_42")
     assert mod_c.get("/mod/users?q=g").json["items"] == []
     items = mod_c.get("/mod/users?q=griboed").json["items"]
@@ -22,7 +22,7 @@ def test_mod_user_search_ban_lift_and_modlog(make_user):
 
 
 def test_ban_blocks_and_revokes_session(make_user):
-    mod_c, _ = make_user("moderator")
+    mod_c, _ = make_user("admin")
     victim_c, victim = make_user()
     r = mod_c.post("/mod/bans", json={"user_id": victim["id"], "reason": "спам", "days": 7})
     assert r.status_code == 201
@@ -34,12 +34,12 @@ def test_admin_permanent_ban_and_roles(make_user):
     c, u = make_user()
     assert admin_c.post("/mod/bans", json={"user_id": u["id"], "reason": "x", "days": None}).status_code == 201
     _, u2 = make_user()
-    r = admin_c.put(f"/admin/users/{u2['id']}/roles", json={"roles": ["user", "moderator"]})
+    r = admin_c.put(f"/admin/users/{u2['id']}/roles", json={"roles": ["user", "admin"]})
     assert r.status_code == 200
 
 
 def test_modlog_is_append_only(app, make_user):
-    mod_c, _ = make_user("moderator")
+    mod_c, _ = make_user("admin")
     _, v = make_user()
     mod_c.post("/mod/bans", json={"user_id": v["id"], "reason": "x", "days": 1})
     from app.db import session_scope

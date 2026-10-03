@@ -102,8 +102,8 @@ def register_cli(app: Flask) -> None:
 
         async def _run():
             async with session_scope() as s:
-                roles = (await s.scalars(select(Role).where(Role.code.in_(["user", "moderator", "admin"])))).all()
-                if len(roles) < 3:
+                roles = (await s.scalars(select(Role).where(Role.code.in_(["user", "admin"])))).all()
+                if len(roles) < 2:
                     raise click.ClickException("Роли ещё не созданы. Сначала: alembic upgrade head && flask --app app seed")
                 taken = await s.scalar(select(User.id).where(or_(
                     User.username == username.lower(), func.lower(User.email) == email.lower())))

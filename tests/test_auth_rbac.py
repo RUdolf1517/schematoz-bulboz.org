@@ -46,15 +46,17 @@ def test_user_cannot_access_mod_or_admin(make_user):
     assert c.get("/admin/modlog").status_code == 403
 
 
-def test_moderator_limits(make_user):
-    mod_c, _ = make_user("moderator")
-    _, victim = make_user()
-    assert mod_c.get("/mod/users?q=ab").status_code == 200
-    assert mod_c.get("/admin/modlog").status_code == 403           # полный лог — только админ
-    r = mod_c.post("/mod/bans", json={"user_id": victim["id"], "reason": "спам", "days": None})
-    assert r.status_code == 403                                     # перманент — только админ
-    r = mod_c.post("/mod/bans", json={"user_id": victim["id"], "reason": "спам", "days": 31})
-    assert r.status_code == 403
+def test_no_moderator_role(app, make_user):
+    from app.permissions import ROLES
+    assert set(ROLES) == {"user", "admin"}
+    admin_c, _ = make_user("admin")
+    c, victim = make_user()
+    assert c.get("/mod/users?q=ab").status_code == 403              # баны — только админ
+    assert admin_c.get("/mod/users?q=ab").status_code == 200
+    assert admin_c.post("/mod/bans", json={"user_id": victim["id"], "reason": "спам", "days": None}).status_code == 201
+    assert admin_c.put(f"/admin/users/{victim['id']}/roles", json={"roles": ["user", "moderator"]}).status_code == 400
+    r = app.test_client().get("/mod")
+    assert r.status_code == 301 and r.headers["Location"].endswith("/admin#users")
 
 
 def test_suspicious_activity_triggers_captcha(app, make_user):

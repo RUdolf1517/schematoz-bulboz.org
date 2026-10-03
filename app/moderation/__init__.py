@@ -1,4 +1,4 @@
-"""Модераторская панель (JSON API): /mod/*"""
+"""Баны и апелляции (JSON API): /mod/*. Модераторов нет — всё это права админа."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -116,14 +116,14 @@ def appeal_out(b: Ban, user: User | None) -> dict:
 @bp.get("/appeals")
 @require_perm("ban.temporary")
 async def appeals():
-    """Очередь апелляций. Свои баны модератор не видит — их разбирает кто-то другой."""
+    """Очередь апелляций (все, включая выданные этим админом — помечены own)."""
     async with session_scope() as s:
         rows = (await s.execute(
             select(Ban, User).join(User, User.id == Ban.user_id)
-            .where(Ban.appeal_status == AppealStatus.PENDING, Ban.issued_by != g.user.id)
+            .where(Ban.appeal_status == AppealStatus.PENDING)
             .order_by(Ban.appeal_created_at)
         )).all()
-    return {"items": [appeal_out(b, u) for b, u in rows]}
+    return {"items": [{**appeal_out(b, u), "own": b.issued_by == g.user.id} for b, u in rows]}
 
 
 @bp.post("/appeals/<int:ban_id>/decide")
@@ -138,8 +138,6 @@ async def decide_appeal(ban_id: int):
         b = await s.get(Ban, ban_id, with_for_update=True)
         if b is None or b.appeal_status != AppealStatus.PENDING:
             raise ApiError("Апелляция не найдена", 404, "not_found")
-        if b.issued_by == g.user.id:
-            raise ApiError("Нельзя рассматривать апелляцию на собственный бан", 403, "own_ban")
         if decision == "accept" and b.ends_at is None and "ban.lift_any" not in g.perms:
             raise ApiError("Перманентный бан снимает только администратор", 403, "forbidden")
         now = datetime.now(timezone.utc)

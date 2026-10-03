@@ -46,4 +46,4 @@ def user_public(u: User) -> dict:
             "avatar_frame": (u.profile or {}).get("avatar_frame", "none"),
             "accent": (u.profile or {}).get("accent"),
             "status_emoji": (u.profile or {}).get("status_emoji", ""),
-            "role": "admin" if u.rating_tier == 2 else "moderator" if u.rating_tier == 1 else "user"}
+            "role": "admin" if u.rating_tier == 2 else "user"}

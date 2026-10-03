@@ -143,11 +143,55 @@ def _remote(kind: str, urls: str, default_author: str) -> dict | None:
     return None
 
 
+# ---------------------------------------------------------------- цитаты из админки
+KINDS = {"dubious": "Спорные (облачко и «Погладить»)", "philo": "Философы («Поговорить»)"}
+CUSTOM_KEY = "quotes:custom:{}"
+CUSTOM_TTL = 3600
+
+
+def _custom(kind: str) -> list[dict]:
+    """Админские цитаты из Redis-кэша (заполняет ensure_custom / refresh_custom)."""
+    try:
+        raw = _redis().get(CUSTOM_KEY.format(kind))
+        return json.loads(raw) if raw else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+async def refresh_custom(s) -> None:
+    from sqlalchemy import select
+    from ..models import Quote
+    rows = (await s.scalars(select(Quote).where(Quote.enabled.is_(True)))).all()
+    r = _redis()
+    for kind in KINDS:
+        items = [{"who": q.author, "text": q.body, "book": q.source} for q in rows if q.kind == kind]
+        r.set(CUSTOM_KEY.format(kind), json.dumps(items, ensure_ascii=False), ex=CUSTOM_TTL)
+
+
+async def ensure_custom() -> None:
+    """Подгрузить кэш, если его нет (рестарт Redis / истёк TTL). Дёшево: один EXISTS."""
+    if _redis().exists(CUSTOM_KEY.format("dubious")):
+        return
+    from ..db import session_scope
+    async with session_scope() as s:
+        await refresh_custom(s)
+
+
+def _pick(builtin_n: int, kind: str):
+    """Встроенные и админские цитаты в одном равновероятном пуле."""
+    custom = _custom(kind)
+    i = rng.randrange(builtin_n + len(custom))
+    return None if i < builtin_n else custom[i - builtin_n]
+
+
 def dubious(remote: bool = True) -> dict:
     if remote and rng.random() < REMOTE_SHARE:
         q = _remote("dubious", current_app.config.get("QUOTES_DUBIOUS_URLS", ""), "Неизвестный мудрец")
         if q:
             return q
+    c = _pick(len(DUBIOUS), "dubious")
+    if c:
+        return {"lines": [{"who": c["who"], "text": c["text"]}], "book": c["book"], "remote": False, "custom": True}
     who, src, text = rng.choice(DUBIOUS)
     return {"lines": [{"who": who, "text": text}], "book": src, "remote": False}
 
@@ -157,6 +201,9 @@ def philosophy() -> dict:
         q = _remote("philo", current_app.config.get("QUOTES_PHILO_URLS", ""), "Неизвестный философ")
         if q:
             return q
+    c = _pick(len(PHILO), "philo")
+    if c:
+        return {"lines": [{"who": c["who"], "text": c["text"]}], "book": c["book"], "remote": False, "custom": True}
     book, lines = rng.choice(PHILO)
     return {"lines": [{"who": w, "text": t} for w, t in lines], "book": book, "remote": False}
 

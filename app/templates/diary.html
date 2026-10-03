@@ -3,7 +3,8 @@
 {% block content %}
 <div id="diary" data-kid="{{ kombucha_id }}">
   <section class="panel kb-diary-head"><p class="muted">Загружаем дневник…</p></section>
-  <section class="panel"><div class="kb-diary" id="diary-list"></div>
+  <section class="panel" id="tree"><h2 style="margin-top:0">🌳 Родословная</h2><div id="kb-tree"><p class="muted">Загружаем род…</p></div></section>
+  <section class="panel"><h2 style="margin-top:0">📖 События</h2><div class="kb-diary" id="diary-list"></div>
     <button class="btn btn-ghost btn-sm" id="diary-more" hidden>Листать дальше</button></section>
 </div>
 {% endblock %}

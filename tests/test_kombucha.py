@@ -443,7 +443,7 @@ def test_admin_kombucha_debug(make_user, no_mutations):
     from app.services.kombucha_mutations import MUTATIONS
     c, u = make_user()
     kid = _first(c)["id"]
-    mc, _ = make_user("moderator")
+    mc, _ = make_user()
     assert mc.get(f"/admin/kombucha?user={u['username']}").status_code == 403   # только админ
     assert mc.patch(f"/admin/kombucha/{kid}", json={"stage": 6}).status_code == 403
     ac, _ = make_user("admin")
@@ -499,3 +499,51 @@ def test_sprout_max_three_times_every_7_days(app, make_user, no_mutations):
         _db(app, week_ago)
     assert counts == [1, 2, 3, 3]                                  # 4-го деления нет
     assert r["sprout"] is None and r["kombucha"]["sprout_progress"]["max"] == 3
+
+
+def test_mold_in_clean_jar(app, make_user, monkeypatch):
+    c, _ = make_user()
+    kid = _first(c)["id"]
+    monkeypatch.setattr(kb.rng, "random", lambda: 0.02)        # < 3% — споры долетели и до чистой банки
+    _edit(app, kid, hours=12, clean=100.0)
+    k = _first(c)
+    assert k["mold"] and k["stats"]["clean"] > 50
+    c2, _ = make_user()
+    kid2 = _first(c2)["id"]
+    monkeypatch.setattr(kb.rng, "random", lambda: 0.05)        # 5%: в чистой нет, в грязной (<20) — есть
+    _edit(app, kid2, hours=12, clean=100.0)
+    assert not _first(c2)["mold"]
+    _edit(app, kid2, hours=12, clean=15.0)
+    assert _first(c2)["mold"]
+
+
+def test_family_tree(app, make_user, no_mutations):
+    from datetime import timedelta as td
+    c, u = make_user()
+    root = _first(c)["id"]
+    _give_wood(app, u["id"], 5000)
+    for _ in range(4):
+        c.post("/api/shop/jar", json={})
+    # прародитель делится дважды, первый ребёнок — ещё раз (внук)
+    kids = []
+    for i in range(2):
+        _edit(app, root, xp=1600, care_days=2, last_care_day=None)
+        kids.append(c.post(f"/api/kombucha/{root}/" + ("pet", "sugar")[i], json={}).get_json()["sprout"]["name"])
+
+        async def back(s):
+            k = await s.get(Kombucha, root)
+            k.last_sprout_at -= td(days=7)
+        _db(app, back)
+    items = {k["name"]: k["id"] for k in _state(c)["items"]}
+    child = items[kids[0]]
+    _edit(app, child, xp=1600, care_days=2, last_care_day=None)
+    grand = c.post(f"/api/kombucha/{child}/pet", json={}).get_json()["sprout"]["name"]
+    gid = {k["name"]: k["id"] for k in _state(c)["items"]}[grand]
+
+    d = app.test_client().get(f"/api/kombucha/{gid}/tree").get_json()   # публично, без входа
+    assert d["root"] == root and d["focus"] == gid and d["ancestors"] == [child, root]
+    by = {n["id"]: n for n in d["nodes"]}
+    assert len(by) == 4 and by[gid]["parent_id"] == child and by[items[kids[1]]]["parent_id"] == root
+    assert by[root]["sprouts"] == 2 and by[root]["owner"] == u["username"]
+    assert app.test_client().get(f"/api/kombucha/{root}/tree").get_json()["ancestors"] == []
+    assert app.test_client().get("/api/kombucha/999999/tree").status_code == 404

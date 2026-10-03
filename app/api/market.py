@@ -252,3 +252,53 @@ async def kombucha_card(kid: int):
     o["owners"] = [{"username": x.get("username"), "at": x.get("at"), "how": x.get("how"), "price": x.get("price")}
                    for x in (k.owners or [])]
     return {"kombucha": o}
+
+
+# ---------------------------------------------------------------- родословная
+TREE_MAX_UP = 30
+TREE_MAX_NODES = 300
+
+
+def _tree_node(k: Kombucha, owner: str) -> dict:
+    muts = k.mutations or []
+    return {"id": k.id, "name": k.name, "owner": owner, "parent_id": k.parent_id, "generation": k.generation,
+            "stage": kb.stage_for(k.xp)["title"], "size": kb.stage_for(k.xp)["size"], "xp": k.xp,
+            "alive": k.alive, "frozen": k.frozen, "sprouts": k.sprout_count or 0,
+            "born_at": k.born_at.isoformat() if k.born_at else None,
+            "mutations": len(muts), "emojis": [m.get("emoji") for m in muts if m.get("emoji")][:4],
+            "inherited": next((m.get("code") for m in muts if m.get("inherited")), None)}
+
+
+@bp.get("/kombucha/<int:kid>/tree")
+async def kombucha_tree(kid: int):
+    """Родственное дерево: предки до корня + все потомки корня (братья, дети, внуки…)."""
+    async with session_scope() as s:
+        async def load(ids):
+            rows = (await s.execute(select(Kombucha, User.username).join(User, User.id == Kombucha.user_id)
+                                    .where(Kombucha.id.in_(ids)))).all()
+            return {k.id: (k, u) for k, u in rows}
+
+        got = await load([kid])
+        if kid not in got:
+            raise ApiError("Гриб не найден", 404, "not_found")
+        nodes = dict(got)
+        ancestors, cur = [], got[kid][0]
+        while cur.parent_id and len(ancestors) < TREE_MAX_UP:          # вверх — к прародителю
+            up = nodes.get(cur.parent_id) or (await load([cur.parent_id])).get(cur.parent_id)
+            if up is None:
+                break
+            nodes[up[0].id] = up
+            ancestors.append(up[0].id)
+            cur = up[0]
+        root = cur.id
+        frontier = [root]                                               # вниз — все ветки рода
+        while frontier and len(nodes) < TREE_MAX_NODES:
+            rows = (await s.execute(select(Kombucha, User.username).join(User, User.id == Kombucha.user_id)
+                                    .where(Kombucha.parent_id.in_(frontier)).order_by(Kombucha.born_at)
+                                    .limit(TREE_MAX_NODES))).all()
+            frontier = [k.id for k, _ in rows if k.id not in nodes]
+            for k, u in rows:
+                nodes.setdefault(k.id, (k, u))
+    return {"root": root, "focus": kid, "ancestors": ancestors,
+            "truncated": len(nodes) >= TREE_MAX_NODES,
+            "nodes": [_tree_node(k, u) for k, u in sorted(nodes.values(), key=lambda x: (x[0].born_at, x[0].id))]}

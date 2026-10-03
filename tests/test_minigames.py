@@ -129,7 +129,7 @@ def test_autoclicker_gets_no_reward(app, make_user, monkeypatch):
     # 3 флага — следующая игра только после капчи
     r = c.post(f"/api/kombucha/{kid}/game/flies/start", json={})
     assert r.status_code == 403 and r.get_json()["error"] == "captcha_required"
-    users = make_user("moderator")[0].get(f"/mod/users?q={u['username']}").get_json()["items"]
+    users = make_user("admin")[0].get(f"/mod/users?q={u['username']}").get_json()["items"]
     assert users[0]["bot_flags"] == 3
 
 

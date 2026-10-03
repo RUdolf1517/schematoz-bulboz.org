@@ -82,7 +82,6 @@ async function loadMe() {
   $("#me-name").textContent = ME.user.username;
   $("#me-avatar").textContent = ME.user.username[0].toUpperCase();
   $("#me-profile").href = `/u/${encodeURIComponent(ME.user.username)}`;
-  $("#me-mod").hidden = !ME.permissions.includes("ban.temporary");
   $("#me-admin").hidden = !ME.permissions.includes("analytics.read");
   setBell(ME.unread_notifications || 0);
   setWood(ME.wood);
@@ -177,7 +176,7 @@ function profileHTML(d, { preview = false } = {}) {
     statsParts.push(`<div class="stat" title="${esc(st.best_stage)}"><b>${st.best_xp}</b><span>рекорд XP</span></div>`);
     if (st.sprouts) statsParts.push(`<div class="stat"><b>🌱 ${st.sprouts}</b><span>отростков</span></div>`);
   }
-  const role = u.role === "admin" ? ` <span class="urating tier-admin">админ</span>` : u.role === "moderator" ? ` <span class="urating tier-mod">модер</span>` : "";
+  const role = u.role === "admin" ? ` <span class="urating tier-admin">админ</span>` : "";
   const showcase = (d.badges || []).filter((b) => b.showcase);
   const meta = [c.pronouns && esc(c.pronouns), c.city && `📍 ${esc(c.city)}`, u.created_at && `грибовод с ${new Date(u.created_at).toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}`].filter(Boolean);
   const pk = d.pinned_kombucha;
@@ -464,12 +463,12 @@ async function pageBanned() {
   if (!ME) { root.innerHTML = `<p>Войди в аккаунт, чтобы посмотреть статус.</p><a class="btn btn-accent" href="/login">Войти</a>`; return; }
   const { ban } = await api("GET", "/api/me/ban");
   if (!ban) { root.innerHTML = `<h1>Всё чисто ✅</h1><p>Активных блокировок нет.</p><a class="btn" href="/">В ленту</a>`; return; }
-  const STATUS = { none: "", pending: "⏳ Апелляция на рассмотрении — её разбирает другой модератор, не тот, кто выдал бан.", accepted: "✅ Апелляция принята.", rejected: "❌ Апелляция отклонена." };
+  const STATUS = { none: "", pending: "⏳ Апелляция на рассмотрении — её разбирает администратор.", accepted: "✅ Апелляция принята.", rejected: "❌ Апелляция отклонена." };
   root.innerHTML = `<h1>Аккаунт заблокирован</h1>
     <p><b>Причина:</b> ${esc(ban.reason)}</p>
     <p><b>Срок:</b> ${ban.ends_at ? "до " + esc(fmtDate(ban.ends_at)) : "навсегда"}</p>
     <p class="muted">Подробнее — в <a href="/rules">правилах сообщества</a>.</p>
-    ${ban.appeal_status !== "none" ? `<p>${STATUS[ban.appeal_status]}</p>${ban.appeal_comment ? `<p class="muted">Комментарий модератора: ${esc(ban.appeal_comment)}</p>` : ""}` : `
+    ${ban.appeal_status !== "none" ? `<p>${STATUS[ban.appeal_status]}</p>${ban.appeal_comment ? `<p class="muted">Комментарий администратора: ${esc(ban.appeal_comment)}</p>` : ""}` : `
     <form class="form" id="appeal-form"><label>Не согласен? Напиши апелляцию (от 10 символов)
       <textarea name="text" rows="5" minlength="10" maxlength="2000" required></textarea></label>
       <button class="btn btn-accent">Отправить апелляцию</button></form>`}`;
@@ -495,7 +494,7 @@ function initPanel(tabs) {
 
 function denied(perm_) {
   if (!ME) { location.href = `/login?next=${encodeURIComponent(here())}`; return true; }
-  if (!perm(perm_)) { $("main").innerHTML = `<div class="panel"><h1>Нет доступа</h1><p class="muted">Этот раздел только для команды модерации.</p></div>`; return true; }
+  if (!perm(perm_)) { $("main").innerHTML = `<div class="panel"><h1>Нет доступа</h1><p class="muted">Этот раздел только для админов.</p></div>`; return true; }
   return false;
 }
 
@@ -524,10 +523,10 @@ async function banDialog(userId, username) {
   });
 }
 
-async function pageMod() {
-  if (denied("ban.temporary")) return;
-  const show = initPanel({
-    async users(panel) {
+// вкладки «Игроки и баны» и «Апелляции» админки (модераторов больше нет)
+function adminBanTabs(show) {
+  return {
+    async bans(panel) {
       panel.innerHTML = `<input class="input" id="mod-q" placeholder="Ник игрока (от 2 букв)"><div id="mod-users" style="margin-top:10px"></div>`;
       const q = $("#mod-q", panel), box = $("#mod-users", panel);
       let tm;
@@ -546,9 +545,9 @@ async function pageMod() {
     },
     async appeals(panel) {
       const { items } = await api("GET", "/mod/appeals");
-      if (!items.length) { panel.innerHTML = `<p class="muted">Апелляций нет. Свои баны ты здесь не видишь — их разбирают коллеги.</p>`; return; }
+      if (!items.length) { panel.innerHTML = `<p class="muted">Апелляций нет 🕊</p>`; return; }
       panel.innerHTML = items.map((a) => `<div class="item" data-bid="${a.ban_id}">
-        <div class="head"><b>@${esc(a.username)}</b><span class="muted">бан ${a.ends_at ? "до " + esc(fmtDate(a.ends_at)) : "навсегда"} · выдал #${a.issued_by}</span></div>
+        <div class="head"><b>@${esc(a.username)}</b>${a.own ? `<span class="pill">твой бан</span>` : ""}<span class="muted">бан ${a.ends_at ? "до " + esc(fmtDate(a.ends_at)) : "навсегда"} · выдал #${a.issued_by}</span></div>
         <p style="font-size:14px"><b>Причина бана:</b> ${esc(a.reason)}</p>
         <div class="quote">${esc(a.text)}</div>
         <input class="input" placeholder="Комментарий для пользователя" data-comment>
@@ -558,14 +557,49 @@ async function pageMod() {
         const item = b.closest(".item");
         try {
           await api("POST", `/mod/appeals/${item.dataset.bid}/decide`, { decision: b.dataset.dec, comment: $("[data-comment]", item).value });
-          toast("Решение сохранено"); show("appeals");
+          toast("Решение сохранено"); show()("appeals");
         } catch (_) {}
       }));
     },
-    async log(panel) {
-      const { items } = await api("GET", "/mod/log");
-      panel.innerHTML = modlogTable(items);
-    },
+  };
+}
+
+// ---------------------------------------------------------------- админ: цитаты гриба
+async function adminQuotes(panel, kind = "") {
+  const d = await api("GET", `/admin/quotes${kind ? `?kind=${kind}` : ""}`);
+  const K = d.kinds;
+  panel.innerHTML = `<form class="panel form" id="q-form"><h3 style="margin-top:0">Новая цитата</h3>
+      <p class="muted" style="font-size:13px">Гриб говорит её сам, от первого лица — без «как говорил…». Только на русском. Автор и источник видны при наведении на облачко.
+        Встроенных цитат: спорных ${d.builtin.dubious}, философских ${d.builtin.philo}; свои добавляются в общий пул.</p>
+      <label>Куда<select name="kind">${Object.entries(K).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select></label>
+      <label>Цитата<textarea name="text" rows="3" maxlength="400" required placeholder="Я — гриб. Этим и интересен."></textarea></label>
+      <div class="row"><label style="flex:1">Автор<input name="author" maxlength="80" placeholder="Владимир Маяковский"></label>
+        <label style="flex:1">Источник<input name="source" maxlength="120" placeholder="«Я сам», 1922"></label></div>
+      <button class="btn btn-accent">Добавить</button></form>
+    <div class="tabs" id="q-kinds"><button data-k="" class="${kind ? "" : "active"}">Все (${kind ? "…" : d.items.length})</button>${Object.entries(K).map(([k, v]) => `<button data-k="${k}" class="${kind === k ? "active" : ""}">${esc(v.split(" (")[0])}</button>`).join("")}</div>
+    <div id="q-list">${d.items.length ? d.items.map((q) => `<div class="item q-item${q.enabled ? "" : " q-off"}" data-qid="${q.id}">
+        <div class="head"><span class="pill">${esc(K[q.kind].split(" (")[0])}</span><span class="muted">${esc(q.author || "без автора")}${q.source ? ` · ${esc(q.source)}` : ""}</span></div>
+        <div class="quote">${esc(q.text)}</div>
+        <div class="btns" style="margin-top:8px"><button class="btn btn-sm btn-ghost" data-toggle>${q.enabled ? "🙈 Выключить" : "👁 Включить"}</button>
+          <button class="btn btn-sm btn-ghost" data-edit>✏️ Изменить</button><button class="btn btn-sm btn-danger" data-del>Удалить</button></div></div>`).join("")
+      : `<p class="muted">Своих цитат пока нет — гриб говорит встроенными.</p>`}</div>`;
+  const reload = () => adminQuotes(panel, kind);
+  $("#q-form", panel).onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try { await api("POST", "/admin/quotes", { kind: f.get("kind"), text: f.get("text"), author: f.get("author"), source: f.get("source") }); toast("Цитата добавлена 🍄"); reload(); } catch (_) {}
+  };
+  $$("#q-kinds [data-k]", panel).forEach((b) => (b.onclick = () => adminQuotes(panel, b.dataset.k)));
+  const byId = new Map(d.items.map((q) => [q.id, q]));
+  $$(".q-item", panel).forEach((el) => {
+    const q = byId.get(Number(el.dataset.qid));
+    $("[data-toggle]", el).onclick = async () => { try { await api("PATCH", `/admin/quotes/${q.id}`, { enabled: !q.enabled }); reload(); } catch (_) {} };
+    $("[data-del]", el).onclick = async () => { if (!confirm("Удалить цитату?")) return; try { await api("DELETE", `/admin/quotes/${q.id}`); reload(); } catch (_) {} };
+    $("[data-edit]", el).onclick = async () => {
+      const text = prompt("Текст цитаты:", q.text);
+      if (text == null || text.trim() === q.text) return;
+      try { await api("PATCH", `/admin/quotes/${q.id}`, { text }); toast("Сохранено"); reload(); } catch (_) {}
+    };
   });
 }
 
@@ -660,7 +694,10 @@ async function kbDebugPanel(panel, login = "", selId = null) {
 
 async function pageAdmin() {
   if (denied("analytics.read")) return;
-  initPanel({
+  let show;
+  show = initPanel({
+    ...adminBanTabs(() => show),
+    async quotes(panel) { await adminQuotes(panel); },
     async kombucha(panel) { await kbDebugPanel(panel); },
     async analytics(panel) {
       const a = await api("GET", "/admin/analytics");
@@ -669,7 +706,7 @@ async function pageAdmin() {
     },
     async users(panel) {
       panel.innerHTML = `<input class="input" id="user-q" placeholder="Поиск по нику или email"><div id="user-list" style="margin-top:12px"></div>`;
-      const ROLES = ["user", "moderator", "admin"];
+      const ROLES = ["user", "admin"];
       const load = async () => {
         const { items } = await api("GET", `/admin/users?q=${encodeURIComponent($("#user-q").value)}`);
         $("#user-list").innerHTML = `<table class="list"><tr><th>Ник</th><th>Email</th><th>Роли</th><th></th></tr>${items.map((u) => `<tr data-uid="${u.id}">
@@ -1421,7 +1458,7 @@ async function pageKombucha() {
         ${kombuchaSVG(k)}
       </div>
       <div class="kb-info">
-        <div class="kb-name"><h2>${esc(k.name)}</h2><button class="link-btn" data-rename title="Переименовать">✏️</button><a class="link-btn kb-diary-link" href="/g/${k.id}" title="Дневник гриба — можно поделиться">📖 Дневник</a></div>
+        <div class="kb-name"><h2>${esc(k.name)}</h2><button class="link-btn" data-rename title="Переименовать">✏️</button><a class="link-btn kb-diary-link" href="/g/${k.id}" title="Дневник гриба — можно поделиться">📖 Дневник</a><a class="link-btn kb-diary-link" href="/g/${k.id}#tree" title="Родственное дерево">🌳 Род</a></div>
         <div class="kb-mood mood-${k.mood}">${KB_MOOD[k.mood]?.[0] || ""} ${esc(KB_MOOD[k.mood]?.[1] || "")}</div>
         <div class="kb-stage">${esc(st.title)} · ${k.age_days} дн.${k.generation > 1 ? ` · поколение ${k.generation}` : ""}${k.is_sprout ? " · отросток" : ""}</div>
         <div class="kb-xp"><div class="kb-xp-bar"><span style="width:${pct}%"></span></div>
@@ -1712,7 +1749,31 @@ async function pageDiary() {
     next = d.next; more.hidden = !next;
   };
   more.onclick = load;
+  kbTree($("#kb-tree"), kid);
   await load();
+  if (location.hash === "#tree") $("#tree")?.scrollIntoView();
+}
+
+// 🌳 Родственное дерево: предки → прародитель → все ветки. Свой гриб подсвечен.
+async function kbTree(box, kid) {
+  let d;
+  try { d = await api("GET", `/api/kombucha/${kid}/tree`, undefined, { quiet: true }); } catch (_) { box.innerHTML = `<p class="muted">Род не нашёлся.</p>`; return; }
+  const by = new Map(d.nodes.map((n) => [n.id, { ...n, kids: [] }]));
+  for (const n of by.values()) if (n.parent_id && by.has(n.parent_id) && n.id !== d.root) by.get(n.parent_id).kids.push(n);
+  const line = new Set([...d.ancestors, d.focus]);
+  const node = (n) => `<li${line.has(n.id) ? ' class="on-line"' : ""}>
+    <a class="kb-tree-node${n.id === d.focus ? " focus" : ""}${n.alive ? "" : " dead"}" href="/g/${n.id}#tree" title="${esc(n.stage)} · ${n.xp} XP · мутаций ${n.mutations}">
+      <span class="kb-tree-e">${n.alive ? (n.frozen ? "🧊" : "🍄") : "🪦"}</span>
+      <span class="kb-tree-t"><b>${esc(n.name)}</b><small>${esc(n.stage)} · @${esc(n.owner)}</small>
+        <small>${n.emojis.map(esc).join("")}${n.mutations > n.emojis.length ? ` +${n.mutations - n.emojis.length}` : ""}${n.sprouts ? ` · 🌱${n.sprouts}` : ""}</small></span></a>
+    ${n.kids.length ? `<ul>${n.kids.map(node).join("")}</ul>` : ""}</li>`;
+  const total = d.nodes.length;
+  const desc = (n) => n.kids.reduce((a, c) => a + 1 + desc(c), 0);
+  const me = by.get(Number(kid));
+  box.innerHTML = total === 1
+    ? `<p class="muted">Гриб — основатель рода, родственников пока нет. На последней стадии он может разделиться (раз в 7 дней, до 3 раз) — и род начнётся 🌱</p>${`<ul class="kb-tree">${node(by.get(d.root))}</ul>`}`
+    : `<p class="muted">В роду ${total} ${plural(total, "гриб", "гриба", "грибов")} · предков у этого: ${d.ancestors.length} · потомков: ${desc(me)}${d.truncated ? " · показаны не все" : ""}</p>
+       <div class="kb-tree-wrap"><ul class="kb-tree">${node(by.get(d.root))}</ul></div>`;
 }
 
 async function pageHome() {
@@ -1728,7 +1789,7 @@ async function pageHome() {
 
 const PAGES = {
   home: pageHome, diary: pageDiary, kombucha: pageKombucha, market: pageMarket, wallet: pageWallet,
-  profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, notifications: pageNotifications, mod: pageMod, admin: pageAdmin,
+  profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, notifications: pageNotifications, admin: pageAdmin,
   settings: pageSettings, faq: pageFaq,
 };
 

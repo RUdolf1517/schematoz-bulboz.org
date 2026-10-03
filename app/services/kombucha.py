@@ -44,7 +44,8 @@ PERIOD = timedelta(hours=12)
 DROP = {"sweet": 20.0, "tea": 15.0, "clean": 10.0, "happy": 15.0}  # за каждые 12 часов
 DEATH_AFTER = timedelta(hours=48)   # 2 суток на нуле — время вернуться с выходных
 MOLD_CLEAN_BELOW = 20.0      # ниже этой чистоты может завестись плесень
-MOLD_CHANCE = 0.10           # шанс на каждой ступеньке
+MOLD_CHANCE = 0.10          # в грязной банке
+MOLD_CHANCE_CLEAN = 0.03    # и даже в чистой — споры летают везде           # шанс на каждой ступеньке
 MOLD_EXTRA = {"clean": 10.0, "happy": 15.0}
 LOW_STAT = 15.0              # если хоть что-то ниже — опыт за уход /2
 STICKY_ABOVE = 85.0
@@ -198,7 +199,7 @@ def tick(k: Kombucha, at: datetime | None = None) -> None:
         step_at = k.updated_at + PERIOD * (i + 1)
         if k.zero_since and step_at - k.zero_since >= DEATH_AFTER:
             break
-        if not k.mold and k.clean < MOLD_CLEAN_BELOW and rng.random() < MOLD_CHANCE:
+        if not k.mold and rng.random() < (MOLD_CHANCE if k.clean < MOLD_CLEAN_BELOW else MOLD_CHANCE_CLEAN):
             k.mold = True
         for s in STATS:
             setattr(k, s, max(getattr(k, s) - DROP[s] - (MOLD_EXTRA.get(s, 0.0) if k.mold else 0.0), 0.0))
