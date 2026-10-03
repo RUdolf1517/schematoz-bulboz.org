@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Деревянные — schematoz-bulboz.org{% endblock %}
+{% block content %}
+<div id="wallet">
+  <section class="panel wallet-hero">
+    <div class="wallet-coin">$₽</div>
+    <div><div class="muted">Твой баланс</div><div class="wallet-balance" id="w-balance">…</div>
+      <div class="muted wallet-sub">«Деревянные» — валюта сайта. Начисляются за уход за грибом и мини-игры, тратятся в <a href="/">магазине чайного гриба</a>. За рубли не покупаются и не выводятся.</div></div>
+  </section>
+  <section class="panel"><h2>Как заработать</h2><div class="wallet-rules" id="w-rules"></div></section>
+  <section class="panel"><h2>История</h2><div id="w-history" class="wallet-history"><p class="muted">Загружаем…</p></div>
+    <button class="btn btn-ghost btn-sm" id="w-more" hidden>Показать ещё</button></section>
+</div>
+{% endblock %}

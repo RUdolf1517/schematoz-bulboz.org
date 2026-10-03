@@ -1,0 +1,21 @@
+{
+  "name": "schematoz-bulboz — чайный гриб",
+  "short_name": "Бульбоз",
+  "description": "Тамагочи про чайный гриб: уход, мутации, мини-игры и рынок",
+  "lang": "ru",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e0e12",
+  "theme_color": "#0e0e12",
+  "icons": [
+    {"src": "/static/pwa/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/static/pwa/icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "/static/pwa/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ],
+  "shortcuts": [
+    {"name": "Мой гриб", "url": "/", "icons": [{"src": "/static/pwa/icon-192.png", "sizes": "192x192"}]},
+    {"name": "Рынок", "url": "/market", "icons": [{"src": "/static/pwa/icon-192.png", "sizes": "192x192"}]}
+  ]
+}

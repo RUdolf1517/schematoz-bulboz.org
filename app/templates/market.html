@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Грибной рынок — schematoz-bulboz.org{% endblock %}
+{% block content %}
+<div id="market">
+  <header class="kb-header">
+    <h1>🛒 Грибной рынок</h1>
+    <p class="muted">Покупай и продавай замороженные чайные грибы за «Деревянные». Цену назначает продавец, продавцу уходит 95%, 5% комиссии сгорает. Редкие мутации с маленьким номером ценятся дороже 😉</p>
+  </header>
+  <section class="panel">
+    <div class="mk-filters">
+      <button class="chip active" data-sort="new">Новые</button>
+      <button class="chip" data-sort="cheap">Дешёвые</button>
+      <button class="chip" data-sort="rare">Редкие</button>
+      <select class="input" id="mk-rarity" aria-label="Редкость">
+        <option value="">Любая редкость</option><option value="legendary">🌟 Легендарные</option>
+        <option value="epic">💜 Эпические</option><option value="rare">💙 Редкие</option><option value="common">Обычные</option>
+      </select>
+    </div>
+    <div class="kb-shelf" id="mk-list"><p class="muted">Загружаем…</p></div>
+  </section>
+  <section class="panel" id="trades"><h2>🔄 Обмены и подарки</h2><div id="mk-trades"><p class="muted">Загружаем…</p></div></section>
+</div>
+{% endblock %}
