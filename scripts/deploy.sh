@@ -71,7 +71,15 @@ sync_db_role() {
   if command -v pg_lsclusters >/dev/null; then
     if ! pg_lsclusters -h | awk '{print $3}' | grep -qx "$port"; then
       pg_lsclusters
-      die "в DATABASE_URL порт $port, а кластера PostgreSQL на нём нет (список выше) — поправь порт в .env"
+      local ports; ports=$(pg_lsclusters -h | awk '{print $3}' | sort -u)
+      if [ "$(wc -l <<<"$ports")" -eq 1 ] && [ -n "$ports" ]; then
+        log "В .env порт $port, а PostgreSQL один и слушает $ports — исправляю .env"
+        cp "$APP_DIR/.env" "$APP_DIR/.env.bak-$(date +%s)"
+        sed -i -E "s#^(DATABASE_URL=[^@]*@[^:/]+)(:[0-9]+)?/#\\1:$ports/#" "$APP_DIR/.env"
+        port=$ports
+      else
+        die "в DATABASE_URL порт $port, а кластера на нём нет; кластеров несколько (список выше) — укажи нужный порт в .env"
+      fi
     fi
     pg_lsclusters -h | awk -v p="$port" '$3==p && $4!="online" {print $1, $2}' | while read -r v c; do
       log "Запускаю кластер PostgreSQL $v/$c"; pg_ctlcluster "$v" "$c" start; done
