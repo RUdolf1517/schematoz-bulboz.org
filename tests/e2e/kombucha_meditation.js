@@ -51,9 +51,9 @@ const check = (n, ok, extra = "") => console.log(`${ok ? "✅" : "❌"} ${n}${ok
     }
     return r;
   };
-  await sleep(1500); const btn = doc.querySelector("[data-meditate]");
+  await sleep(1500); const btn = doc.querySelector("[data-games]");
   check("кнопка «Медитация гриба» есть", !!btn);
-  doc.querySelector("[data-meditate]").click(); await sleep(2500); console.log("   toast:", doc.querySelector(".toast")?.textContent || "-");
+  btn.click(); await sleep(1200); doc.querySelector('[data-game="meditation"]').click(); await sleep(2500); console.log("   toast:", doc.querySelector(".toast")?.textContent || "-");
   check("открылся экран медитации, интерфейс скрыт", !!doc.querySelector(".kb-med") && doc.body.classList.contains("kb-med-on"));
   check("ритм пришёл с сервера", track && track.beats.length === 24, JSON.stringify(track)?.slice(0, 80));
   if (!track) { console.log(errors.join("\n")); return; }

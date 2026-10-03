@@ -8,7 +8,7 @@ from sqlalchemy import func, or_, select
 
 from ..auth.passwords import hash_password, verify_password
 from ..auth.rbac import active_global_ban, login_required
-from ..auth.sessions import login_user, logout_user
+from ..auth.sessions import login_user, logout_user, revoke_all_sessions
 from ..db import session_scope
 from ..errors import ApiError
 from ..models import LegalPage, Role, User, UserConsent, UserRole
@@ -78,6 +78,38 @@ async def login():
     ban = await active_global_ban(user.id)
     login_user(user.id)
     return {"user": user_public(user), "banned": ban is not None}
+
+
+@bp.post("/auth/password")
+@login_required
+@captcha_required()  # после 6 неверных текущих паролей за 15 минут — капча
+async def change_password():
+    """{current_password, new_password}. Все остальные сессии выходят, текущая остаётся (с новым sid)."""
+    data = json_body()
+    current = data.get("current_password")
+    new = data.get("new_password")
+    if not isinstance(current, str) or not current:
+        raise ApiError("Введи текущий пароль", 400, "validation_error", field="current_password")
+    if not isinstance(new, str) or not 8 <= len(new) <= 128:
+        raise ApiError("Новый пароль — от 8 до 128 символов", 400, "validation_error", field="new_password")
+    if new.strip() != new or not new.strip():
+        raise ApiError("Пароль не должен начинаться или заканчиваться пробелом", 400, "validation_error", field="new_password")
+    async with session_scope() as s:
+        user = await s.get(User, g.user.id, with_for_update=True)
+        if not verify_password(user.password_hash, current):
+            if antispam.hit_rate("pwd_fail", antispam.client_key(), 5, 900):
+                antispam.mark_suspicious(antispam.client_key(), "password_bruteforce")
+            raise ApiError("Текущий пароль неверный", 400, "invalid_password", field="current_password")
+        if verify_password(user.password_hash, new):
+            raise ApiError("Новый пароль совпадает со старым", 400, "same_password", field="new_password")
+        if new.lower() in {user.username.lower(), (user.email or "").lower()}:
+            raise ApiError("Пароль не должен совпадать с ником или email", 400, "weak_password", field="new_password")
+        user.password_hash = hash_password(new)
+        from ..services.modlog import log_action
+        log_action(s, user.id, "password.change", "user", user.id)
+    revoke_all_sessions(g.user.id)      # выкидываем все устройства (вдруг пароль утёк)…
+    login_user(g.user.id)                # …кроме этого
+    return {"ok": True}
 
 
 @bp.post("/auth/logout")

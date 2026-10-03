@@ -1,3 +1,4 @@
+from kremle_detect.integrations.flask_ext import SESSION_KEY
 from tests.conftest import pass_captcha
 
 
@@ -69,3 +70,40 @@ def test_suspicious_activity_triggers_captcha(app, make_user):
     pass_captcha(c)
     assert c.post("/api/market/999/buy", json={}).status_code == 404
     assert c.post("/api/market/998/buy", json={}).status_code == 404
+
+
+def test_change_password(app, make_user):
+    c, u = make_user()
+    other = app.test_client()
+    pass_captcha(other)
+    assert other.post("/api/auth/login", json={"login": u["username"], "password": "correct-horse"}).status_code == 200
+    assert app.test_client().post("/api/auth/password", json={}).status_code == 401
+    bad = [({"current_password": "nope-nope", "new_password": "new-secret-1"}, "invalid_password"),
+           ({"current_password": "correct-horse", "new_password": "short"}, "validation_error"),
+           ({"current_password": "correct-horse", "new_password": "correct-horse"}, "same_password"),
+           ({"current_password": "correct-horse", "new_password": " spaced-pass "}, "validation_error"),
+           ({"current_password": "correct-horse", "new_password": "x" * 129}, "validation_error")]
+    for body, err in bad:
+        r = c.post("/api/auth/password", json=body)
+        assert r.status_code == 400 and (err is None or r.json["error"] == err), (body, r.json)
+    r = c.post("/api/auth/password", json={"current_password": "correct-horse", "new_password": "new-secret-1"})
+    assert r.status_code == 200
+    assert c.get("/api/auth/me").status_code == 200                 # текущая сессия жива
+    assert other.get("/api/auth/me").status_code == 401             # остальные выкинуты
+    fresh = app.test_client()
+    pass_captcha(fresh)
+    assert fresh.post("/api/auth/login", json={"login": u["username"], "password": "correct-horse"}).status_code == 401
+    pass_captcha(fresh)
+    assert fresh.post("/api/auth/login", json={"login": u["username"], "password": "new-secret-1"}).status_code == 200
+
+
+def test_change_password_bruteforce_captcha(make_user):
+    c, _ = make_user()
+    with c.session_transaction() as sess:      # убираем «запасную» капчу с регистрации
+        sess.pop(SESSION_KEY, None)
+    for _ in range(6):
+        c.post("/api/auth/password", json={"current_password": "wrong-pass", "new_password": "new-secret-1"})
+    r = c.post("/api/auth/password", json={"current_password": "correct-horse", "new_password": "new-secret-1"})
+    assert r.status_code == 403 and r.json["error"] == "captcha_required"
+    pass_captcha(c)
+    assert c.post("/api/auth/password", json={"current_password": "correct-horse", "new_password": "new-secret-1"}).status_code == 200

@@ -235,7 +235,7 @@ async function pageSettings() {
   const field = (label, control, hint = "") => `<div class="st-field"><span class="st-label">${label}</span>${control}${hint ? `<small class="st-hint">${hint}</small>` : ""}</div>`;
   const text = (name, val, max, ph = "") => `<input class="input" name="${name}" maxlength="${max}" placeholder="${esc(ph)}" value="${esc(val)}">`;
   const lvl = d.user.level, unlimited = d.user.role !== "user";
-  const SECTIONS_UI = [["basic", "👤", "Основное"], ["media", "🖼", "Аватар"], ["look", "🎨", "Оформление"], ["links", "🏷", "Интересы"], ["show", "🏆", "Витрина"], ["privacy", "🙈", "Приватность"]];
+  const SECTIONS_UI = [["basic", "👤", "Основное"], ["media", "🖼", "Аватар"], ["look", "🎨", "Оформление"], ["links", "🏷", "Интересы"], ["show", "🏆", "Витрина"], ["privacy", "🙈", "Приватность"], ["password", "🔐", "Пароль"]];
   $("#st-nav").innerHTML = SECTIONS_UI.map(([id, e, t]) => `<a href="#st-${id}">${e} ${t}</a>`).join("");
   form.innerHTML = `
     <section class="st-card" id="st-basic"><h2>👤 Основное</h2>
@@ -366,7 +366,25 @@ async function pageSettings() {
     } catch (_) {}
   };
   preview();
+  passwordForm($("#pwd-form"), d.user.username);
   loginKeysPanel($("#login-keys"));
+}
+
+function passwordForm(f, username) {
+  if (!f) return;
+  f.elements.username.value = username;     // для менеджеров паролей
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const cur = f.elements.current_password.value, n1 = f.elements.new_password.value, n2 = f.elements.new_password2.value;
+    if (n1 !== n2) return toast("Новые пароли не совпадают", true);
+    if (n1.length < 8) return toast("Новый пароль — от 8 символов", true);
+    const btn = f.querySelector("button"); btn.disabled = true;
+    try {
+      await api("POST", "/api/auth/password", { current_password: cur, new_password: n1 });
+      f.reset(); f.elements.username.value = username;
+      toast("Пароль изменён 🔐 Другие устройства вышли из аккаунта");
+    } catch (_) {} finally { btn.disabled = false; }
+  };
 }
 
 // ---------------------------------------------------------------- auth

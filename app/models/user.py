@@ -58,7 +58,7 @@ class User(TimestampMixin, Base):
     # ISO-неделя последней использованной заморозки стрика, например "2026-W39"
     streak_freeze_week: Mapped[str | None] = mapped_column(String(8))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # Рейтинг юзера (формула в services/rating.py). rating_tier: 2 — админ (∞), 1 — модер (∞, но ниже админа), 0 — все
+    # Рейтинг юзера (формула в services/rating.py). rating_tier: 2 — админ (∞), 0 — все
     rating: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     rating_tier: Mapped[int] = mapped_column(SmallInteger, default=0, server_default="0")
     # Кастомизация профиля: обложка + JSON с настройками (схема и валидация — services/profile_custom.py)

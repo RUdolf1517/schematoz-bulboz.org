@@ -139,6 +139,7 @@ $₽ начисляются **только** за уход за грибом, м
 |---|---|---|
 | POST | `/api/auth/register`, `/api/auth/login`, `/api/auth/login-file`, `/api/auth/logout` · GET `/api/auth/me` | — |
 | GET / POST / DELETE | `/api/auth/login-keys[/<id>]` | вход |
+| POST | `/api/auth/password` — смена пароля `{current_password, new_password}`; остальные сессии отзываются, перебор → капча | вход |
 | GET | `/api/kombucha` · `/api/kombucha/top` · `/api/wallet` | вход / — / вход |
 | POST | `/api/kombucha/<id>/<sugar\|tea\|clean\|pet\|talk\|cure\|daily>` | вход |
 | POST | `/api/kombucha/<id>/game/<pour\|memory\|sugar\|flies>/start\|finish`, `/meditate/start\|finish` | вход |

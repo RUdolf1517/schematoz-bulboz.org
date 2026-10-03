@@ -11,6 +11,15 @@
     <div class="st-col">
       <nav class="st-nav" id="st-nav"></nav>
       <form class="st-form form" id="settings-form" novalidate><p class="muted">Загружаем…</p></form>
+      <section class="st-card" id="st-password"><h2>🔐 Смена пароля</h2>
+        <form class="form" id="pwd-form" autocomplete="on">
+          <input type="text" name="username" autocomplete="username" hidden>
+          <label>Текущий пароль<input class="input" type="password" name="current_password" autocomplete="current-password" required></label>
+          <label>Новый пароль<input class="input" type="password" name="new_password" autocomplete="new-password" minlength="8" maxlength="128" required></label>
+          <label>Ещё раз<input class="input" type="password" name="new_password2" autocomplete="new-password" minlength="8" maxlength="128" required></label>
+          <small class="st-hint">От 8 символов. После смены выйдешь на всех других устройствах. Файлы входа продолжат работать — отзови их ниже, если боишься утечки.</small>
+          <button class="btn btn-accent">Сменить пароль</button>
+        </form></section>
       <section class="st-card" id="login-keys"></section>
     </div>
     <aside class="st-aside">
