@@ -98,7 +98,13 @@ systemctl reload nginx
 if [ -n "$EMAIL" ]; then
     echo "→ HTTPS через certbot"
     apt-get install -y -qq certbot python3-certbot-nginx >/dev/null
-    certbot --nginx -n --agree-tos -m "$EMAIL" --redirect -d "$DOMAIN" -d "www.$DOMAIN"
+    # www.ДОМЕН добавляем в сертификат, только если для него есть DNS-запись — иначе certbot упадёт
+    if getent hosts "www.$DOMAIN" >/dev/null; then
+        certbot --nginx -n --agree-tos -m "$EMAIL" --redirect -d "$DOMAIN" -d "www.$DOMAIN"
+    else
+        echo "  (www.$DOMAIN не найден в DNS — сертификат только на $DOMAIN)"
+        certbot --nginx -n --agree-tos -m "$EMAIL" --redirect -d "$DOMAIN"
+    fi
 fi
 
 cat <<EOF
