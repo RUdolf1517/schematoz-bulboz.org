@@ -40,6 +40,15 @@ hypercorn "app.asgi:asgi_app" --bind 0.0.0.0:8000
 
 ### Прод
 
+**Установка на сервер одной командой** (Ubuntu 24.04 / Debian 12+, домен уже смотрит на сервер):
+
+```bash
+git clone https://github.com/RUdolf1517/schematoz-bulboz.org.git && cd schematoz-bulboz.org
+sudo ./scripts/deploy.sh schematoz-bulboz.org you@mail.ru
+```
+
+Ставит PostgreSQL, Redis, Python 3.12, создаёт базу и `.env` со случайными секретами, миграции, админа (пароль печатается в конце), systemd-сервис, nginx + HTTPS, ежедневные бэкапы и файрвол. Обновление: `git pull && sudo ./scripts/deploy.sh --update`.
+
 nginx перед приложением: `sudo ./scripts/install_nginx.sh твой-домен.ru почта@для-letsencrypt.ru` — ставит nginx, отдаёт `/static` и `/media` с диска, проксирует остальное на `127.0.0.1:8000`, rate limit на `/api`, HTTPS через certbot (если указан email).
 
 ```bash
