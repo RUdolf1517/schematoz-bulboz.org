@@ -69,11 +69,7 @@ def make_track(seed: int) -> dict:
 def start(user_id: int, k) -> dict:
     if not k.alive or k.frozen:
         raise ApiError("Медитировать может только живой и незамороженный гриб", 400, "kb_unavailable")
-    r = get_redis()
-    left = r.ttl(f"med:cd:{k.id}")
-    if left and left > 0:
-        raise ApiError(f"Гриб ещё отдыхает после медитации: {left // 60} мин {left % 60} с", 429, "kb_cooldown",
-                       retry_after=left)
+    r = get_redis()   # медитировать можно без ограничений, награда — раз в COOLDOWN
     token = secrets.token_urlsafe(16)
     seed = rng.getrandbits(32)
     track = make_track(seed)
@@ -162,7 +158,12 @@ async def finish(s, user, k, token: str, taps, meta=None) -> dict:
     if reason:
         res = {**res, "accuracy": 0.0, "suspect": reason, "bot_flags": antibot.register(user.id, reason)}
     acc = res["accuracy"]
-    r.set(f"med:cd:{k.id}", 1, ex=COOLDOWN)
+    left = r.ttl(f"med:cd:{k.id}")
+    if left and left > 0:
+        return {**res, "practice": True, "reward_in": int(left), "mut_why": "practice", "happy": 0, "xp": 0,
+                "wood": 0, "mutation": None, "cooldown": COOLDOWN, "grade": grade(acc)}
+    if not reason:
+        r.set(f"med:cd:{k.id}", 1, ex=COOLDOWN)
 
     kb.tick(k)
     happy = round(25 * acc)

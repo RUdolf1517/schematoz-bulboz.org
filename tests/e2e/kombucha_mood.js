@@ -47,6 +47,6 @@ const check = (n, ok, extra = "") => console.log(`${ok ? "✅" : "❌"} ${n}${ok
   check("коллекция свёрнута по умолчанию", cx && !cx.open);
   cx.querySelector("summary").click(); await sleep(200);
   check("коллекция разворачивается", cx.open && d.window.localStorage.getItem("fold:kb-codex") === "1");
-  check("деление: только на последней стадии", /делится только на последней стадии|Деление \d/\d/.test(txt(d, ".kb-main")));
+  check("деление: только на последней стадии", /делится только на последней стадии|Деление \d+\/\d+/.test(txt(d, ".kb-main")));
   console.log(errors.length ? "JS errors:\n" + errors.join("\n") : "JS errors: none");
 })();

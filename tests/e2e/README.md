@@ -6,7 +6,7 @@
 
 ```bash
 ./scripts/reset_dev_db.sh
-DATABASE_URL=$(.venv/bin/python scripts/dev_pg.py) REDIS_URL=memory:// DEMO_MODE=1 \
+DATABASE_URL=$(.venv/bin/python scripts/dev_pg.py) REDIS_URL=memory:// DEMO_MODE=1 ANTIBOT_DISABLED=1 \
   .venv/bin/hypercorn app.asgi:asgi_app --bind 127.0.0.1:8001 &
 cd tests/e2e && npm i jsdom@24 && NODE_PATH=$PWD/node_modules node smoke.js
 ```

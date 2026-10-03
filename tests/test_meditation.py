@@ -47,9 +47,9 @@ def test_meditation_flow(make_user, monkeypatch):
     # повтор той же сессии — нельзя
     again = c.post(f"/api/kombucha/{kid}/meditate/finish", json={"token": t["token"], "taps": t["beats"]})
     assert again.status_code == 400
-    # кулдаун
-    cd = c.post(f"/api/kombucha/{kid}/meditate/start", json={})
-    assert cd.status_code == 429 and cd.get_json()["error"] == "kb_cooldown"
+    # кулдауна на игру нет — только на награду
+    t2 = c.post(f"/api/kombucha/{kid}/meditate/start", json={})
+    assert t2.status_code == 200
 
 
 def test_meditation_foreign_and_limits(make_user, monkeypatch):

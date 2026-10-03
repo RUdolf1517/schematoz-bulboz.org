@@ -893,3 +893,4 @@ body.kb-med-on { overflow: hidden; }
 .kb-tree-t{display:flex;flex-direction:column;line-height:1.25}
 .kb-tree-t small{color:var(--muted);font-size:12px}
 .q-off{opacity:.5}
+.kb-practice{background:rgba(120,200,255,.12);border-radius:10px;padding:6px 10px}

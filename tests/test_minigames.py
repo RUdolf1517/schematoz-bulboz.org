@@ -85,7 +85,13 @@ def test_memory_flow(make_user, monkeypatch):
     # клиент не может «приписать» себе больше: итог хранит сервер
     fin = c.post(f"/api/kombucha/{kid}/game/memory/finish", json={"token": g["token"], "reached": 12, "won": True}).get_json()
     assert fin["result"]["reached"] == 3 and fin["result"]["accuracy"] == round(3 / 12, 3)
-    assert c.post(f"/api/kombucha/{kid}/game/memory/start", json={}).status_code == 429    # кулдаун
+    # играть можно сразу снова, но это тренировка — без награды
+    g2 = c.post(f"/api/kombucha/{kid}/game/memory/start", json={})
+    assert g2.status_code == 200
+    g2 = g2.get_json(); off += 10_000; _ff(monkeypatch, off)
+    c.post(f"/api/kombucha/{kid}/game/memory/step", json={"token": g2["token"], "input": [(g2["seq"][0] + 1) % 4]})
+    p = c.post(f"/api/kombucha/{kid}/game/memory/finish", json={"token": g2["token"]}).get_json()["result"]
+    assert p["practice"] and p["reward_in"] > 0 and p["wood"] == 0 and p["xp"] == 0 and p["happy"] == 0
 
 
 def test_games_api_guards(make_user, monkeypatch):

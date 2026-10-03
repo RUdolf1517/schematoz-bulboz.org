@@ -68,7 +68,15 @@ def check_client(meta) -> str | None:
     return None
 
 
+def disabled() -> bool:
+    """ANTIBOT_DISABLED=1 — только для e2e в jsdom (там все события синтетические)."""
+    from flask import current_app
+    return bool(current_app.config.get("ANTIBOT_DISABLED"))
+
+
 def verdict(*reasons: str | None) -> str | None:
+    if disabled():
+        return None
     return next((r for r in reasons if r), None)
 
 

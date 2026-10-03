@@ -232,11 +232,7 @@ def start(user_id: int, k, game: str) -> dict:
         raise ApiError("Нет такой игры", 404, "not_found")
     if not k.alive or k.frozen:
         raise ApiError("Играть может только живой и незамороженный гриб", 400, "kb_unavailable")
-    r = get_redis()
-    left = r.ttl(_cd_key(k.id, game))
-    if left and left > 0:
-        raise ApiError(f"Гриб отдыхает после этой игры: {left // 60} мин {left % 60} с", 429, "kb_cooldown",
-                       retry_after=left)
+    r = get_redis()   # играть можно сколько угодно — ограничена только награда (см. reward)
     token, seed = secrets.token_urlsafe(16), rng.getrandbits(32)
     sess = {"uid": user_id, "kid": k.id, "game": game, "seed": seed, "t0": _now_ms()}
     out: dict = {"token": token, "game": game, "title": GAMES[game][0]}
@@ -338,7 +334,7 @@ def bot_reason(game: str, seed: int, data: dict, res: dict) -> str | None:
 
 
 def _antibot(user_id: int, game: str, seed: int, data: dict, res: dict) -> dict:
-    reason = bot_reason(game, seed, data, res)
+    reason = None if antibot.disabled() else bot_reason(game, seed, data, res)
     if not reason:
         return res
     n = antibot.register(user_id, reason)
@@ -347,7 +343,16 @@ def _antibot(user_id: int, game: str, seed: int, data: dict, res: dict) -> dict:
 
 async def reward(s, user, k, game: str, token: str, res: dict) -> dict:
     acc = res["accuracy"]
-    get_redis().set(_cd_key(k.id, game), 1, ex=COOLDOWN)
+    r = get_redis()
+    left = r.ttl(_cd_key(k.id, game))
+    if left and left > 0:   # тренировка: результат считаем, награду — нет
+        return {**res, "game": game, "grade": grade(acc), "practice": True, "reward_in": int(left),
+                "happy": 0, "stat": GAMES[game][2], "boost": 0, "xp": 0, "wood": 0, "mutation": None, "mut_why": "practice",
+                "cooldown": COOLDOWN}
+    if res.get("suspect"):   # бот не сжигает окно награды
+        acc = 0.0
+    else:
+        r.set(_cd_key(k.id, game), 1, ex=COOLDOWN)
     kb.tick(k)
     stat = GAMES[game][2]
     happy = round(20 * acc)
