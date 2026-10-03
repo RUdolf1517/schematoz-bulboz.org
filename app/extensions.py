@@ -20,3 +20,12 @@ def init_redis(app) -> None:
 
 def get_redis() -> redis.Redis:
     return current_app.extensions["redis"]
+
+
+def redis_pop(r, key: str):
+    """Атомарно прочитать и удалить ключ. GETDEL есть только с Redis 6.2 (в Ubuntu 22.04 — 6.0),
+    поэтому GET+DEL в транзакции MULTI/EXEC — работает на любом Redis."""
+    pipe = r.pipeline(transaction=True)
+    pipe.get(key)
+    pipe.delete(key)
+    return pipe.execute()[0]

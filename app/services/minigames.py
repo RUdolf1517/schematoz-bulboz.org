@@ -28,7 +28,7 @@ import secrets
 import time
 
 from ..errors import ApiError
-from ..extensions import get_redis
+from ..extensions import get_redis, redis_pop
 from . import antibot
 from . import kombucha as kb
 from . import kombucha_diary as diary
@@ -252,7 +252,7 @@ def start(user_id: int, k, game: str) -> dict:
 def _load(token: str, user_id: int, kid: int, game: str, consume: bool) -> dict:
     r = get_redis()
     key = f"mg:{token}"
-    raw = r.getdel(key) if consume else r.get(key)
+    raw = redis_pop(r, key) if consume else r.get(key)
     if not raw:
         raise ApiError("Игра не найдена или уже завершена", 400, "mg_session")
     sess = json.loads(raw)

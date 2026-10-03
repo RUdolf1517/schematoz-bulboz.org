@@ -24,7 +24,7 @@ import secrets
 import time
 
 from ..errors import ApiError
-from ..extensions import get_redis
+from ..extensions import get_redis, redis_pop
 from . import antibot
 from . import kombucha as kb
 from . import kombucha_diary as diary
@@ -139,10 +139,7 @@ def _roll_mutation(k, acc: float):
 
 async def finish(s, user, k, token: str, taps, meta=None) -> dict:
     r = get_redis()
-    raw = r.getdel(f"med:{token}") if hasattr(r, "getdel") else None
-    if raw is None and not hasattr(r, "getdel"):
-        raw = r.get(f"med:{token}")
-        r.delete(f"med:{token}")
+    raw = redis_pop(r, f"med:{token}")
     if not raw:
         raise ApiError("Сессия медитации не найдена или уже завершена", 400, "med_session")
     sess = json.loads(raw)
