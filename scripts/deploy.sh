@@ -40,6 +40,10 @@ sync_code() {
   fi
   mkdir -p "$APP_DIR/var/uploads"
   chown -R "$APP_USER:$APP_USER" "$APP_HOME"
+  # nginx (www-data) отдаёт /static и /media с диска сам — ему нужно право читать файлы и проходить по папкам.
+  # Без этого CSS/JS отдаются с 403 и сайт выглядит «голым».
+  chmod -R o+rX "$APP_DIR/app/static" "$APP_DIR/var/uploads"
+  d="$APP_DIR"; while [ "$d" != "/" ]; do chmod o+x "$d"; d=$(dirname "$d"); done
 }
 
 install_deps_and_migrate() {
@@ -116,6 +120,24 @@ sync_db_role() {
   log "Вход в PostgreSQL по паролю из .env — ок"
 }
 
+# hypercorn с 2 воркерами стартует несколько секунд — ждём до 60 с, а не падаем сразу
+wait_up() {
+  for _ in $(seq 1 60); do curl -fsS -o /dev/null "http://127.0.0.1:$APP_PORT/" 2>/dev/null && return 0; sleep 1; done
+  return 1
+}
+
+# CSS через nginx должен отдаваться с 200, иначе сайт «страшненький»
+check_static() {
+  local dom code
+  dom=$(grep -oE 'server_name [^ ;]+' /etc/nginx/sites-enabled/* 2>/dev/null | head -1 | awk '{print $2}')
+  [ -n "$dom" ] || return 0
+  code=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $dom" "http://127.0.0.1/static/site.css")
+  case "$code" in
+    200|301|302|308) log "Статика через nginx: $code — ок" ;;
+    *) echo "  ⚠ /static/site.css через nginx отдаёт $code. Смотри: tail -20 /var/log/nginx/error.log" ;;
+  esac
+}
+
 # ---------- режим обновления ----------
 if [ "${1:-}" = "--update" ]; then
   [ -f "$APP_DIR/.env" ] || die "сначала полная установка"
@@ -123,7 +145,9 @@ if [ "${1:-}" = "--update" ]; then
   sync_db_role
   install_deps_and_migrate
   systemctl restart bulboz
-  sleep 2; curl -fsS -o /dev/null "http://127.0.0.1:$APP_PORT/" && log "Обновлено, сайт отвечает" || die "сайт не отвечает: journalctl -u bulboz -n 50"
+  wait_up || die "сайт не отвечает за 60 с: journalctl -u bulboz -n 50"
+  check_static
+  log "Обновлено, сайт отвечает"
   exit 0
 fi
 
@@ -204,12 +228,13 @@ EOF
 systemctl daemon-reload
 systemctl enable bulboz >/dev/null
 systemctl restart bulboz
-for _ in $(seq 1 20); do curl -fsS -o /dev/null "http://127.0.0.1:$APP_PORT/" && break; sleep 1; done
-curl -fsS -o /dev/null "http://127.0.0.1:$APP_PORT/" || die "приложение не стартовало: journalctl -u bulboz -n 50"
+wait_up || die "приложение не стартовало за 60 с: journalctl -u bulboz -n 50"
 
 # ---------- 8. nginx + HTTPS ----------
 log "nginx + HTTPS"
 APP_PORT=$APP_PORT APP_DIR=$APP_DIR UPLOAD_DIR=$APP_DIR/var/uploads "$APP_DIR/scripts/install_nginx.sh" "$DOMAIN" "$EMAIL"
+
+check_static
 
 # ---------- 9. бэкапы ----------
 log "Бэкапы → $BACKUP_DIR"
