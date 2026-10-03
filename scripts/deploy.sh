@@ -52,10 +52,39 @@ install_deps_and_migrate() {
   as_app ".venv/bin/flask --app app doctor" || die "flask doctor нашёл проблему — см. вывод выше"
 }
 
+# Роль и пароль PostgreSQL всегда приводим к тому, что записано в .env (DATABASE_URL).
+# Тогда не бывает «password authentication failed», если роль создали раньше руками или .env правили.
+sync_db_role() {
+  local url user pass host db
+  url=$(grep -E '^DATABASE_URL=' "$APP_DIR/.env" | tail -1 | cut -d= -f2- | tr -d "\"' ")
+  [ -n "$url" ] || die "в .env нет DATABASE_URL"
+  # postgresql+asyncpg://USER:PASS@HOST:PORT/DB
+  user=$(sed -E 's#^[^:]+://([^:@/]+).*#\1#' <<<"$url")
+  pass=$(sed -E 's#^[^:]+://[^:@/]+:([^@]*)@.*#\1#' <<<"$url")
+  host=$(sed -E 's#^.*@([^:/]+).*#\1#' <<<"$url")
+  db=$(sed -E 's#^.*/([^/?]+)(\?.*)?$#\1#' <<<"$url")
+  case "$host" in localhost|127.0.0.1) ;; *) log "БД на внешнем хосте $host — роль не трогаю"; return;; esac
+  [[ "$user" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && "$db" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "странное имя роли/базы в DATABASE_URL"
+  [[ "$pass" != *"'"* && "$pass" != *"%"* && -n "$pass" ]] || die "пароль БД в .env пустой или содержит ' или % — замени на hex (openssl rand -hex 16)"
+  log "PostgreSQL: роль $user, база $db (пароль — из .env)"
+  if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$user'" | grep -q 1; then
+    sudo -u postgres psql -qc "ALTER ROLE \"$user\" WITH LOGIN PASSWORD '$pass';"
+  else
+    sudo -u postgres psql -qc "CREATE ROLE \"$user\" LOGIN PASSWORD '$pass';"
+  fi
+  sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$db'" | grep -q 1 \
+    || sudo -u postgres createdb -O "$user" "$db"
+  sudo -u postgres psql -qc "ALTER DATABASE \"$db\" OWNER TO \"$user\";"
+  sudo -u postgres psql -d "$db" -qc "ALTER SCHEMA public OWNER TO \"$user\";"
+  PGPASSWORD="$pass" psql -h 127.0.0.1 -U "$user" -d "$db" -tAc "SELECT 1" >/dev/null 2>&1 \
+    || die "не входит в PostgreSQL как $user по паролю из .env — проверь /etc/postgresql/*/main/pg_hba.conf: для 127.0.0.1 нужен scram-sha-256"
+}
+
 # ---------- режим обновления ----------
 if [ "${1:-}" = "--update" ]; then
   [ -f "$APP_DIR/.env" ] || die "сначала полная установка"
   sync_code
+  sync_db_role
   install_deps_and_migrate
   systemctl restart bulboz
   sleep 2; curl -fsS -o /dev/null "http://127.0.0.1:$APP_PORT/" && log "Обновлено, сайт отвечает" || die "сайт не отвечает: journalctl -u bulboz -n 50"
@@ -82,15 +111,8 @@ sync_code
 
 # ---------- 3–4. база и .env ----------
 if [ ! -f "$APP_DIR/.env" ]; then
-  log "PostgreSQL и .env"
+  log ".env"
   DB_PASS=$(openssl rand -hex 16)
-  if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$APP_USER'" | grep -q 1; then
-    sudo -u postgres psql -qc "ALTER ROLE $APP_USER PASSWORD '$DB_PASS';"
-  else
-    sudo -u postgres psql -qc "CREATE ROLE $APP_USER LOGIN PASSWORD '$DB_PASS';"
-  fi
-  sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$APP_USER'" | grep -q 1 \
-    || sudo -u postgres createdb -O "$APP_USER" "$APP_USER"
   cat > "$APP_DIR/.env" <<EOF
 SECRET_KEY=$(openssl rand -hex 32)
 DATABASE_URL=postgresql+asyncpg://$APP_USER:$DB_PASS@localhost:5432/$APP_USER
@@ -105,6 +127,7 @@ EOF
 else
   log ".env уже есть — не трогаю"
 fi
+sync_db_role
 grep -q "^SECRET_KEY=change-me\|^SECRET_KEY=dev-secret" "$APP_DIR/.env" && die "в .env дефолтный SECRET_KEY"
 grep -q "^DEMO_MODE=1\|^ANTIBOT_DISABLED=1" "$APP_DIR/.env" && die "в .env включён DEMO_MODE или ANTIBOT_DISABLED — на проде нельзя"
 
