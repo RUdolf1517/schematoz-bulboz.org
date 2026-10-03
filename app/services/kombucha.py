@@ -41,30 +41,30 @@ rng = random.Random()          # в тестах подменяется, что�
 
 STATS = ("sweet", "tea", "clean", "happy")
 PERIOD = timedelta(hours=12)
-DROP = {"sweet": 35.0, "tea": 30.0, "clean": 20.0, "happy": 30.0}  # за каждые 12 часов
-DEATH_AFTER = timedelta(hours=12)
-MOLD_CLEAN_BELOW = 35.0      # ниже этой чистоты может завестись плесень
-MOLD_CHANCE = 0.4            # шанс на каждой ступеньке
+DROP = {"sweet": 20.0, "tea": 15.0, "clean": 10.0, "happy": 15.0}  # за каждые 12 часов
+DEATH_AFTER = timedelta(hours=48)   # 2 суток на нуле — время вернуться с выходных
+MOLD_CLEAN_BELOW = 20.0      # ниже этой чистоты может завестись плесень
+MOLD_CHANCE = 0.15           # шанс на каждой ступеньке
 MOLD_EXTRA = {"clean": 10.0, "happy": 15.0}
-LOW_STAT = 30.0              # если хоть что-то ниже — опыт за уход /2
+LOW_STAT = 15.0              # если хоть что-то ниже — опыт за уход /2
 STICKY_ABOVE = 85.0
 
 # действие: (показатель, прирост, кулдаун, опыт, фраза)
 ACTIONS = {
-    "sugar": ("sweet", 15, timedelta(hours=6), 5, "Хрум-хрум, сахарок 🍬"),
-    "tea": ("tea", 15, timedelta(hours=6), 5, "Свежая заварка, как у бабушки ☕"),
-    "clean": ("clean", 25, timedelta(hours=12), 8, "Банка сияет ✨"),
-    "pet": ("happy", 5, timedelta(hours=1), 1, "Гриб довольно булькает 🫧"),
+    "sugar": ("sweet", 25, timedelta(hours=4), 8, "Хрум-хрум, сахарок 🍬"),
+    "tea": ("tea", 25, timedelta(hours=4), 8, "Свежая заварка, как у бабушки ☕"),
+    "clean": ("clean", 40, timedelta(hours=8), 12, "Банка сияет ✨"),
+    "pet": ("happy", 8, timedelta(minutes=30), 2, "Гриб довольно булькает 🫧"),
     "talk": ("happy", 3, timedelta(minutes=30), 2, "Гриб задумался 🤔"),
-    "cure": ("clean", 10, timedelta(hours=24), 0, "Уксусная ванна! Плесень побеждена 🧪"),
+    "cure": ("clean", 20, timedelta(hours=6), 0, "Уксусная ванна! Плесень побеждена 🧪"),
 }
 DAILY_COOLDOWN = timedelta(hours=20)
-SPROUT_CARE_DAYS = 7
-SPROUT_EVERY = timedelta(days=7)
+SPROUT_CARE_DAYS = 3
+SPROUT_EVERY = timedelta(days=3)
 
 STAGES = [  # (с какого опыта, название, размер 1..6)
-    (0, "Спора", 1), (150, "Плёночка", 2), (500, "Блинчик", 3), (1200, "Медуза", 4),
-    (2500, "Гриб-гигант", 5), (4000, "Легенда трёхлитровой банки", 6),
+    (0, "Спора", 1), (80, "Плёночка", 2), (250, "Блинчик", 3), (550, "Медуза", 4),
+    (1000, "Гриб-гигант", 5), (1600, "Легенда трёхлитровой банки", 6),
 ]
 
 NAMES = ["Гриша", "Бульбоз", "Кефирыч", "Чайнобой", "Медузий", "Шипучка", "Бражник", "Грибозавр",

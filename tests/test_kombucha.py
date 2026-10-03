@@ -59,9 +59,9 @@ def test_create_and_actions(make_user, no_mutations):
     assert k["alive"] and k["stage"]["title"] == "Спора" and st["jars"] == {"jars": 1, "used": 1, "free": 0, "max": 5}
     assert len(st["catalog"]) == 240
     r = c.post(f"/api/kombucha/{k['id']}/tea", json={})
-    assert r.status_code == 200 and r.get_json()["kombucha"]["stats"]["tea"] == 85
+    assert r.status_code == 200 and r.get_json()["kombucha"]["stats"]["tea"] == 95
     again = c.post(f"/api/kombucha/{k['id']}/tea", json={})
-    assert again.status_code == 429 and again.get_json()["retry_after"] > 5 * 3600
+    assert again.status_code == 429 and again.get_json()["retry_after"] > 3 * 3600
     assert c.post(f"/api/kombucha/{k['id']}/hack", json={}).status_code == 404
 
 
@@ -95,8 +95,8 @@ def test_decay_is_every_12_hours(app, make_user, no_mutations):
     assert 0 < k2["next_drop_in"] <= 3600
     _edit(app, k["id"], hours=1)
     k3 = _first(c)
-    assert k3["stats"]["sweet"] == k["stats"]["sweet"] - 35   # 12 ч — одна ступенька (хардкор)
-    assert k3["stats"]["tea"] == k["stats"]["tea"] - 30
+    assert k3["stats"]["sweet"] == k["stats"]["sweet"] - 20   # 12 ч — одна ступенька
+    assert k3["stats"]["tea"] == k["stats"]["tea"] - 15
     assert k3["next_drop_in"] > 11 * 3600
     # уход не сдвигает таймер ступенек
     c.post(f"/api/kombucha/{k['id']}/pet", json={})
@@ -140,7 +140,7 @@ def test_danger_timer(app, make_user, no_mutations):
     kid = _first(c)["id"]
     _edit(app, kid, hours=12, sweet=10.0)
     k = _first(c)
-    assert k["alive"] and k["stats"]["sweet"] == 0 and 11 * 3600 < k["dies_in"] <= 12 * 3600   # закиснет через 12 ч
+    assert k["alive"] and k["stats"]["sweet"] == 0 and 47 * 3600 < k["dies_in"] <= 48 * 3600   # закиснет через 48 ч
 
 
 def test_daily_bonus_counts_care(make_user, no_mutations):
@@ -149,7 +149,7 @@ def test_daily_bonus_counts_care(make_user, no_mutations):
     c.post(f"/api/kombucha/{kid}/pet", json={})
     c.post(f"/api/kombucha/{kid}/clean", json={})
     r = c.post(f"/api/kombucha/{kid}/daily", json={}).get_json()
-    assert r["kombucha"]["xp"] == 1 + 8 + 5            # игр не было — только база 5 XP
+    assert r["kombucha"]["xp"] == 2 + 12 + 5           # игр не было — только база 5 XP
     wtx = [t for t in c.get("/api/wallet").get_json()["items"] if t["reason"] == "daily_bonus"]
     assert wtx[0]["delta"] == 5 + 2                     # 5 + по 1 $₽ за каждый уход за сутки
     assert c.post(f"/api/kombucha/{kid}/daily", json={}).status_code == 429
@@ -228,9 +228,9 @@ def test_buy_jar_and_plant(app, make_user, no_mutations):
 def test_sprout_after_week_of_care_on_last_stage(app, make_user, no_mutations):
     c, u = make_user()
     kid = _first(c)["id"]
-    _edit(app, kid, xp=4000, care_days=6, mutations=[{"code": "golden", "at": "x"}])
+    _edit(app, kid, xp=1600, care_days=2, mutations=[{"code": "golden", "at": "x"}])
     r = c.post(f"/api/kombucha/{kid}/pet", json={}).get_json()
-    assert r["sprout"] == {"planted": False}          # 7-й день ухода, но банки нет — отросток ждёт
+    assert r["sprout"] == {"planted": False}          # 3-й день ухода, но банки нет — отросток ждёт
     assert r["kombucha"]["sprout_pending"]
     _give_wood(app, u["id"], 1000)
     res = c.post("/api/shop/jar", json={}).get_json()
@@ -248,20 +248,20 @@ def test_sprout_every_week(app, make_user, no_mutations):
     _give_wood(app, u["id"], 1000)
     c.post("/api/shop/jar", json={})
     c.post("/api/shop/jar", json={})
-    _edit(app, kid, xp=4000, care_days=6)
+    _edit(app, kid, xp=1600, care_days=2)
     r = c.post(f"/api/kombucha/{kid}/pet", json={}).get_json()
     assert r["sprout"]["planted"] and r["kombucha"]["sprout_progress"]["count"] == 1
-    assert r["kombucha"]["sprout_progress"]["next_in"] > 6 * 86400
+    assert r["kombucha"]["sprout_progress"]["next_in"] > 2 * 86400
     # неделя ещё не прошла — даже с 7 днями ухода не делится
-    _edit(app, kid, care_days=6, last_care_day=None)
+    _edit(app, kid, care_days=2, last_care_day=None)
     r = c.post(f"/api/kombucha/{kid}/sugar", json={}).get_json()
     assert r["sprout"] is None
 
     async def week_ago(s):
         k = await s.get(Kombucha, kid)
-        k.last_sprout_at -= td(days=7)
+        k.last_sprout_at -= td(days=3)
     _db(app, week_ago)
-    _edit(app, kid, care_days=6, last_care_day=None)
+    _edit(app, kid, care_days=2, last_care_day=None)
     r = c.post(f"/api/kombucha/{kid}/tea", json={}).get_json()
     assert r["sprout"]["planted"] and r["kombucha"]["sprout_progress"]["count"] == 2
 
@@ -286,7 +286,7 @@ def test_mold_appears_in_dirty_jar(app, make_user, monkeypatch):
     c, u = make_user()
     kid = _first(c)["id"]
     monkeypatch.setattr(kb.rng, "random", lambda: 0.0)
-    _edit(app, kid, hours=12, clean=20.0)
+    _edit(app, kid, hours=12, clean=15.0)
     assert _first(c)["mold"]
 
 
@@ -364,7 +364,7 @@ def test_top_and_guest(app, make_user, no_mutations):
     kid = _first(c)["id"]
     c.post(f"/api/kombucha/{kid}/pet", json={})
     top = app.test_client().get("/api/kombucha/top").get_json()["items"]
-    assert top[0]["kombucha"]["xp"] == 1
+    assert top[0]["kombucha"]["xp"] == 2
     cl = app.test_client()
     assert cl.get("/api/kombucha").status_code == 401
     assert cl.get("/api/wallet").status_code == 401
@@ -402,11 +402,11 @@ def test_sprout_only_on_last_stage(app, make_user, no_mutations):
     kid = _first(c)["id"]
     _give_wood(app, u["id"], 1000)
     c.post("/api/shop/jar", json={})
-    for stage_xp in (0, 150, 500, 1200, 2500, 3900):              # все стадии до «Легенды»
+    for stage_xp in (0, 80, 250, 550, 1000, 1500):              # все стадии до «Легенды»
         _edit(app, kid, xp=stage_xp, care_days=30, last_care_day=None)
         r = c.post(f"/api/kombucha/{kid}/pet", json={}).get_json()
         assert r["sprout"] is None and not r["kombucha"]["sprout_progress"]["legend"], stage_xp
-    _edit(app, kid, xp=4000, care_days=6, last_care_day=None)
+    _edit(app, kid, xp=1600, care_days=2, last_care_day=None)
     r = c.post(f"/api/kombucha/{kid}/sugar", json={}).get_json()
     assert r["sprout"] and r["sprout"]["planted"]
 

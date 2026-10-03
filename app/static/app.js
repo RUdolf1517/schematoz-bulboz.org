@@ -1399,7 +1399,7 @@ async function pageKombucha() {
     const sp = k.sprout_progress;
     const sprout = k.sprout_pending ? `<div class="kb-note">🌱 Отросток готов и ждёт свободную банку. <button class="link-btn" data-buy>Купить банку за ${S.prices.jar} $₽</button></div>`
       : !sp.legend ? `<div class="kb-note muted">🌱 Гриб делится только на последней стадии — «Легенда трёхлитровой банки». Сейчас: «${esc(st.title)}».</div>`
-      : `<div class="kb-sprout" title="Легенда делится раз в неделю, если 7 дней за ней ухаживали и на ней нет плесени"><span>🌱 Деление${sp.count ? ` (было ${sp.count})` : ""}:</span>
+      : `<div class="kb-sprout" title="Легенда делится раз в 3 дня, если 3 дня за ней ухаживали и на ней нет плесени"><span>🌱 Деление${sp.count ? ` (было ${sp.count})` : ""}:</span>
           <span class="${sp.legend ? "ok" : ""}">${sp.legend ? "✅" : "⏳"} стадия «Легенда»</span>
           <span class="${sp.care_days >= sp.need_days ? "ok" : ""}">${sp.care_days >= sp.need_days ? "✅" : "⏳"} дней ухода ${sp.care_days}/${sp.need_days}</span>
           <span class="${sp.next_in ? "" : "ok"}">${sp.next_in ? `⏳ следующее через ${fmtLeft(sp.next_in)}` : "✅ раз в неделю"}</span>

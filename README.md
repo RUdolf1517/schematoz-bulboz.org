@@ -40,6 +40,8 @@ hypercorn "app.asgi:asgi_app" --bind 0.0.0.0:8000
 
 ### Прод
 
+nginx перед приложением: `sudo ./scripts/install_nginx.sh твой-домен.ru почта@для-letsencrypt.ru` — ставит nginx, отдаёт `/static` и `/media` с диска, проксирует остальное на `127.0.0.1:8000`, rate limit на `/api`, HTTPS через certbot (если указан email).
+
 ```bash
 cp .env.example .env              # DATABASE_URL (через PgBouncer, обычно :6432), REDIS_URL, SECRET_KEY
 alembic upgrade head && flask --app app seed
