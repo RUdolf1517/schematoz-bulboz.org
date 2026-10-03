@@ -55,7 +55,7 @@ install_deps_and_migrate() {
 # Роль и пароль PostgreSQL всегда приводим к тому, что записано в .env (DATABASE_URL).
 # Тогда не бывает «password authentication failed», если роль создали раньше руками или .env правили.
 sync_db_role() {
-  local url user pass host db
+  local url user pass host db port err hba
   url=$(grep -E '^DATABASE_URL=' "$APP_DIR/.env" | tail -1 | cut -d= -f2- | tr -d "\"' ")
   [ -n "$url" ] || die "в .env нет DATABASE_URL"
   # postgresql+asyncpg://USER:PASS@HOST:PORT/DB
@@ -63,21 +63,49 @@ sync_db_role() {
   pass=$(sed -E 's#^[^:]+://[^:@/]+:([^@]*)@.*#\1#' <<<"$url")
   host=$(sed -E 's#^.*@([^:/]+).*#\1#' <<<"$url")
   db=$(sed -E 's#^.*/([^/?]+)(\?.*)?$#\1#' <<<"$url")
-  case "$host" in localhost|127.0.0.1) ;; *) log "БД на внешнем хосте $host — роль не трогаю"; return;; esac
+  port=$(sed -nE 's#^.*@[^:/]+:([0-9]+)/.*#\1#p' <<<"$url"); port=${port:-5432}
+  case "$host" in localhost|127.0.0.1|::1) ;; *) log "БД на внешнем хосте $host — роль не трогаю"; return;; esac
   [[ "$user" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && "$db" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "странное имя роли/базы в DATABASE_URL"
   [[ "$pass" != *"'"* && "$pass" != *"%"* && -n "$pass" ]] || die "пароль БД в .env пустой или содержит ' или % — замени на hex (openssl rand -hex 16)"
-  log "PostgreSQL: роль $user, база $db (пароль — из .env)"
-  if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$user'" | grep -q 1; then
-    sudo -u postgres psql -qc "ALTER ROLE \"$user\" WITH LOGIN PASSWORD '$pass';"
-  else
-    sudo -u postgres psql -qc "CREATE ROLE \"$user\" LOGIN PASSWORD '$pass';"
+  # кластер на этом порту есть и запущен?
+  if command -v pg_lsclusters >/dev/null; then
+    if ! pg_lsclusters -h | awk '{print $3}' | grep -qx "$port"; then
+      pg_lsclusters
+      die "в DATABASE_URL порт $port, а кластера PostgreSQL на нём нет (список выше) — поправь порт в .env"
+    fi
+    pg_lsclusters -h | awk -v p="$port" '$3==p && $4!="online" {print $1, $2}' | while read -r v c; do
+      log "Запускаю кластер PostgreSQL $v/$c"; pg_ctlcluster "$v" "$c" start; done
   fi
-  sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$db'" | grep -q 1 \
-    || sudo -u postgres createdb -O "$user" "$db"
-  sudo -u postgres psql -qc "ALTER DATABASE \"$db\" OWNER TO \"$user\";"
-  sudo -u postgres psql -d "$db" -qc "ALTER SCHEMA public OWNER TO \"$user\";"
-  PGPASSWORD="$pass" psql -h 127.0.0.1 -U "$user" -d "$db" -tAc "SELECT 1" >/dev/null 2>&1 \
-    || die "не входит в PostgreSQL как $user по паролю из .env — проверь /etc/postgresql/*/main/pg_hba.conf: для 127.0.0.1 нужен scram-sha-256"
+  log "PostgreSQL: роль $user, база $db (пароль — из .env)"
+  if sudo -u postgres psql -p "$port" -tAc "SELECT 1 FROM pg_roles WHERE rolname='$user'" | grep -q 1; then
+    sudo -u postgres psql -p "$port" -qc "ALTER ROLE \"$user\" WITH LOGIN PASSWORD '$pass';"
+  else
+    sudo -u postgres psql -p "$port" -qc "CREATE ROLE \"$user\" LOGIN PASSWORD '$pass';"
+  fi
+  sudo -u postgres psql -p "$port" -tAc "SELECT 1 FROM pg_database WHERE datname='$db'" | grep -q 1 \
+    || sudo -u postgres createdb -p "$port" -O "$user" "$db"
+  sudo -u postgres psql -p "$port" -qc "ALTER DATABASE \"$db\" OWNER TO \"$user\";"
+  sudo -u postgres psql -p "$port" -d "$db" -qc "ALTER SCHEMA public OWNER TO \"$user\";"
+  try_login() { PGPASSWORD="$pass" psql -h 127.0.0.1 -p "$port" -U "$user" -d "$db" -tAc "SELECT 1" 2>&1 >/dev/null; }
+  if ! err=$(try_login); then
+    echo "  psql: $err"
+    # чиним pg_hba: свой пользователь по паролю с localhost — первым правилом
+    hba=$(sudo -u postgres psql -p "$port" -tAc "SHOW hba_file")
+    if [ -f "$hba" ] && ! grep -q "# bulboz-deploy" "$hba"; then
+      log "Добавляю в $hba правило входа по паролю для $user"
+      cp "$hba" "$hba.bak-$(date +%s)"
+      { echo "host    $db    $user    127.0.0.1/32    scram-sha-256    # bulboz-deploy"
+        echo "host    $db    $user    ::1/128         scram-sha-256    # bulboz-deploy"
+        cat "$hba"; } > "$hba.new"
+      mv "$hba.new" "$hba"; chown postgres:postgres "$hba"; chmod 640 "$hba"
+    fi
+    # пароль мог быть сохранён в md5 при старом password_encryption — перезадаём в scram
+    sudo -u postgres psql -p "$port" -qc "SET password_encryption='scram-sha-256'; ALTER ROLE \"$user\" WITH PASSWORD '$pass';"
+    sudo -u postgres psql -p "$port" -qc "SELECT pg_reload_conf();" >/dev/null
+    sleep 1
+    err=$(try_login) || die "всё ещё не входит как $user на 127.0.0.1:$port: $err"
+  fi
+  log "Вход в PostgreSQL по паролю из .env — ок"
 }
 
 # ---------- режим обновления ----------
