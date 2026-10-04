@@ -927,9 +927,16 @@ body.kb-med-on { overflow: hidden; }
 .halloween-scream-flash { animation:halloween-flash .48s steps(2,end); }
 @keyframes halloween-flash { 50%{box-shadow:inset 0 0 0 999px #ff2b1a25} }
 
-body.halloween { --bg:#100b13; --bg2:#1a101e; --card:#211526; --line:#43243f; --accent:#ff7438; --accent2:#a447c0; background-image:radial-gradient(ellipse at 80% 3%,#4c1d4a55,transparent 36%); }
-body.halloween .top { background:#100b13ed; border-bottom-color:#552441; }
-body.halloween .logo-mark { filter:drop-shadow(0 0 9px #ff8e25); }
+body.halloween { --bg:#08050d; --bg2:#120b18; --card:#1a101f; --line:#69203c; --accent:#ff394b; --accent2:#8f25d2; background-color:#08050d; background-image:radial-gradient(ellipse at 78% 2%,#73163c50,transparent 34%),radial-gradient(ellipse at 8% 70%,#25103f55,transparent 45%),repeating-linear-gradient(0deg,#08050d00 0 3px,#fb285506 4px 5px); }
+body.halloween .top { background:#09050eef; border-bottom-color:#8a2443; box-shadow:0 4px 30px #c21b3c22; }
+body.halloween .logo-mark { filter:drop-shadow(0 0 12px #ff3e29); }
+body.halloween .main-nav a.active { color:#ff626c; text-shadow:0 0 12px #ed123d; }
+body.halloween .panel { border-color:#5a1b36; background-image:linear-gradient(135deg,#ff263508,transparent 60%); }
+body.halloween .kb-main { border-color:#a32949; box-shadow:0 0 0 1px #ce1a3833,0 16px 55px #050207cc,inset 0 0 45px #a3132510; }
+body.halloween .kb-say { background:#260d1e; color:#ffe5eb; border:1px solid #7e2649; box-shadow:0 0 20px #ba183733; }
+body.halloween .kb-say::after { border-top-color:#260d1e; }
+body.halloween .btn-accent { background:linear-gradient(120deg,#84142f,#f33a50,#9c1c70); border-color:#ff5569; box-shadow:0 0 18px #f5294b44; }
+body.halloween .input { border-color:#6d2846; }
 body.halloween::before { content:"🕸️"; position:fixed; left:-14px; top:var(--header-h); z-index:19; opacity:.17; font-size:86px; pointer-events:none; transform:rotate(-20deg); }
 body.halloween::after { content:"🦇　🦇　🦇"; position:fixed; top:calc(var(--header-h) + 8px); right:6vw; z-index:19; opacity:.45; font-size:18px; pointer-events:none; letter-spacing:8px; }
 body.halloween .panel { box-shadow:0 10px 32px #17091955; }
@@ -969,6 +976,40 @@ body.halloween .site-footer { border-color:#43243f; }
 .push-hours input { max-width:150px; }
 .push-pref-form > div:last-child { margin-top:16px; }
 
+/* Bat swarm over the living mushroom: large, obvious flight paths, no pointer capture. */
+.kb-bat-swarm { position:absolute; inset:52px -10px 18px; z-index:3; overflow:hidden; pointer-events:none; }
+.kb-bat { position:absolute; left:-42px; top:20%; font-size:26px; filter:drop-shadow(0 0 8px #d22a56); animation:kb-bat-flight 6.8s linear infinite; }
+.kb-bat.bat-b { top:49%; font-size:19px; animation-duration:8.5s; animation-delay:-3.2s; }
+.kb-bat.bat-c { top:75%; font-size:22px; animation-duration:7.4s; animation-delay:-5s; }
+@keyframes kb-bat-flight { 0%{transform:translate(-8vw,12px) rotate(-14deg) scale(.8)} 25%{transform:translate(28vw,-17px) rotate(12deg) scale(1.12)} 53%{transform:translate(58vw,19px) rotate(-9deg) scale(.9)} 78%{transform:translate(94vw,-12px) rotate(17deg) scale(1.1)} 100%{transform:translate(145vw,15px) rotate(-8deg) scale(.82)} }
+.kb-music-btn { position:absolute; top:6px; right:0; z-index:3; border:1px solid #812d4b; border-radius:999px; background:#160a16ed; color:#ffd9e1; padding:5px 9px; font:inherit; font-size:11px; cursor:pointer; box-shadow:0 0 15px #c51d4733; }
+.kb-music-btn[aria-pressed="true"] { color:#ff8792; border-color:#ff435f; animation:music-pulse 1.5s ease-in-out infinite; }
+.kb-scare-btn { position:absolute; right:6px; bottom:6px; z-index:4; width:36px; height:36px; border:1px solid #fa4168; border-radius:10px; background:#220918eF; color:#ffe0e9; font-size:21px; cursor:pointer; box-shadow:0 0 17px #f22a5f77; }
+.kb-scare-btn:hover { background:#801432; transform:scale(1.08); }
+@keyframes music-pulse { 50%{box-shadow:0 0 22px #fb214e99} }
+.haunt-controls { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
+.haunt-controls button { flex:1; min-width:170px; }
+.haunt-controls .scare-test { border-color:#a62546; color:#ff9bab; }
+.haunt-controls .scare-test:hover { background:#7d1431; color:#fff; }
+.haunt-run { transform:translate(var(--haunt-x),var(--haunt-y)) rotate(var(--haunt-r)) !important; transition:transform .16s ease-out !important; }
+.haunt-hide { animation:haunt-hide .95s ease-in-out; }
+@keyframes haunt-hide { 0%,100%{opacity:1;filter:none} 35%{opacity:.02;filter:blur(7px)} 68%{opacity:.12;filter:blur(3px)} }
+.haunt-blink { animation:haunt-blink .32s steps(2,end) 3; }
+@keyframes haunt-blink { 50%{opacity:.08;filter:brightness(2.5)} }
+.haunt-color { animation:haunt-color .9s steps(5,end); }
+@keyframes haunt-color { 0%{filter:hue-rotate(0) brightness(1)} 25%{filter:hue-rotate(90deg) brightness(1.7)} 50%{filter:hue-rotate(190deg) brightness(.65)} 75%{filter:hue-rotate(270deg) brightness(1.8)} 100%{filter:hue-rotate(360deg) brightness(1)} }
+.halloween-event-card { position:relative; border-color:#a51d43; box-shadow:0 0 0 1px #ed245544,0 20px 70px #000c,inset 0 0 60px #8c10301c; }
+.halloween-event-card::before { content:""; position:absolute; inset:0; z-index:0; pointer-events:none; background:repeating-linear-gradient(135deg,transparent 0 26px,#fd274106 27px 28px); }
+.halloween-event-card > * { position:relative; z-index:1; }
+.halloween-boss { border-color:#f03b56; background:radial-gradient(circle at 46% 31%,#ffd369 0 12%,#ef5b28 38%,#79162d 76%); box-shadow:0 0 22px #ff3c58aa,0 0 65px #9a123b66,inset 0 0 35px #280314; text-shadow:0 2px 12px #24000a; }
+.halloween-boss:disabled { cursor:not-allowed; filter:saturate(.65); opacity:.9; }
+.haunt-caption { color:#ff8294; text-shadow:0 0 9px #ff234e; }
+.raid-hp-bar i { background:linear-gradient(90deg,#5e1025,#e41e4e,#ff723c); box-shadow:0 0 15px #f31b55; }
+.haunt-web { filter:drop-shadow(0 0 10px #c9164c); opacity:.8; }
+body.halloween::before { opacity:.3; filter:drop-shadow(0 0 10px #bb1c50); }
+body.halloween::after { opacity:.72; text-shadow:0 0 14px #ff2952; animation:bat-drift 3.5s ease-in-out infinite alternate; }
+body.halloween .site-footer { border-color:#69203c; }
+
 @media (max-width:700px) {
   .halloween-event-card { grid-template-columns:1fr; gap:8px; padding:15px; }
   .haunt-stage { min-height:230px; }
@@ -978,4 +1019,7 @@ body.halloween .site-footer { border-color:#43243f; }
 @media (prefers-reduced-motion:reduce) {
   *,*::before,*::after { scroll-behavior:auto !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
   .kb-scene > .kb-svg { transform:none !important; }
+  .kb-bat { animation:none !important; left:36% !important; transform:none !important; }
+  .kb-bat.bat-b { left:60% !important; }
+  .kb-bat.bat-c { left:48% !important; }
 }

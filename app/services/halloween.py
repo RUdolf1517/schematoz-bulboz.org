@@ -25,8 +25,9 @@ TEMP_MUTATIONS = {
     "halloween_eyes": {"title": "Светящиеся глаза", "emoji": "👁️", "color": "#ff5b21", "effect": "eyes"},
 }
 DEFAULT_CONFIG = {
-    "enabled": False,
-    "start_at": "2026-10-24T00:00:00+00:00",
+    # Default season is visible during October 2026; admins can change the dates or disable it.
+    "enabled": True,
+    "start_at": "2026-10-01T00:00:00+00:00",
     "end_at": "2026-11-02T00:00:00+00:00",
 }
 

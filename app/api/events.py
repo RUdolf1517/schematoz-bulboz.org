@@ -4,7 +4,7 @@ from __future__ import annotations
 import random
 from datetime import datetime, timedelta, timezone
 
-from flask import g, request
+from flask import g
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
@@ -30,10 +30,19 @@ def _raid_hp(raid: HalloweenRaid, at: datetime) -> int:
     return min(raid.max_hp, raid.hp + int(elapsed * RAID_REGEN_PER_SECOND))
 
 
-async def _ensure_raid(s) -> HalloweenRaid:
+async def _ensure_raid(s, *, lock: bool = True) -> HalloweenRaid:
+    query = select(HalloweenRaid).where(HalloweenRaid.id == 1)
+    if lock:
+        query = query.with_for_update()
+    raid = await s.scalar(query)
+    if raid is not None:
+        return raid
     await s.execute(insert(HalloweenRaid).values(id=1, hp=RAID_MAX_HP, max_hp=RAID_MAX_HP, phase=1, total_damage=0)
                     .on_conflict_do_nothing(index_elements=["id"]))
-    return await s.scalar(select(HalloweenRaid).where(HalloweenRaid.id == 1).with_for_update())
+    query = select(HalloweenRaid).where(HalloweenRaid.id == 1)
+    if lock:
+        query = query.with_for_update()
+    return await s.scalar(query)
 
 
 @bp.get("/events/state")
@@ -49,19 +58,20 @@ async def event_state():
 
 
 @bp.get("/events/halloween/raid")
-@require_perm("kombucha.play")
 async def halloween_raid_state():
+    """Public read-only state of the one shared raid boss during the active event."""
     at = datetime.now(UTC)
+    uid = current_user_id()
     async with session_scope() as s:
         config = await halloween.get_config(s)
-        if not halloween.active(config, at):
-            raise ApiError("Хэллоуинский рейд сейчас закрыт", 409, "event_inactive")
-        raid = await _ensure_raid(s)
-        player = await s.get(HalloweenRaidPlayer, g.user.id)
-        await halloween.award_survivor(s, g.user.id)
+        is_active = halloween.active(config, at)
+        if not is_active:
+            return {"active": False}
+        raid = await _ensure_raid(s, lock=False)
+        player = await s.get(HalloweenRaidPlayer, uid) if uid else None
         return {"boss": "Тыквенная плесень", "hp": _raid_hp(raid, at), "max_hp": raid.max_hp,
                 "phase": raid.phase, "total_damage": raid.total_damage,
-                "my_damage": player.damage if player else 0, "regen_per_minute": 6}
+                "my_damage": player.damage if player else 0, "regen_per_minute": 6, "active": is_active}
 
 
 @bp.post("/events/halloween/raid/tap")

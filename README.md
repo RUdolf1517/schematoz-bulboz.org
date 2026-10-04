@@ -172,7 +172,8 @@ Web Push настраивается отдельно: `flask --app app generate-
 | POST | `/api/uploads` | `kombucha.play` |
 | GET | `/api/notifications` · POST `/api/notifications/read` | вход |
 | GET / PUT | `/api/push/settings` · POST / DELETE `/api/push/subscriptions` | вход |
-| GET | `/api/events/state` · `/api/events/halloween/raid` · POST `/api/events/halloween/raid/tap` · POST `/api/events/halloween/treat/<id>` · POST `/api/events/halloween/hat/<id>` | публично / `kombucha.play` |
+| GET | `/api/events/state` · `/api/events/halloween/raid` (общий босс только во время ивента) | публично |
+| POST | `/api/events/halloween/raid/tap` · `/api/events/halloween/treat/<id>` · `/api/events/halloween/hat/<id>` | `kombucha.play` |
 | GET / PUT | `/admin/events/halloween` | `role.assign` |
 | GET | `/api/me/ban` · POST `/api/bans/<id>/appeal` | вход (бан не мешает) |
 | GET | `/mod/users?q=` · POST `/mod/bans`, `/mod/bans/<id>/lift` | `ban.temporary` |
