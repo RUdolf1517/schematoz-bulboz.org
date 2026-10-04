@@ -2326,6 +2326,20 @@ async function pageEvents() {
       partyDirty = false;
       paint();
       if (r.defeated) toast(r.message || "Стадия побеждена!");
+      const stageScene = $(".haunt-stage", panel);
+      const hitCount = Math.min(3, Math.max(1, Number(r.damage_dealt) || 1));
+      if (stageScene) {
+        stageScene.classList.add("raid-clash", `raid-hits-${hitCount}`);
+        const damagePop = $(".raid-damage-pop", stageScene);
+        if (damagePop) damagePop.textContent = `−${hitCount}`;
+        if (r.defeated) stageScene.classList.add("raid-phase-break");
+        setTimeout(() => stageScene.classList.remove("raid-clash", `raid-hits-${hitCount}`, "raid-phase-break"), 1050);
+      }
+      const hpBar = $(".raid-hp", panel);
+      if (hpBar) {
+        hpBar.classList.add("raid-hp-hit");
+        setTimeout(() => hpBar.classList.remove("raid-hp-hit"), 600);
+      }
       const boss = $("#halloween-boss", panel);
       if (boss) {
         const effect = r.defeated ? "boss-defeat" : "boss-hit";
@@ -2358,8 +2372,13 @@ async function pageEvents() {
     const receivedGifts = (raid.gifts_received || []).slice().reverse().map((gift) =>
       `<li><span>${esc(gift.emoji || "🎁")}</span><div><b>${esc(gift.title)}</b>${gift.description ? `<small>${esc(gift.description)}</small>` : ""}</div></li>`).join("");
     const selectedNames = available.filter((m) => selected.has(m.id)).map((m) => esc(m.name));
+    const battleFighters = available.filter((m) => selected.has(m.id)).slice(0, 3).map((m, index) =>
+      `<span class="raid-fighter raid-fighter-${index + 1}" title="${esc(m.name)}">🍄</span>`).join("");
     panel.innerHTML = `<div class="halloween-event-card">
-      <div class="haunt-stage"><span class="haunt-web">🕸️</span><span class="haunt-bats">🦇　🦇</span><span class="haunt-fly fly-a">🪰</span><span class="haunt-fly fly-b">🪰</span>
+      <div class="haunt-stage" id="raid-arena"><span class="haunt-web">🕸️</span><span class="haunt-bats">🦇　🦇</span><span class="haunt-fly fly-a">🪰</span><span class="haunt-fly fly-b">🪰</span>
+        <div class="raid-projectiles" aria-hidden="true"><span class="raid-projectile raid-projectile-one">⚡</span><span class="raid-projectile raid-projectile-two">💫</span><span class="raid-projectile raid-projectile-three">🔥</span></div>
+        <span class="raid-impact" aria-hidden="true">💥</span><b class="raid-damage-pop" aria-hidden="true"></b>
+        <div class="raid-fighter-line" aria-hidden="true">${battleFighters}</div>
         <button id="halloween-boss" class="halloween-boss" aria-label="Атаковать босса" ${ready ? "" : "disabled"}>🎃<span>🦠</span></button><span class="haunt-caption">ОН УЖЕ ЗАМЕТИЛ ТЕБЯ</span></div>
       <div class="haunt-info"><p class="eyebrow">ОБЩИЙ РЕЙД · ФАЗА ${raid.phase} · СТАДИЯ ${raid.stage_number}/${raid.stage_count}</p>
         <h2>${esc(raid.boss)}</h2><h3 class="raid-stage-title">${esc(raid.stage_title)}</h3>
@@ -2389,6 +2408,17 @@ async function pageEvents() {
         }
         partyIds = next;
         partyDirty = true;
+        const fighterLine = $(".raid-fighter-line", panel);
+        if (fighterLine) {
+          fighterLine.replaceChildren(...partyIds.slice(0, 3).map((id, index) => {
+            const mushroom = available.find((item) => item.id === id);
+            const fighter = document.createElement("span");
+            fighter.className = `raid-fighter raid-fighter-${index + 1}`;
+            fighter.title = mushroom?.name || "Боец";
+            fighter.textContent = "🍄";
+            return fighter;
+          }));
+        }
         const statusLine = $(".raid-team-status", panel);
         const names = available.filter((m) => partyIds.includes(m.id)).map((m) => m.name);
         if (statusLine) statusLine.textContent = partyIds.length
