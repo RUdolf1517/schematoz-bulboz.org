@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel form auth" id="auth" data-mode="{{ mode }}" data-next="{{ next }}">
+  <h1>{{ 'Вход' if mode == 'login' else 'Регистрация' }}</h1>
+
+  <form id="auth-form">
+    {% if mode == 'login' %}
+      <label>Ник или email <input name="login" required autocomplete="username"></label>
+      <label>Пароль <input name="password" type="password" required autocomplete="current-password"></label>
+    {% else %}
+      <label>Ник (латиница, цифры, _) <input name="username" required pattern="[A-Za-z0-9_]{3,32}" autocomplete="username"></label>
+      <label>Email <input name="email" type="email" required autocomplete="email"></label>
+      <label>Пароль (от 8 символов) <input name="password" type="password" minlength="8" required autocomplete="new-password"></label>
+      <label>Год рождения <input name="birth_year" type="number" min="1900" max="{{ now_year }}" required></label>
+      <label class="check"><input type="checkbox" name="accept_terms" required>
+        Принимаю <a href="/terms" target="_blank">соглашение</a>, <a href="/privacy" target="_blank">политику конфиденциальности</a> и <a href="/rules" target="_blank">правила</a></label>
+    {% endif %}
+    <button class="btn btn-accent" type="submit">{{ 'Войти' if mode == 'login' else 'Создать аккаунт' }}</button>
+  </form>
+
+  {% if mode == 'login' %}
+  <div class="or-sep"><span>или</span></div>
+  <form id="file-login" class="file-login">
+    <label class="file-drop" id="file-drop">
+      <input type="file" name="keyfile" accept=".key,application/json,text/plain" id="keyfile">
+      <b>🔑 Войти файлом входа</b>
+      <span class="muted">Выбери или перетащи сюда файл <code>bulboz-ник.key</code> — без логина и пароля</span>
+    </label>
+  </form>
+  {% else %}
+  <p class="muted" style="font-size:13px">После регистрации можно скачать файл входа — и входить без пароля.</p>
+  {% endif %}
+
+  <p class="muted switch">
+    {% if mode == 'login' %}Нет аккаунта? <a href="/register?next={{ next|urlencode }}">Регистрация</a>
+    {% else %}Уже есть аккаунт? <a href="/login?next={{ next|urlencode }}">Войти</a>{% endif %}
+  </p>
+
+  {% if demo %}
+  <div class="demo-box">
+    <b>Тестовые аккаунты</b> (демо-режим)
+    <table>
+      <tr><td>Админ</td><td><code>admin</code></td><td><code>admin-demo-2026</code></td></tr>
+      <tr><td>Юзер</td><td><code>dasha</code></td><td><code>demo-password</code></td></tr>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

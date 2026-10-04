@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}schematoz-bulboz.org — тамагочи про чайный гриб{% endblock %}</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#0e0e12">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Бульбоз">
+  <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='pwa/icon-192.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='pwa/apple-touch-icon.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='site.css', v=asset_v) }}">
+</head>
+<body data-page="{{ page_name|default('static') }}" data-logged-in="{{ 1 if logged_in else 0 }}">
+  <header class="top">
+    <a class="logo" href="/">🍄 schematoz<span>·</span>bulboz</a>
+    <nav class="main-nav">
+      <a href="/" class="{{ 'active' if page_name in ('kombucha', 'home') }}">🍄 Мой гриб</a>
+      <a href="/market" class="{{ 'active' if page_name == 'market' }}">🛒 Рынок</a>
+      <a href="/faq" class="{{ 'active' if page_name == 'faq' }}">❓ FAQ</a>
+    </nav>
+    <div class="top-actions">
+      {% if logged_in %}<a class="btn btn-ghost btn-sm wood-chip" id="wood-chip" href="/wallet" title="Деревянные — валюта сайта" hidden>$₽ <b id="wood-balance">0</b></a>{% endif %}
+      {% if logged_in %}<a class="btn btn-ghost btn-sm icon-btn bell" href="/notifications" aria-label="Уведомления" title="Уведомления">🔔<span class="bell-count" id="bell-count" hidden></span></a>{% endif %}
+      {% if not logged_in %}<a class="btn btn-accent btn-sm" href="/register">Завести гриба</a>{% endif %}
+      {% if logged_in %}
+        <div class="user-menu" id="user-menu">
+          <button class="btn btn-ghost btn-sm" id="user-menu-btn" aria-haspopup="true" aria-expanded="false">
+            <span class="avatar" id="me-avatar">·</span><span id="me-name">…</span>
+          </button>
+          <div class="dropdown" id="user-dropdown" hidden>
+            <a id="me-profile" href="#">Мой профиль</a>
+            <a href="/settings">Настройки профиля</a>
+            <a href="/">🍄 Мой чайный гриб</a>
+            <a href="/market">🛒 Грибной рынок</a>
+            <a href="/wallet">$₽ Деревянные</a>
+            <a id="me-admin" href="/admin" hidden>Админка</a>
+            <button id="logout-btn" type="button">Выйти</button>
+          </div>
+        </div>
+      {% else %}
+        <a class="btn btn-ghost btn-sm" id="login-btn" href="/login?next={{ request.path|urlencode if request.path not in ('/login', '/register') else '/' }}">Войти</a>
+      {% endif %}
+    </div>
+  </header>
+  <div id="ban-banner" class="ban-banner" hidden></div>
+  <main class="{% block main_class %}{% endblock %}">{% block content %}{% endblock %}</main>
+  <div id="toast" class="toast" hidden></div>
+  <div id="modal" class="modal" hidden></div>
+  {% include "_footer.html" %}
+  <script src="{{ url_for('static', filename='app.js', v=asset_v) }}"></script>
+</body>
+</html>

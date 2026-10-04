@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Проверка — schematoz-bulboz.org</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a0a;
+  color: #fff;
+  font-family: 'Courier New', monospace;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 2rem 1rem;
+}
+.card {
+  width: 100%;
+  max-width: 560px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: #111;
+  padding: 2rem;
+}
+.header { margin-bottom: 2rem; }
+.header h1 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.6rem;
+  line-height: 1.45;
+}
+.header p { font-size: 0.76rem; opacity: 0.4; letter-spacing: 0.04em; }
+.category-badge {
+  display: inline-block;
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.35;
+  border: 1px solid rgba(255,255,255,0.15);
+  padding: 0.15rem 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.progress-bar {
+  height: 2px;
+  background: rgba(255,255,255,0.08);
+  margin-bottom: 2rem;
+}
+.progress-fill { height: 100%; background: #fff; transition: width 0.3s ease; }
+.qnum {
+  font-size: 0.62rem;
+  opacity: 0.3;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 0.6rem;
+}
+.qtext {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin-bottom: 1.25rem;
+  min-height: 2.8rem;
+}
+.options { display: flex; flex-direction: column; gap: 0.45rem; margin-bottom: 1.25rem; }
+.option {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.13);
+  color: #fff;
+  font-family: 'Courier New', monospace;
+  font-size: 0.82rem;
+  padding: 0.65rem 0.9rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+  letter-spacing: 0.02em;
+}
+.option:hover:not(:disabled) { border-color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.04); }
+.option.selected { border-color: rgba(255,255,255,0.5) !important; background: rgba(255,255,255,0.06) !important; }
+.option:disabled { cursor: default; }
+.feedback { font-size: 0.76rem; min-height: 1.1rem; letter-spacing: 0.03em; margin-bottom: 1rem; }
+.feedback.ok  { color: rgba(255,255,255,0.65); }
+.feedback.err { color: rgba(255,80,80,0.9); }
+.btn-next {
+  background: #fff; color: #000;
+  border: none;
+  font-family: 'Courier New', monospace;
+  font-size: 0.82rem; font-weight: 700;
+  padding: 0.6rem 1.4rem;
+  cursor: pointer; letter-spacing: 0.07em;
+  display: none;
+}
+.btn-next:hover { background: #ddd; }
+.result { display: none; text-align: center; }
+.result h2 { font-size: 1.1rem; margin-bottom: 0.7rem; letter-spacing: 0.06em; }
+.result p  { font-size: 0.8rem; opacity: 0.5; margin-bottom: 1.5rem; line-height: 1.55; }
+.btn-site {
+  display: inline-block;
+  background: #fff; color: #000;
+  font-family: 'Courier New', monospace;
+  font-size: 0.82rem; font-weight: 700;
+  padding: 0.6rem 1.4rem;
+  text-decoration: none; letter-spacing: 0.07em;
+}
+.btn-site:hover { background: #ddd; }
+.btn-retry {
+  display: inline-block; margin-top: 0.5rem;
+  background: none;
+  border: 1px solid rgba(255,255,255,0.18);
+  color: #fff;
+  font-family: 'Courier New', monospace;
+  font-size: 0.82rem;
+  padding: 0.6rem 1.4rem;
+  cursor: pointer; letter-spacing: 0.05em;
+}
+.btn-retry:hover { border-color: rgba(255,255,255,0.45); }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="header">
+    <h1>Возможно вы кремлебот.<br>Пройдите капчу чтобы доказать что это не так.</h1>
+    <p id="subtitle"></p>
+  </div>
+
+  <!-- Honeypot: скрыто от людей, видно ботам -->
+  <div style="position:absolute;left:-9999px;top:-9999px;opacity:0;pointer-events:none;" aria-hidden="true">
+    <input type="text" id="hp_name" name="name" tabindex="-1" autocomplete="off" value="">
+    <input type="email" id="hp_email" name="email" tabindex="-1" autocomplete="off" value="">
+  </div>
+
+  <div id="quiz">
+    <div class="progress-bar"><div class="progress-fill" id="prog"></div></div>
+    <div id="catBadge" class="category-badge"></div>
+    <div class="qnum"    id="qnum"></div>
+    <div class="qtext"   id="qtext"></div>
+    <div class="options" id="opts"></div>
+    <div class="feedback" id="fb"></div>
+    <button class="btn-next" id="btnNext">Следующий →</button>
+  </div>
+
+  <div class="result" id="result">
+    <h2 id="rtitle"></h2>
+    <p  id="rdesc"></p>
+    <div id="ract"></div>
+  </div>
+</div>
+
+<script>
+/* ── JS-детекция Яндекс Браузера (fingerprint) ───────────────── */
+var fingerprint = {};
+try {
+  var ua = navigator.userAgent || '';
+  fingerprint.ua = ua;
+  fingerprint.yaBrowser = /YaBrowser|Yowser/i.test(ua);
+  fingerprint.yaApp = /YaApp_Android|YaApp_iOS|YandexSearch/i.test(ua);
+
+  /* Яндекс Браузер добавляет своё API */
+  fingerprint.yandexApi = !!(window.yandex || window.Ya || window.YaBrowser);
+
+  /* external protocol — YaBrowser регистрирует yandexbrowser: */
+  if (navigator.protocolHandler) {
+    fingerprint.protocolHandler = true;
+  }
+
+  /* navigator.userAgentData (Client Hints JS API) */
+  if (navigator.userAgentData && navigator.userAgentData.brands) {
+    var brands = navigator.userAgentData.brands.map(function(b) { return b.brand; });
+    fingerprint.brands = brands;
+    fingerprint.yaBrands = brands.some(function(b) {
+      return /YaBrowser|Yandex/i.test(b);
+    });
+  }
+
+  /* Yandex Metrika часто загружена в Яндекс Браузере */
+  fingerprint.metrika = !!(window.Ya && window.Ya.Metrika);
+
+  /* Проверяем специфичные CSS-свойства */
+  var testDiv = document.createElement('div');
+  testDiv.style.cssText = '-webkit-app-region: drag';
+  fingerprint.webkitAppRegion = testDiv.style.cssText.length > 0;
+
+  /* Язык / timezone для дополнительного контекста */
+  fingerprint.lang = navigator.language || '';
+  fingerprint.tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  fingerprint.platform = navigator.platform || '';
+  fingerprint.cookieEnabled = navigator.cookieEnabled;
+  fingerprint.screenRes = screen.width + 'x' + screen.height;
+
+  /* Honeypot: если бот заполнил скрытые поля — фиксируем */
+  var hpName = document.getElementById('hp_name');
+  var hpEmail = document.getElementById('hp_email');
+  fingerprint.honeypot = !!(
+    (hpName && hpName.value.length > 0) ||
+    (hpEmail && hpEmail.value.length > 0)
+  );
+} catch(e) {
+  fingerprint.error = e.message;
+}
+
+/* Данные от сервера — подставляются серверной стороной */
+var DATA = {{ questions_json }};
+var QUESTIONS = DATA.questions;
+var TOKEN = DATA.token;
+
+var CAT_LABELS = {
+  math: 'математика',
+  physics: 'физика',
+  russian: 'русский язык',
+  literature: 'литература'
+};
+
+/* Subtitle — динамически из реальных категорий вопросов */
+var seenCats = {}, catList = [];
+QUESTIONS.forEach(function(q) {
+  var c = q.category;
+  if (c && !seenCats[c]) { seenCats[c] = true; catList.push(CAT_LABELS[c] || c); }
+});
+document.getElementById('subtitle').textContent =
+  QUESTIONS.length + ' вопросов' + (catList.length ? ' · ' + catList.join(', ') : '');
+
+function shuffle(a) {
+  var arr = a.slice();
+  for (var i = arr.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  }
+  return arr;
+}
+
+/* Варианты ответов уже перемешаны сервером — только порядок вопросов рандомизируем. */
+var prepared = QUESTIONS.map(function(q, idx) {
+  return {
+    q: q.q,
+    opts: q.opts,   /* shuffled server-side */
+    category: q.category || '',
+    origIdx: idx
+  };
+});
+prepared = shuffle(prepared);
+
+var current  = 0;
+var answers  = {};
+var answered = false;
+
+function render() {
+  var p = prepared[current];
+  document.getElementById('qnum').textContent =
+    'Вопрос ' + (current + 1) + ' из ' + prepared.length;
+  document.getElementById('qtext').textContent = p.q;
+  document.getElementById('prog').style.width =
+    (current / prepared.length * 100) + '%';
+  document.getElementById('fb').textContent = '';
+  document.getElementById('fb').className = 'feedback';
+  document.getElementById('fb').style.display = 'none';
+  document.getElementById('btnNext').style.display = 'none';
+
+  var badge = document.getElementById('catBadge');
+  if (p.category && CAT_LABELS[p.category]) {
+    badge.textContent = CAT_LABELS[p.category];
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
+
+  answered = false;
+
+  var container = document.getElementById('opts');
+  container.innerHTML = '';
+  p.opts.forEach(function(opt, i) {
+    var btn = document.createElement('button');
+    btn.className = 'option';
+    btn.textContent = opt;
+    btn.onclick = function() { pick(i); };
+    container.appendChild(btn);
+  });
+}
+
+function pick(i) {
+  if (answered) return;
+  answered = true;
+  var p    = prepared[current];
+  var btns = document.querySelectorAll('.option');
+  btns.forEach(function(b) { b.disabled = true; });
+
+  /* Отправляем индекс выбранного варианта (0-based в перемешанном сервером списке) */
+  answers[String(p.origIdx)] = i;
+  btns[i].classList.add('selected');
+
+  document.getElementById('btnNext').style.display = 'inline-block';
+}
+
+document.getElementById('btnNext').onclick = function() {
+  current++;
+  if (current >= prepared.length) {
+    sendAnswers();
+  } else {
+    render();
+  }
+};
+
+function sendAnswers() {
+  document.getElementById('prog').style.width = '100%';
+  document.getElementById('btnNext').style.display = 'none';
+  var fb = document.getElementById('fb');
+  fb.textContent = 'Отправляем...';
+  fb.style.display = 'block';
+
+  fetch(DATA.verify_url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: TOKEN, answers: answers, fingerprint: fingerprint })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) { showResult(data); })
+  .catch(function() {
+    document.getElementById('fb').textContent = 'Ошибка соединения. Попробуйте ещё раз.';
+  });
+}
+
+function showResult(data) {
+  document.getElementById('quiz').style.display = 'none';
+  var res = document.getElementById('result');
+  res.style.display = 'block';
+
+  document.getElementById('rtitle').textContent =
+    data.passed ? 'Человек подтверждён.' : (data.errors > 10 ? 'Кремлебот детектед.' : 'Почти.');
+
+  document.getElementById('rdesc').textContent = data.passed
+    ? 'Все проверки пройдены. Добро пожаловать на сайт.'
+    : 'Ошибок: ' + data.errors + ' из ' + data.total + '. ' +
+      (data.errors > 10
+        ? 'Слишком много ошибок. Выучите школьную программу и попробуйте снова.'
+        : 'Почти прошли. Повторите попытку.');
+
+  var act = document.getElementById('ract');
+  act.innerHTML = '';
+  if (data.passed && data.redirect) {
+    var a = document.createElement('a');
+    a.href = data.redirect;  /* assigned as property — не интерпретируется как HTML */
+    a.className = 'btn-site';
+    a.textContent = 'Войти на сайт →';
+    act.appendChild(a);
+  } else {
+    var btn = document.createElement('button');
+    btn.className = 'btn-retry';
+    btn.textContent = 'Попробовать снова';
+    btn.onclick = function() { location.reload(); };
+    act.appendChild(btn);
+  }
+}
+
+render();
+</script>
+<!-- schematoz-bulboz.org: футер обязателен на всех страницах. Шаблон основан на
+     kremle_detect/templates/kremle_captcha.html; плейсхолдер questions_json подставляет библиотека. -->
+<footer style="text-align:center;font:13px/1.6 system-ui,sans-serif;color:#8e8ea0;padding:24px 16px;margin-top:24px;border-top:1px solid #2a2936">
+  <nav><a href="/" style="color:#8e8ea0">← на schematoz-bulboz.org</a> ·
+    <a href="/rules" style="color:#8e8ea0">Правила сообщества</a> ·
+    <a href="/terms" style="color:#8e8ea0">Пользовательское соглашение</a> ·
+    <a href="/privacy" style="color:#8e8ea0">Политика конфиденциальности</a> ·
+    <a href="/requisites" style="color:#8e8ea0">Реквизиты</a></nav>
+  <p>разработано RUdolf1517 на основе технологий <a href="https://rudolfzinovev.xyz" rel="noopener" style="color:#f2f2f5">rudolfzinovev.xyz</a></p>
+  <p>© ООО «СукИнЭндСын»</p>
+</footer>
+</body>
+</html>
