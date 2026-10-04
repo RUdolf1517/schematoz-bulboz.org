@@ -160,6 +160,13 @@ async def add_mutation(s, k: Kombucha, m: Mutation, at: datetime, inherited: boo
     await kb_achievements.after_mutation(s, k.user_id, m)
     diary.log(s, k, "inherited" if inherited else "mutation", at=at, emoji=m.emoji, title=m.title,
               rarity=RARITY[m.rarity][0], serial=serial)
+    if not inherited:
+        from .notifications import notify_once
+        from .push import enqueue_push
+        alert_key = f"mutation:{k.id}:{serial}"
+        body = f"Я мутировал: {m.emoji} «{m.title}». Не говори, что я не меняюсь."
+        await notify_once(s, k.user_id, "kombucha", alert_key, text=body, kombucha_id=k.id, category="mutation")
+        await enqueue_push(s, k.user_id, "mutation", "Появилась мутация 🧬", body, f"/g/{k.id}", alert_key)
     return {"code": m.code, "title": m.title, "emoji": m.emoji, "rarity": m.rarity,
             "rarity_title": RARITY[m.rarity][0], "serial": serial, "first_time": new}
 
@@ -546,6 +553,8 @@ def out(k: Kombucha) -> dict:
         danger = max(int((k.zero_since + DEATH_AFTER - at).total_seconds()), 0)
     muts = [mo for mo in (mut_out(x) for x in (k.mutations or [])) if mo]
     muts.sort(key=lambda x: RARITY_ORDER.index(x["rarity"]))
+    from .halloween import active_mutations
+    muts.extend(active_mutations(k, at))
     st = stage_for(k.xp)
     return {
         "id": k.id, "name": k.name, "xp": k.xp, "best_xp": k.best_xp, "generation": k.generation, "alive": k.alive,
@@ -557,6 +566,10 @@ def out(k: Kombucha) -> dict:
         "mutations": muts, "mut_per_stage": MAX_MUT_PER_STAGE,
         "mut_slots": {str(st): n for st, n in sorted(stage_mut_counts(k).items())}, "care_days": k.care_days, "sprouted": k.sprouted, "sprout_pending": k.sprout_pending,
         "sprout_progress": sprout_progress(k, at), "mold": bool(k.mold),
+        "halloween_hat": k.halloween_hat,
+        "halloween_mutations": active_mutations(k, at),
+        "halloween_gone": bool(k.halloween_gone and k.halloween_gone_day == at.astimezone(MSK).date()),
+        "halloween_web_until": k.halloween_web_until.isoformat() if k.halloween_web_until and k.halloween_web_until > at else None,
         "owners": [{"username": o.get("username"), "at": o.get("at"), "how": o.get("how")} for o in (k.owners or [])],
         "is_sprout": k.parent_id is not None,
         "frozen": k.frozen, "frozen_at": k.frozen_at.isoformat() if k.frozen_at else None,

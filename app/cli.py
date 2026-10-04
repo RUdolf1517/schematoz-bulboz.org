@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 from datetime import date
 
 import click
@@ -81,6 +83,42 @@ def register_cli(app: Flask) -> None:
         """Роли, права, юр. страницы."""
         _run_db(app, seed())
         click.echo("seeded")
+
+    @app.cli.command("run-notification-jobs")
+    @click.option("--limit", default=200, show_default=True, type=click.IntRange(1, 5000))
+    def run_notification_jobs(limit: int):
+        """Сканировать игровые напоминания и отправлять очередь Web Push (запускать раз в 5 минут)."""
+        from .services.notification_jobs import scan_notifications
+        from .services.push import dispatch_pushes
+
+        async def _run():
+            scanned = await scan_notifications()
+            delivered = await dispatch_pushes(limit=limit)
+            return {"notifications": scanned, "push": delivered}
+        click.echo(json.dumps(_run_db(app, _run()), ensure_ascii=False))
+
+    @app.cli.command("generate-vapid")
+    def generate_vapid():
+        """Сгенерировать P-256 VAPID-пару в PEM/base64url-формате."""
+        try:
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric import ec
+        except ImportError:
+            raise click.ClickException("Для генерации установи зависимости проекта: pip install -e .") from None
+        private = ec.generate_private_key(ec.SECP256R1())
+        private_pem = private.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode("ascii").strip()
+        public = private.public_key().public_bytes(
+            serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint,
+        )
+        public_b64 = base64.urlsafe_b64encode(public).rstrip(b"=").decode("ascii")
+        private_b64 = base64.urlsafe_b64encode(private_pem.encode("ascii")).rstrip(b"=").decode("ascii")
+        click.echo("Добавь эти строки в .env (private key закодирован одной строкой — безопасно для systemd):")
+        click.echo(f"VAPID_PUBLIC_KEY={public_b64}")
+        click.echo(f"VAPID_PRIVATE_KEY=base64:{private_b64}")
+        click.echo("VAPID_SUBJECT=mailto:admin@schematoz-bulboz.org")
 
     @app.cli.command("create-db-dev")
     def create_db_dev():

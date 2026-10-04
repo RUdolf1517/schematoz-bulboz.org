@@ -20,6 +20,49 @@ bp = Blueprint("admin", __name__, url_prefix="/admin")
 SETTING_PERMS = {"captcha": "settings.captcha", "antispam": "settings.antispam"}
 
 
+@bp.get("/events/halloween")
+@require_perm("role.assign")
+async def halloween_settings():
+    from ..services import halloween
+    async with session_scope() as s:
+        value = await halloween.get_config(s)
+    return {**value, "active": halloween.active(value)}
+
+
+@bp.put("/events/halloween")
+@require_perm("role.assign")
+async def update_halloween_settings():
+    from ..services import halloween, quotes
+    data = json_body()
+    enabled = data.get("enabled")
+    start_at, end_at = data.get("start_at"), data.get("end_at")
+    if not isinstance(enabled, bool):
+        raise ApiError("enabled должен быть true или false", 400, "validation_error")
+    if not isinstance(start_at, str) or not isinstance(end_at, str):
+        raise ApiError("Нужны даты начала и конца события", 400, "validation_error")
+    try:
+        start = datetime.fromisoformat(start_at.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(end_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ApiError("Даты должны быть ISO 8601 с часовым поясом", 400, "validation_error") from exc
+    if start.tzinfo is None or end.tzinfo is None or end <= start:
+        raise ApiError("Конец события должен быть позже начала; даты должны содержать часовой пояс", 400,
+                       "validation_error")
+    value = {"enabled": enabled, "start_at": start.astimezone(timezone.utc).isoformat(),
+             "end_at": end.astimezone(timezone.utc).isoformat()}
+    async with session_scope() as s:
+        row = await s.get(Setting, "halloween", with_for_update=True)
+        old = row.value if row else None
+        if row is None:
+            s.add(Setting(key="halloween", value=value, updated_by=g.user.id))
+        else:
+            row.value, row.updated_by = value, g.user.id
+        log_action(s, g.user.id, "settings.update", "setting", None, key="halloween", old=old, new=value)
+        await s.flush()
+        await quotes.refresh_custom(s)
+    return {**value, "active": halloween.active(value)}
+
+
 @bp.put("/users/<int:uid>/roles")
 @require_perm("role.assign")
 async def set_roles(uid: int):
@@ -257,7 +300,7 @@ def _quote_fields(data: dict, partial: bool) -> dict:
     out = {}
     if "kind" in data or not partial:
         if data.get("kind") not in quotes.KINDS:
-            raise ApiError("kind: dubious | philo", 400, "validation_error", field="kind")
+            raise ApiError("kind: dubious | philo | halloween", 400, "validation_error", field="kind")
         out["kind"] = data["kind"]
     if "text" in data or not partial:
         body = data.get("text")

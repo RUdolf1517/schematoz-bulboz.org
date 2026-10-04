@@ -161,6 +161,7 @@ async def finish(s, user, k, token: str, taps, meta=None) -> dict:
                 "wood": 0, "mutation": None, "cooldown": COOLDOWN, "grade": grade(acc)}
     if not reason:
         r.set(f"med:cd:{k.id}", 1, ex=COOLDOWN)
+        r.set(f"med:played:{k.id}", 1, ex=30 * 24 * 60 * 60)
 
     kb.tick(k)
     happy = round(25 * acc)

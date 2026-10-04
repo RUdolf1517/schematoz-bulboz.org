@@ -353,6 +353,7 @@ async def reward(s, user, k, game: str, token: str, res: dict) -> dict:
         acc = 0.0
     else:
         r.set(_cd_key(k.id, game), 1, ex=COOLDOWN)
+        r.set(f"mg:played:{k.id}:{game}", 1, ex=30 * 24 * 60 * 60)
     kb.tick(k)
     stat = GAMES[game][2]
     happy = round(20 * acc)

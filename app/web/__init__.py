@@ -105,6 +105,11 @@ def notifications():
     return page("notifications.html", "notifications")
 
 
+@bp.get("/events")
+def events():
+    return page("events.html", "events")
+
+
 @bp.get("/u/<username>")
 def profile(username: str):
     return page("profile.html", "profile", username=username)

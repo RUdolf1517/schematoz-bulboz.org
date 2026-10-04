@@ -2,7 +2,7 @@
 загружаются в той же корутине (и том же event loop), что и сама вьюха."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 from flask import g
@@ -64,6 +64,10 @@ async def _load_user() -> User:
         raise ApiError("Нужно войти", 401, "unauthorized")
     async with session_scope() as s:
         user = await s.get(User, uid)
+        now = datetime.now(timezone.utc)
+        # Track real account activity without writing on every tiny API call.
+        if user and (user.last_seen_at is None or user.last_seen_at < now - timedelta(minutes=5)):
+            user.last_seen_at = now
     if user is None:
         raise ApiError("Нужно войти", 401, "unauthorized")
     g.user = user

@@ -1,13 +1,14 @@
 """Уведомления внутри сайта. Пишутся в той же транзакции, что и событие.
-Пуши в мобилку (FCM/APNs) позже будут читать эту же таблицу воркером."""
+Web Push использует отдельную транзакционную outbox-очередь из app.services.push."""
 from __future__ import annotations
 
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Notification
 
-KINDS = {"badge", "ban", "appeal", "trade", "sale", "kombucha"}
+KINDS = {"badge", "ban", "appeal", "trade", "sale", "kombucha", "halloween"}
 
 
 def notify(s: AsyncSession, user_id: int, kind: str, **payload) -> Notification:
@@ -15,6 +16,17 @@ def notify(s: AsyncSession, user_id: int, kind: str, **payload) -> Notification:
     n = Notification(user_id=user_id, kind=kind, payload=payload)
     s.add(n)
     return n
+
+
+async def notify_once(s: AsyncSession, user_id: int, kind: str, dedupe_key: str, **payload) -> bool:
+    """Create one in-site alert per logical event, even if the scheduler runs repeatedly."""
+    assert kind in KINDS, kind
+    result = await s.execute(
+        insert(Notification).values(user_id=user_id, kind=kind, payload=payload, dedupe_key=dedupe_key[:128])
+        .on_conflict_do_nothing(index_elements=["user_id", "dedupe_key"])
+        .returning(Notification.id)
+    )
+    return result.scalar() is not None
 
 
 async def unread_count(s: AsyncSession, user_id: int) -> int:

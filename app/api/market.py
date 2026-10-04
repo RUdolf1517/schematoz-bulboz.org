@@ -21,6 +21,7 @@ from ..services import kombucha as kb
 from ..services import kombucha_achievements as ach
 from ..services import wood
 from ..services.notifications import notify
+from ..services.push import enqueue_push
 from . import bp
 from .utils import json_body
 
@@ -105,14 +106,18 @@ async def market_buy(kid: int):
         if data.get("price") is not None and data.get("price") != k.price:
             raise ApiError("Цена изменилась", 409, "price_changed", price=k.price)
         price, seller_id = k.price, k.user_id
+        sale_ref = f"{k.id}:{datetime.now(timezone.utc).timestamp()}"
         await wood.spend(s, buyer.id, price, "buy_kombucha", k.id)
         got = price - int(price * wood.MARKET_FEE)
         # sale не имеет суточного лимита, ref уникален на сделку
-        await wood.earn(s, seller_id, "sale", f"{k.id}:{datetime.now(timezone.utc).timestamp()}", amount=got)
+        await wood.earn(s, seller_id, "sale", sale_ref, amount=got)
         await kb.transfer(s, k, buyer.id, "sale", price)
         await ach.award(s, seller_id, "kb_sale")
         await ach.award(s, buyer.id, "kb_buy")
         notify(s, seller_id, "sale", username=buyer.username, kombucha_name=k.name, amount=got)
+        await enqueue_push(s, seller_id, "sale", "Меня купили 💰",
+                           f"Я переехал(а) к @{buyer.username}. Тебе начислили {got} $₽ — не трать всё на банки.",
+                           "/wallet", f"sale:{sale_ref}")
         await s.flush()
         return {"kombucha": kb.out(k), "wood": await wood.balance(s, buyer.id), "paid": price}
 

@@ -62,6 +62,46 @@ async function api(method, url, body, { quiet = false } = {}) {
 
 // ---------------------------------------------------------------- header / session
 let ME = null;
+let HALLOWEEN_ACTIVE = false;
+const REDUCED_MOTION = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches || false;
+
+async function applyEventTheme() {
+  let d;
+  try { d = await api("GET", "/api/events/state", undefined, { quiet: true }); } catch (_) { d = { active: false }; }
+  HALLOWEEN_ACTIVE = !!d.active;
+  document.body.classList.toggle("halloween", HALLOWEEN_ACTIVE);
+  document.body.dataset.halloween = HALLOWEEN_ACTIVE ? "1" : "0";
+  const mark = $(".logo-mark");
+  if (mark) mark.textContent = HALLOWEEN_ACTIVE ? "🎃" : "🍄";
+  const nav = $("#events-nav");
+  if (nav) nav.hidden = false;
+  const theme = $("meta[name=theme-color]");
+  if (theme) theme.content = HALLOWEEN_ACTIVE ? "#100b12" : "#0e0e12";
+  return d;
+}
+
+function maybeHalloweenScreamer() {
+  if (!HALLOWEEN_ACTIVE || REDUCED_MOTION || Date.now() - Number(localStorage.getItem("halloween-scream-at") || 0) < 120000 || Math.random() >= 0.1) return;
+  localStorage.setItem("halloween-scream-at", String(Date.now()));
+  const scene = $(".kb-scene .kb-svg") || $(".halloween-boss") || $(".profile-skin .kb-svg") || $(".kb-svg");
+  if (scene) scene.classList.add("kb-screamer");
+  document.body.classList.add("halloween-scream-flash");
+  try {
+    const Audio = window.AudioContext || window.webkitAudioContext;
+    if (Audio) {
+      const ctx = new Audio(); const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = "sawtooth"; osc.frequency.setValueAtTime(280, ctx.currentTime); osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.18);
+      gain.gain.setValueAtTime(0.07, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
+      osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.23); osc.onended = () => ctx.close();
+    }
+  } catch (_) {}
+  setTimeout(() => { scene?.classList.remove("kb-screamer"); document.body.classList.remove("halloween-scream-flash"); }, 650);
+}
+
+document.addEventListener("pointerdown", (e) => {
+  if (e.target.closest("button, a, [role=button]")) maybeHalloweenScreamer();
+}, { passive: true });
+
 // «Деревянные» ($₽) в шапке
 function setWood(n) {
   const chip = $("#wood-chip");
@@ -240,8 +280,8 @@ async function pageSettings() {
   const field = (label, control, hint = "") => `<div class="st-field"><span class="st-label">${label}</span>${control}${hint ? `<small class="st-hint">${hint}</small>` : ""}</div>`;
   const text = (name, val, max, ph = "") => `<input class="input" name="${name}" maxlength="${max}" placeholder="${esc(ph)}" value="${esc(val)}">`;
   const lvl = d.user.level, unlimited = d.user.role !== "user";
-  const SECTIONS_UI = [["basic", "👤", "Основное"], ["media", "🖼", "Аватар"], ["look", "🎨", "Оформление"], ["links", "🏷", "Интересы"], ["show", "🏆", "Витрина"], ["privacy", "🙈", "Приватность"], ["password", "🔐", "Пароль"]];
-  $("#st-nav").innerHTML = SECTIONS_UI.map(([id, e, t]) => `<a href="#st-${id}">${e} ${t}</a>`).join("");
+  const SECTIONS_UI = [["basic", "👤", "Основное"], ["media", "🖼", "Аватар"], ["look", "🎨", "Оформление"], ["links", "🏷", "Интересы"], ["show", "🏆", "Витрина"], ["privacy", "🙈", "Приватность"], ["push", "🔔", "Уведомления"], ["password", "🔐", "Пароль"]];
+  $("#st-nav").innerHTML = SECTIONS_UI.map(([id, e, t]) => `<a href="#${id === "push" ? "push-settings" : "st-" + id}">${e} ${t}</a>`).join("");
   form.innerHTML = `
     <section class="st-card" id="st-basic"><h2>👤 Основное</h2>
       <div class="st-grid">
@@ -373,6 +413,78 @@ async function pageSettings() {
   preview();
   passwordForm($("#pwd-form"), d.user.username);
   loginKeysPanel($("#login-keys"));
+  pushSettingsPanel($("#push-settings"));
+}
+
+function base64UrlBytes(value) {
+  const pad = "=".repeat((4 - value.length % 4) % 4);
+  const raw = atob((value + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+async function pushSettingsPanel(root) {
+  if (!root) return;
+  let d;
+  try { d = await api("GET", "/api/push/settings"); }
+  catch (_) { root.innerHTML = `<p class="muted">Не удалось загрузить настройки push.</p>`; return; }
+  const status = () => {
+    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return "Этот браузер не поддерживает PWA push. Уведомления на сайте останутся включены.";
+    if (!d.configured) return "На сервере ещё не настроены VAPID-ключи. Администратору нужно добавить VAPID_PUBLIC_KEY и VAPID_PRIVATE_KEY.";
+    if (Notification.permission === "denied") return "Разрешение запрещено в настройках браузера. Сначала разреши уведомления для сайта.";
+    return d.subscribed ? "Устройство подключено к push." : "Устройство ещё не подключено.";
+  };
+  const render = () => {
+    root.innerHTML = `<h2>🔔 Push-уведомления</h2>
+      <p class="muted">${esc(status())} Сайт продолжит показывать уведомления без push. В тихие часы push откладываются, лимит — не больше ${d.daily_cap} в сутки.</p>
+      <div class="row push-controls"><button class="btn ${d.enabled ? "btn-ghost" : "btn-accent"}" id="push-toggle" ${!d.configured ? "disabled" : ""}>${d.enabled ? "⏸ Выключить push" : d.subscribed ? "▶ Включить push" : "🔔 Подключить это устройство"}</button>
+        ${d.subscribed ? `<button class="btn btn-ghost" id="push-unsubscribe">Удалить устройство</button>` : ""}</div>
+      <form id="push-pref-form" class="push-pref-form">
+        <h3>Что присылать</h3><div class="push-types">${Object.entries(d.types).map(([key, label]) => `<label class="push-type"><input type="checkbox" name="type" value="${esc(key)}" ${d.categories[key] ? "checked" : ""}> <span>${esc(label)}</span></label>`).join("")}</div>
+        <h3>Тихие часы</h3><div class="push-hours"><label>С <input class="input" type="time" name="quiet_start" value="${esc(d.quiet_start)}"></label><label>До <input class="input" type="time" name="quiet_end" value="${esc(d.quiet_end)}"></label></div>
+        <small class="muted">По умолчанию 23:00–09:00 по Москве; при сохранении используется часовой пояс браузера. Если одинаковые границы — тихие часы отключены.</small>
+        <div><button class="btn btn-accent" type="submit">Сохранить настройки</button></div>
+      </form>`;
+    const f = $("#push-pref-form", root);
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(f), categories = {};
+      Object.keys(d.types).forEach((key) => { categories[key] = fd.getAll("type").includes(key); });
+      try {
+        d = await api("PUT", "/api/push/settings", {
+          categories, quiet_start: fd.get("quiet_start"), quiet_end: fd.get("quiet_end"),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || d.timezone,
+        });
+        render(); toast("Настройки push сохранены");
+      } catch (_) {}
+    };
+    $("#push-toggle", root).onclick = async () => {
+      if (d.enabled) {
+        try { d = await api("PUT", "/api/push/settings", { enabled: false }); render(); toast("Push временно выключены"); } catch (_) {}
+        return;
+      }
+      try {
+        if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) throw new Error("Браузер не поддерживает Web Push");
+        const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+        if (permission !== "granted") throw new Error("Разреши уведомления в браузере");
+        if (!d.configured) throw new Error("Сервер не настроил Web Push (VAPID)");
+        const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+        let subscription = await registration.pushManager.getSubscription();
+        if (!subscription) subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlBytes(d.vapid_public_key) });
+        await api("POST", "/api/push/subscriptions", subscription.toJSON());
+        d = await api("GET", "/api/push/settings"); render(); toast("Устройство подключено 🔔");
+      } catch (err) { toast(err.message || "Не удалось подключить push", true); }
+    };
+    $("#push-unsubscribe", root)?.addEventListener("click", async () => {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        await api("DELETE", "/api/push/subscriptions", { endpoint: subscription?.endpoint });
+        await subscription?.unsubscribe();
+        d = await api("GET", "/api/push/settings"); render(); toast("Устройство отключено");
+      } catch (_) {}
+    });
+  };
+  render();
 }
 
 function passwordForm(f, username) {
@@ -511,7 +623,9 @@ function initPanel(tabs) {
     try { await tabs[name](panel); } catch (e) { panel.innerHTML = `<p class="muted">Не удалось загрузить: ${esc(e.message)}</p>`; }
   };
   $$("#panel-tabs button").forEach((b) => (b.onclick = () => show(b.dataset.tab)));
-  show($("#panel-tabs button.active").dataset.tab);
+  const requested = new URLSearchParams(location.search).get("tab") || location.hash.slice(1);
+  const initial = tabs[requested] ? requested : $("#panel-tabs button.active")?.dataset.tab;
+  if (initial) show(initial);
   return show;
 }
 
@@ -715,12 +829,44 @@ async function kbDebugPanel(panel, login = "", selId = null) {
   draw();
 }
 
+async function adminHalloween(panel) {
+  const data = await api("GET", "/admin/events/halloween");
+  const localInput = (value) => {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? "" : new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  };
+  panel.innerHTML = `<form class="panel form" id="halloween-admin-form">
+    <h2 style="margin-top:0">🎃 Хэллоуинский ивент</h2>
+    <p class="muted">Переключатель можно включать и выключать в любой момент. Ивент активен только между датами; вводимые даты — в часовом поясе этого браузера.</p>
+    <label class="check"><input type="checkbox" name="enabled" ${data.enabled ? "checked" : ""}> Разрешить событие</label>
+    <label>Начало<input class="input" type="datetime-local" name="start_at" required value="${esc(localInput(data.start_at))}"></label>
+    <label>Конец<input class="input" type="datetime-local" name="end_at" required value="${esc(localInput(data.end_at))}"></label>
+    <p class="event-admin-status">Сейчас: <b>${data.active ? "🟢 активно" : data.enabled ? "🕒 включено, но вне дат" : "⚫ выключено"}</b></p>
+    <button class="btn btn-accent">Сохранить настройки</button>
+  </form>
+  <div class="panel"><h3>Состав события</h3><p class="muted">Тёмное оформление, скримеры с ограничением раз в 2 минуты, шанс исчезновения гриба раз в сутки, хэллоуинские цитаты (вкладка «Цитаты гриба»), временные мутации, «Сладость или гадость» и общий рейд «Тыквенная плесень».</p><p class="muted">В проекте пока нет модели клубов, поэтому рейд общий для всех игроков сайта.</p></div>`;
+  $("#halloween-admin-form", panel).onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const start = new Date(f.get("start_at")), end = new Date(f.get("end_at"));
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return toast("Укажи начало и конец события", true);
+    try {
+      const r = await api("PUT", "/admin/events/halloween", {
+        enabled: f.has("enabled"), start_at: start.toISOString(), end_at: end.toISOString(),
+      });
+      toast(r.active ? "🎃 Хэллоуин включён" : "Настройки ивента сохранены");
+      await adminHalloween(panel);
+    } catch (_) {}
+  };
+}
+
 async function pageAdmin() {
   if (denied("analytics.read")) return;
   let show;
   show = initPanel({
     ...adminBanTabs(() => show),
     async quotes(panel) { await adminQuotes(panel); },
+    async events(panel) { await adminHalloween(panel); },
     async kombucha(panel) { await kbDebugPanel(panel); },
     async analytics(panel) {
       const a = await api("GET", "/admin/analytics");
@@ -800,6 +946,7 @@ const NOTIF = {
   trade: (p) => [p.accepted ? "🤝" : p.gift ? "🎁" : "🔄", p.accepted ? `@${esc(p.username)} принял(а) твоё предложение обмена` : p.gift ? `@${esc(p.username)} дарит тебе чайный гриб` : `@${esc(p.username)} предлагает обмен грибами`, "/market#trades"],
   kombucha: (p) => ["🍄", esc(p.text || p.message || "Новости с подоконника"), p.kombucha_id ? `/g/${p.kombucha_id}` : "/"],
   sale: (p) => ["💰", `@${esc(p.username)} купил(а) твой гриб «${esc(p.kombucha_name)}» — +${p.amount} $₽`, "/wallet"],
+  halloween: (p) => ["🎃", esc(p.text || "На подоконнике случилось что-то странное"), p.kombucha_id ? `/g/${p.kombucha_id}` : "/events"],
   appeal: (p) => ["⚖️", p.decision === "accept" || p.decision === "approve" ? "Апелляцию приняли — блокировка снята" : `Апелляцию отклонили${p.comment ? ": " + esc(p.comment) : ""}`, "/banned"],
 };
 
@@ -818,6 +965,11 @@ async function pageNotifications() {
 }
 
 // ---------------------------------------------------------------- мини-игра «Чайный гриб»
+const HALLOWEEN_HAT_UI = {
+  pumpkin: { emoji: "🎃", title: "Тыква" }, witch: { emoji: "🧙‍♀️", title: "Ведьмина шляпа" },
+  horns: { emoji: "😈", title: "Рога" }, ghost_halo: { emoji: "👻", title: "Нимб-призрак" },
+  foil: { emoji: "🛸", title: "Шапочка из фольги" },
+};
 const KB_DISC = [ // [мутация, заливка, обводка] — первая подходящая по приоритету
   ["crystal", "#aef4ff", "#4fc3dc"], ["golden", "#ffd54a", "#b8860b"], ["spotted", "#e0442f", "#9c2414"],
   ["night", "#51639e", "#2c3866"], ["sweet_tooth", "#ffc2e0", "#e58db1"],
@@ -828,9 +980,9 @@ function shade(hex, f = 0.6) {
   const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(v * f));
   return `rgb(${c.join(",")})`;
 }
-const RAR = { legendary: "Легендарная", epic: "Эпическая", rare: "Редкая", common: "Обычная" };
+const RAR = { legendary: "Легендарная", epic: "Эпическая", rare: "Редкая", common: "Обычная", event: "Временная хэллоуинская" };
 function mutChip(m) {
-  return `<span class="kb-mut r-${m.rarity}" title="${esc(RAR[m.rarity] || "")}: ${esc(m.title)}${m.inherited ? " (унаследована)" : ""}">${esc(m.emoji)} ${esc(m.title)}${m.serial ? ` <b class="kb-serial">#${m.serial}</b>` : ""}${m.inherited ? " 🧬" : ""}</span>`;
+  return `<span class="kb-mut r-${m.rarity}" title="${esc(RAR[m.rarity] || "")}: ${esc(m.title)}${m.expires_at ? ` · временно до ${esc(fmtDate(m.expires_at))}` : ""}${m.inherited ? " (унаследована)" : ""}">${esc(m.emoji)} ${esc(m.title)}${m.serial ? ` <b class="kb-serial">#${m.serial}</b>` : ""}${m.inherited ? " 🧬" : ""}</span>`;
 }
 async function kombuchaCardModal(id) {
   let d;
@@ -839,7 +991,7 @@ async function kombuchaCardModal(id) {
   modal(`<div class="kb-cardm"><div class="kb-cardm-svg">${kombuchaSVG(d)}</div>
     <h2>${esc(d.name)} ${d.frozen ? "🧊" : ""}</h2>
     <div class="muted">${esc(d.stage.title)} · ${d.xp} XP · поколение ${d.generation} · владелец <a href="/u/${encodeURIComponent(d.owner)}">@${esc(d.owner)}</a>${d.price != null ? ` · 🏷 ${d.price} $₽` : ""}</div>
-    <h3>Мутации</h3>${d.mutations.length ? `<table class="kb-cardm-t">${d.mutations.map((m) => `<tr><td>${esc(m.emoji)} ${esc(m.title)}</td><td>${esc(RAR[m.rarity])}</td><td><b>#${m.serial ?? "?"}</b> из ${m.issued}</td></tr>`).join("")}</table>` : `<p class="muted">Без мутаций</p>`}
+    <h3>Мутации</h3>${d.mutations.length ? `<table class="kb-cardm-t">${d.mutations.map((m) => `<tr><td>${esc(m.emoji)} ${esc(m.title)}</td><td>${esc(RAR[m.rarity] || "")}</td><td>${m.serial != null ? `<b>#${m.serial}</b> из ${m.issued}` : "временно"}</td></tr>`).join("")}</table>` : `<p class="muted">Без мутаций</p>`}
     <h3>История владельцев</h3>${d.owners.length ? `<ol class="kb-owners">${d.owners.map((o) => `<li>@${esc(o.username || "?")} — ${HOW[o.how] || esc(o.how)}${o.price ? ` за ${o.price} $₽` : ""} <small class="muted">${esc(fmtDate(o.at))}</small></li>`).join("")}</ol>` : `<p class="muted">Всю жизнь у одного хозяина — @${esc(d.owner)}</p>`}
     <div class="modal-actions"><button class="btn btn-ghost" data-close>Закрыть</button></div></div>`);
 }
@@ -893,7 +1045,7 @@ function kbMutFx(k, w, h, top, level) {
     const rnd = (n) => (kbHash(m.code + n) % 1000) / 1000;          // стабильные «случайные» числа мутации
     if (idx < 3) L.discColors.push(col);
     if (m.rarity === "legendary" || m.rarity === "epic") L.glow.push(`drop-shadow(0 0 ${m.rarity === "legendary" ? 7 : 4}px ${col})`);
-    if (KB_OWN_FX.has(m.code)) return;                               // у этих — ручная отрисовка ниже
+    if (KB_OWN_FX.has(m.code) || m.code.startsWith("halloween_")) return; // у этих — ручная отрисовка ниже
     const place = hs % 3, kind = (hs >> 3) % 4;
     if (place === 0) {                                                // ГРИБ
       if (kind === 0) for (let i = 0; i < 2 + Math.round(r * 1.5); i++)
@@ -1178,7 +1330,7 @@ async function kbSugar(k, onDone) {
 // 🪰 Отгони мушек
 async function kbFlies(k, onDone) {
   const G = await kbStart(k, "flies"); if (!G) return;
-  const sh = kbGameShell("🪰 Отгони мушек", "Мушки летят к банке — тапни каждую, пока не села. Три севшие — конец.");
+  const sh = kbGameShell(HALLOWEEN_ACTIVE ? "🦇 Прогони ночной рой" : "🪰 Отгони мушек", HALLOWEEN_ACTIVE ? "Летучие мыши и ночные мушки слетаются к банке — отгони их!" : "Мушки летят к банке — тапни каждую, пока не села. Три севшие — конец.");
   sh.area.innerHTML = `<div class="kb-flies"><div class="kb-flies-jar">${kombuchaSVG({ ...k, id: "fl" + k.id }, { small: true })}</div></div>`;
   const box = sh.area.firstChild, taps = [], t0 = performance.now();
   let lives = G.lives, swat = 0, ended = false;
@@ -1189,7 +1341,7 @@ async function kbFlies(k, onDone) {
     if (ended) return;
     const d = document.createElement("button");
     const a = (f.angle * Math.PI) / 180;
-    d.className = "kb-fly"; d.textContent = "🪰";
+    d.className = "kb-fly halloween-fly"; d.textContent = HALLOWEEN_ACTIVE ? (Math.random() < 0.5 ? "🦇" : "🪰") : "🪰";
     d.style.setProperty("--fx", `${Math.cos(a) * 48}vmin`); d.style.setProperty("--fy", `${Math.sin(a) * 48}vmin`);
     d.style.animationDuration = `${f.dur}ms`;
     let gone = false;
@@ -1335,6 +1487,7 @@ function kombuchaSVG(k, { small = false } = {}) {
   const top = 200 - level;
   let tint = k.alive ? `hsl(${28 + (100 - st.tea) * 0.15}, ${45 + st.tea * 0.4}%, ${62 - st.tea * 0.22}%)` : "#6b6b4a";
   if (has("cosmic") && k.alive) tint = "#2a1a4a";
+  if (has("halloween_zombie") && k.alive) tint = "#426b3d";
   const w = 34 + size * 11, h = 8 + size * 2.2;
   const cx = 110, cy = top + 4;
   const dirt = k.alive ? (100 - st.clean) / 100 : 0.8;
@@ -1372,6 +1525,9 @@ function kombuchaSVG(k, { small = false } = {}) {
   if (has("survivor")) acc.push(`<text x="${Math.max(w * 0.62, 22 * faceK + 12)}" y="${4}" class="kb-acc" font-size="14">🩹</text>`);
   if (has("phoenix")) acc.push(`<text x="${-w * 0.7}" y="${faceY + 4}" class="kb-acc kb-flick" font-size="16">🔥</text>`);
   if (has("chatty")) acc.push(`<text x="${w * 0.6}" y="${faceY}" class="kb-acc" font-size="14">💬</text>`);
+  const hat = HALLOWEEN_HAT_UI[k.halloween_hat];
+  if (hat) acc.push(`<text x="0" y="${faceY - 22}" class="kb-acc kb-halloween-hat" font-size="25">${hat.emoji}</text>`);
+  if (has("halloween_eyes")) acc.push(`<text x="0" y="${-h * 0.08}" class="kb-acc kb-burning-eyes" font-size="12">👁️ 👁️</text>`);
   const outside = [];
   if (has("holivar")) outside.push(`<text x="196" y="120" class="kb-acc" font-size="20">⚔️</text>`);
   if (has("sparkle")) outside.push(...[[28, 60], [192, 80], [24, 170], [196, 190]].map(([x, y], i) => `<text x="${x}" y="${y}" class="kb-acc kb-twinkle" font-size="14" style="animation-delay:${i * 0.4}s">✨</text>`));
@@ -1393,10 +1549,10 @@ function kombuchaSVG(k, { small = false } = {}) {
     ${outside.join("")}${FX.outside.join("")}
     <rect x="60" y="6" width="100" height="22" rx="6" class="kb-lid"${FX.lidColor ? ` style="fill:${FX.lidColor};stroke:${shade(FX.lidColor)}"` : ""}/>${FX.lid.join("")}
     <g clip-path="url(#kb-jar-${k.id || 0})">
-      <rect x="30" y="${top}" width="160" height="${230 - top}" fill="${tint}" class="kb-liquid"/>
-      <path d="M30,${top} Q70,${top - 4} 110,${top} T190,${top}" stroke="#ffffff55" stroke-width="2" fill="none"/>
+      <path class="kb-liquid" data-y="${top}" d="M30,${top} Q70,${top - 4} 110,${top} T190,${top} L190,230 L30,230 Z" fill="${tint}"/>
+      <path class="kb-liquid-surface" data-y="${top}" d="M30,${top} Q70,${top - 4} 110,${top} T190,${top}" stroke="#ffffff55" stroke-width="2" fill="none"/>
       ${stars}${bubbles}${FX.liquid.join("")}
-      <g class="${k.alive ? "kb-float" : ""}"><g class="kb-mush" transform="translate(${cx},${cy})"${FX.glow.length ? ` style="filter:${FX.glow.slice(0, 3).join(" ")}"` : ""}>
+      ${HALLOWEEN_ACTIVE && k.halloween_gone ? "" : `<g class="${k.alive ? "kb-float" : ""}"><g class="kb-mush" data-cx="${cx}" data-cy="${cy}" transform="translate(${cx},${cy})"${FX.glow.length ? ` style="filter:${FX.glow.slice(0, 3).join(" ")}"` : ""}>
         <g class="kb-disc-wrap">
           <ellipse rx="${w}" ry="${h}" class="kb-disc" ${discFill ? `style="fill:${discFill};stroke:${shade(FX.discColors[0])}"` : disc ? `style="fill:${disc[1]};stroke:${disc[2]}"` : ""}/>
           <ellipse rx="${w * 0.8}" ry="${h * 0.5}" cy="-${h * 0.3}" class="kb-disc-hi"/>
@@ -1408,16 +1564,93 @@ function kombuchaSVG(k, { small = false } = {}) {
           ${k.mood === "happy" || k.mood === "sticky" ? `<circle cx="-16" cy="4" r="3" class="kb-blush"/><circle cx="16" cy="4" r="3" class="kb-blush"/>` : ""}
         </g>
         ${acc.join("")}
-      </g></g>
+      </g></g>`}
       <g opacity="${dirt.toFixed(2)}">${spots}</g>
       ${k.mold ? Array.from({ length: 9 }, (_, i) => `<circle cx="${cx + (((i * 37) % 80) - 40) * (w / 60)}" cy="${cy - h * 0.4 + ((i * 13) % 10) - 5}" r="${3 + (i % 3) * 2}" class="kb-moldspot"/>`).join("") : ""}
     </g>
     <path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z" class="kb-jar"${FX.glass.length ? ` style="fill:${FX.glass[0]}40;stroke:${FX.glass[FX.glass.length - 1]};stroke-width:4"` : ""}/>${FX.jar.join("")}
+    ${k.halloween_web_until ? `<g class="kb-jar-web"><path d="M40 42 Q72 48 96 30 M40 42 Q50 72 38 100 M40 42 L78 66 L96 30 M50 48 L47 70 L70 61 L78 66 L69 84 L50 79 L47 70 M184 190 Q158 177 150 210 M184 190 Q160 198 138 190 M184 190 L160 168 L150 210 M174 184 L168 201 L151 194 L160 168"/></g>` : ""}
     <path d="M52,50 L50,190" class="kb-glare"/>${has("clean_freak") ? `<path d="M64,60 L63,110" class="kb-glare"/>` : ""}
     ${k.frozen ? `<path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z" class="kb-ice"/><text x="160" y="60" class="kb-acc" font-size="20">❄️</text>` : ""}
     ${small ? "" : `<g class="kb-mood-badge"><circle cx="186" cy="30" r="17"/><text x="186" y="37" text-anchor="middle" font-size="20">${KB_MOOD[k.mood]?.[0] || "🙂"}</text></g>`}
     <text x="110" y="228" text-anchor="middle" class="kb-label">3 л</text>
   </svg>`;
+}
+
+let kbTiltScene = null;
+let kbTiltRoll = 0;
+let kbTiltListening = false;
+function clampN(value, min, max) { return Math.min(max, Math.max(min, value)); }
+
+function applyKbTilt() {
+  if (!kbTiltScene || REDUCED_MOTION) return;
+  const svg = $(".kb-svg", kbTiltScene);
+  if (!svg) return;
+  const surface = $(".kb-liquid-surface", svg), liquid = $(".kb-liquid", svg);
+  const y = surface?.dataset.y || 100;
+  if (surface) surface.setAttribute("transform", `rotate(${-kbTiltRoll} 110 ${y})`);
+  if (liquid) liquid.setAttribute("transform", `rotate(${-kbTiltRoll} 110 ${y})`);
+  const mush = $(".kb-mush", svg);
+  if (mush) {
+    const cx = Number(mush.dataset.cx || 110), cy = Number(mush.dataset.cy || 100);
+    const x = cx + kbTiltRoll * 1.25;
+    const y = cy + Math.abs(kbTiltRoll) * 0.08 + Math.sin(performance.now() / 260) * Math.min(Math.abs(kbTiltRoll) * 0.015, 0.3);
+    mush.setAttribute("transform", `translate(${x.toFixed(2)},${y.toFixed(2)}) rotate(${(kbTiltRoll * 0.25).toFixed(2)})`);
+  }
+  svg.style.setProperty("--sensor-tilt", "0deg");
+}
+
+function initTiltScene(scene) {
+  if (!scene) return;
+  kbTiltScene = scene;
+  if (REDUCED_MOTION) {
+    const button = $("[data-tilt]", scene);
+    if (button) { button.disabled = true; button.textContent = "♿ Анимация выключена"; }
+    return;
+  }
+  if (!scene.dataset.tiltBound) {
+    scene.dataset.tiltBound = "1";
+    scene.addEventListener("pointermove", (e) => {
+      if (e.pointerType !== "mouse" || !window.matchMedia("(hover: hover)").matches) return;
+      const r = scene.getBoundingClientRect(), px = (e.clientX - r.left) / r.width - 0.5, py = (e.clientY - r.top) / r.height - 0.5;
+      const svg = $(".kb-svg", scene);
+      if (svg) {
+        svg.style.setProperty("--cursor-x", `${clampN(px * 6, -3, 3).toFixed(1)}px`);
+        svg.style.setProperty("--cursor-y", `${clampN(py * 6, -3, 3).toFixed(1)}px`);
+        svg.style.setProperty("--sensor-tilt", `${clampN(px * 2, -1, 1).toFixed(1)}deg`);
+      }
+    }, { passive: true });
+    scene.addEventListener("pointerleave", () => {
+      const svg = $(".kb-svg", scene);
+      if (svg) { svg.style.setProperty("--cursor-x", "0px"); svg.style.setProperty("--cursor-y", "0px"); svg.style.setProperty("--sensor-tilt", "0deg"); }
+    });
+  }
+  const button = $("[data-tilt]", scene);
+  if (!button) return;
+  const available = "DeviceOrientationEvent" in window;
+  if (!available) { button.disabled = true; button.textContent = "📱 Наклон недоступен"; return; }
+  button.textContent = kbTiltListening ? "📱 Наклон включён" : "📱 Включить наклон";
+  button.onclick = async () => {
+    try {
+      const DOE = window.DeviceOrientationEvent;
+      if (typeof DOE.requestPermission === "function") {
+        const permission = await DOE.requestPermission();
+        if (permission !== "granted") throw new Error("Разрешение на датчики не выдано");
+      }
+      if (!kbTiltListening) {
+        window.addEventListener("deviceorientation", (event) => {
+          if (Number.isFinite(event.gamma)) {
+            kbTiltRoll = clampN(event.gamma, -18, 18);
+            applyKbTilt();
+          }
+        }, { passive: true });
+        kbTiltListening = true;
+      }
+      button.textContent = "📱 Наклон включён";
+      applyKbTilt();
+    } catch (err) { toast(err.message || "Не удалось включить наклон", true); }
+  };
+  applyKbTilt();
 }
 
 function fmtLeft(sec) {
@@ -1474,11 +1707,14 @@ async function pageKombucha() {
           <span class="${sp.care_days >= sp.need_days ? "ok" : ""}">${sp.care_days >= sp.need_days ? "✅" : "⏳"} дней ухода ${sp.care_days}/${sp.need_days}</span>
           <span class="${sp.next_in ? "" : "ok"}">${sp.next_in ? `⏳ следующее через ${fmtLeft(sp.next_in)}` : "✅ раз в 7 дней"}</span>
           ${sp.healthy ? "" : `<span>🦠 сначала вылечи плесень</span>`}</div>`;
-    return `<div class="panel kb-main ${k.alive ? "" : "is-dead"}">
+    const halloweenGone = HALLOWEEN_ACTIVE && k.halloween_gone;
+    return `<div class="panel kb-main ${k.alive ? "" : "is-dead"} ${halloweenGone ? "halloween-gone" : ""}">
       <div class="kb-scene">
         <button class="kb-fs-btn" data-fs title="Смотреть гриб во весь экран">⛶</button>
-        <div class="kb-say" id="kb-say">${esc(k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
+        <button class="kb-tilt-btn" data-tilt title="На телефоне включает управление наклоном">📱 Включить наклон</button>
+        <div class="kb-say" id="kb-say">${esc(halloweenGone ? "В банке только комбуча. Я ненадолго исчез." : k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
         ${kombuchaSVG(k)}
+        ${halloweenGone ? `<div class="kb-gone-note">🍵 Гриб пропал. В банке осталась комбуча. Попробуй вернуться завтра.</div>` : ""}
       </div>
       <div class="kb-info">
         <div class="kb-name"><h2>${esc(k.name)}</h2><button class="link-btn" data-rename title="Переименовать">✏️</button><a class="link-btn kb-diary-link" href="/g/${k.id}" title="Дневник гриба — можно поделиться">📖 Дневник</a><a class="link-btn kb-diary-link" href="/g/${k.id}#tree" title="Родственное дерево">🌳 Род</a></div>
@@ -1534,12 +1770,25 @@ async function pageKombucha() {
           : `<div class="kb-cx r-${m.rarity}"><span class="e">❓</span><b>???</b><small>${esc(m.hint)}</small><small class="muted">${RAR[m.rarity]} · тираж ${m.issued}</small></div>`; }).join("")}</div></details>`).join("")}</details>`;
   };
 
+  const renderHalloweenTools = (k) => {
+    const owned = S.halloween?.owned_hats || [];
+    if (!S.halloween?.active && !owned.length && !k?.halloween_hat && !k?.halloween_web_until) return "";
+    const hats = owned.map((code) => [code, HALLOWEEN_HAT_UI[code]]).filter((x) => x[1]);
+    return `<section class="panel kb-halloween-tools"><h3>🎃 Хэллоуинские находки</h3>
+      ${S.halloween?.active ? `<p class="muted">Событие активно — шапки останутся у тебя и после его конца.</p><a class="btn btn-sm btn-ghost" href="/events">🦇 Перейти к ивентам и рейду</a>` : `<p class="muted">Шапки можно носить и после окончания события.</p>`}
+      ${k?.halloween_web_until ? `<p class="kb-note">🕸️ На банке временная паутина — исчезнет ${esc(fmtDate(k.halloween_web_until))}.</p>` : ""}
+      ${HALLOWEEN_ACTIVE && k?.halloween_gone ? `<p class="kb-note">👻 Сегодня меня нет в банке. Вернусь — или нет.</p>` : ""}
+      ${hats.length && k ? `<div class="kb-hat-equip"><label>Надеть на «${esc(k.name)}» <select class="input" id="kb-hat-select"><option value="">Без шапки</option>${hats.map(([code, hat]) => `<option value="${esc(code)}"${k.halloween_hat === code ? " selected" : ""}>${hat.emoji} ${esc(hat.title)}</option>`).join("")}</select></label><button class="btn btn-sm btn-accent" data-equip-hat>Надеть</button></div>` : owned.length ? `<p>В коллекции ${owned.length} ${plural(owned.length, "шапка", "шапки", "шапок")}.</p>` : `<p class="muted">Пока шапок нет. Загляни к другу и нажми «Сладость или гадость».</p>`}
+    </section>`;
+  };
+
   const render = () => {
     if (!cur() && S.items.length) sel = S.items[0].id;
     const k = cur();
     if (k) { sel = k.id; localStorage.setItem("kb-sel", sel); }
     root.innerHTML = `<div class="kb-bar-top"><span>🫙 Банки: <b>${S.jars.used}/${S.jars.jars}</b></span><span>Баланс: <a href="/wallet"><b>${S.wood} $₽</b></a></span></div>
-      ${renderJars()}${renderMain(k)}`;
+      ${renderJars()}${renderMain(k)}${renderHalloweenTools(k)}`;
+    initTiltScene($(".kb-scene", root));
     renderCodex();
     setWood(S.wood);
     $$("[data-sel]", root).forEach((b) => (b.onclick = () => { sel = Number(b.dataset.sel); render(); }));
@@ -1559,10 +1808,16 @@ async function pageKombucha() {
     }));
     const btn = (sel_) => $(sel_, root);
     if (btn("[data-fs]")) btn("[data-fs]").onclick = () => kbFullscreen(() => cur());
+    if (btn("[data-equip-hat]") && k) btn("[data-equip-hat]").onclick = async () => {
+      const code = $("#kb-hat-select", root).value || null;
+      const r = await call("POST", `/api/events/halloween/hat/${k.id}`, { code });
+      if (r) { S.items = S.items.map((x) => x.id === k.id ? r.kombucha : x); S.halloween.owned_hats = r.owned_hats; render(); toast(code ? "Шапка надета 🎃" : "Шапка снята"); }
+    };
     const afterGame = (r) => {
       S.items = S.items.map((x) => (x.id === r.kombucha.id ? r.kombucha : x));
       S.wood = r.wood_balance; render();
       if (r.result.mutation) toast(`🧬 Игра открыла мутацию: ${r.result.mutation.emoji} «${r.result.mutation.title}» #${r.result.mutation.serial}!`);
+      if (r.halloween_mutation) toast(`👁️ Хэллоуинская мутация: ${r.halloween_mutation.emoji} «${r.halloween_mutation.title}» на три дня`);
     };
     if (btn("[data-games]")) btn("[data-games]").onclick = () => kbGamesMenu(cur(), afterGame);
     const fsOpen = $(".kb-fs-art");
@@ -1616,6 +1871,7 @@ async function pageKombucha() {
     else { say(kk.phrase); if (r.message && action !== "talk") toast(r.message); }
     if (r.quote && kk.mood !== "sticky") { const b = $("#kb-say"); if (b) b.title = r.quote.lines.map((l) => l.who).join(", ") + (r.quote.book ? ` — ${r.quote.book}` : ""); }
     if (r.mutation) toast(`🧬 ${r.mutation.rarity_title} мутация: ${r.mutation.emoji} «${r.mutation.title}» #${r.mutation.serial}!${r.mutation.first_time ? " +15 $₽ за новую находку" : ""}`);
+    if (r.halloween_mutation) toast(`👁️ Хэллоуинская мутация: ${r.halloween_mutation.emoji} «${r.halloween_mutation.title}» на три дня`);
     if (r.new_badges?.length) newBadgesToast(r.new_badges);
     if (r.stage_up) toast(`🎉 Гриб вырос: теперь это «${r.kombucha.stage.title}»!`);
     if (r.sprout) toast(r.sprout.planted ? `🌱 Гриб дал отросток «${r.sprout.name}»! +50 $₽` : "🌱 Гриб дал отросток, но банки нет — купи её в магазине. +50 $₽");
@@ -1708,6 +1964,25 @@ async function profileExtras(d) {
         : `<p class="muted">${d.is_owner ? "Пусто. Заморозь гриб на <a href=\"/\">странице гриба</a> — и он встанет сюда." : "Пока пусто."}</p>`;
     } catch (_) {}
   }
+  if (!d.is_owner && ME && !ME.ban) {
+    try {
+      const event = await api("GET", "/api/events/state", undefined, { quiet: true });
+      if (event.active) {
+        const alive = new Set((d.garden || []).filter((k) => k.alive).map((k) => String(k.id)));
+        $$("#profile .profile-skin .kb-card[data-kcard]").forEach((card) => {
+          const id = card.dataset.kcard;
+          if (alive.has(id)) card.insertAdjacentHTML("beforeend", `<button class="btn btn-sm halloween-treat" data-treat="${esc(id)}">🎃 Сладость или гадость</button>`);
+        });
+        $$("#profile [data-treat]").forEach((button) => { button.onclick = async (e) => {
+          e.stopPropagation(); button.disabled = true;
+          try {
+            const r = await api("POST", `/api/events/halloween/treat/${button.dataset.treat}`, {});
+            toast(r.message); button.textContent = "✅ Сегодня уже заходил(а)";
+          } catch (_) { button.disabled = false; }
+        }; });
+      }
+    } catch (_) {}
+  }
 }
 
 // ---------------------------------------------------------------- «Деревянные» ($₽)
@@ -1743,6 +2018,56 @@ function pageFaq() {
     items.forEach((it) => { const hit = !q || it.textContent.toLowerCase().includes(q); it.hidden = !hit; if (hit) n++; if (q && hit) it.open = true; });
     $("#faq-empty").hidden = n > 0;
   };
+}
+
+// ---------------------------------------------------------------- сезонные события
+async function pageEvents() {
+  const root = $("#events-root"), status = $("#events-status"), panel = $("#halloween-panel");
+  if (!root || !panel) return;
+  let event;
+  try { event = await api("GET", "/api/events/state", undefined, { quiet: true }); }
+  catch (_) { status.textContent = "Не удалось загрузить расписание события."; return; }
+  if (!event.active) {
+    status.textContent = event.enabled ? `Хэллоуин запланирован: ${fmtDate(event.start_at)} — ${fmtDate(event.end_at)}.` : "Сейчас нет активных событий. Загляни позже.";
+    panel.innerHTML = `<h2>🌘 Подоконник пока тихий</h2><p class="muted">Как только администратор включит сезонное событие, здесь появятся игры и рейд.</p>${ME?.permissions?.includes("analytics.read") ? `<a class="btn btn-accent" href="/admin?tab=events">⚙️ Настроить ивент</a>` : ""}`;
+    return;
+  }
+  status.textContent = `Хэллоуин идёт до ${fmtDate(event.end_at)}. Не оставляй грибов одних в темноте.`;
+  if (!ME) {
+    panel.innerHTML = `<div class="halloween-event-card"><h2>🎃 Хэллоуинская ночь</h2><p>Войди, чтобы тапать по Тыквенной плесени и искать сладости у друзей.</p><a class="btn btn-accent" href="/login?next=/events">Войти в рейд</a></div>`;
+    return;
+  }
+  let raid;
+  try { raid = await api("GET", "/api/events/halloween/raid", undefined, { quiet: true }); }
+  catch (_) { panel.innerHTML = `<p class="muted">Рейд пока недоступен. Попробуй обновить страницу.</p>`; return; }
+  let tapBusy = false;
+  const tap = async () => {
+    if (tapBusy) return;
+    tapBusy = true;
+    const buttons = [$("#halloween-boss", panel), $("#halloween-tap", panel)];
+    buttons.forEach((b) => { if (b) b.disabled = true; });
+    try {
+      const r = await api("POST", "/api/events/halloween/raid/tap", {});
+      raid = r; if (r.defeated) toast(r.message || "Фаза побеждена!"); paint();
+    } catch (_) {}
+    setTimeout(() => { tapBusy = false; buttons.forEach((b) => { if (b?.isConnected) b.disabled = false; }); }, 260);
+  };
+  const paint = () => {
+    const pct = Math.max(0, Math.min(100, raid.hp / raid.max_hp * 100));
+    panel.innerHTML = `<div class="halloween-event-card">
+      <div class="haunt-stage"><span class="haunt-web">🕸️</span><span class="haunt-bats">🦇　🦇</span><span class="haunt-fly fly-a">🪰</span><span class="haunt-fly fly-b">🪰</span>
+        <button id="halloween-boss" class="halloween-boss" aria-label="Тапнуть по боссу">🎃<span>🦠</span></button><span class="haunt-caption">ЩЁЛКНИ, ЕСЛИ НЕ СТРАШНО</span></div>
+      <div class="haunt-info"><p class="eyebrow">ОБЩИЙ РЕЙД · ФАЗА ${raid.phase}</p><h2>Тыквенная плесень</h2>
+        <p>Она регенерирует медленно — <b>6 HP в минуту</b>. Каждый честный тап наносит 1 урон; быстрее регенерации.</p>
+        <div class="raid-hp"><div class="raid-hp-label"><b>${raid.hp.toLocaleString("ru-RU")} HP</b><span>${raid.max_hp.toLocaleString("ru-RU")} максимум</span></div><div class="raid-hp-bar"><i style="width:${pct}%"></i></div></div>
+        <div class="raid-meta"><span>Твой вклад: <b>${raid.my_damage}</b></span><span>Всего ударов: <b>${raid.total_damage.toLocaleString("ru-RU")}</b></span></div>
+        <button class="btn btn-accent raid-tap" id="halloween-tap">🗡️ Тапнуть по плесени</button>
+        <p class="muted">Сладость или гадость раз в день доступна на живых грибах друзей — открой профиль и постучи по банке.</p></div>
+    </div>`;
+    $("#halloween-boss", panel).onclick = tap;
+    $("#halloween-tap", panel).onclick = tap;
+  };
+  paint();
 }
 
 // ---------------------------------------------------------------- boot
@@ -1811,7 +2136,7 @@ async function pageHome() {
 }
 
 const PAGES = {
-  home: pageHome, diary: pageDiary, kombucha: pageKombucha, market: pageMarket, wallet: pageWallet,
+  home: pageHome, diary: pageDiary, kombucha: pageKombucha, events: pageEvents, market: pageMarket, wallet: pageWallet,
   profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, notifications: pageNotifications, admin: pageAdmin,
   settings: pageSettings, faq: pageFaq,
 };
@@ -1819,6 +2144,7 @@ const PAGES = {
 (async function boot() {
   initHeader();
   await loadMe();
+  await applyEventTheme();
   const fn = PAGES[document.body.dataset.page];
   if (fn) fn();
 })();

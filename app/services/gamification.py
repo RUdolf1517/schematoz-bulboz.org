@@ -34,6 +34,7 @@ BADGES: dict[str, Badge] = {b.code: b for b in [
     Badge("streak_30", "Месяц без пропусков", "🗓️", "Стрик 30 дней"),
     Badge("streak_100", "Сотка", "💯", "Стрик 100 дней"),
     Badge("night_watch", "Ночной дозор", "🌙", "Ухаживал за грибом между 2 и 5 ночи по Москве"),
+    Badge("halloween_survivor_2026", "Пережил Хэллоуин 2026", "🎃", "Заглянул на подоконник во время Хэллоуина 2026"),
 ]}
 # достижения мини-игры «Чайный гриб»
 from .kombucha_achievements import KB_BADGES as _KB  # noqa: E402

@@ -144,8 +144,13 @@ def _remote(kind: str, urls: str, default_author: str) -> dict | None:
 
 
 # ---------------------------------------------------------------- цитаты из админки
-KINDS = {"dubious": "Спорные (облачко и «Погладить»)", "philo": "Философы («Поговорить»)"}
+KINDS = {
+    "dubious": "Спорные (облачко и «Погладить»)",
+    "philo": "Философы («Поговорить»)",
+    "halloween": "Хэллоуин (жуткие цитаты)",
+}
 CUSTOM_KEY = "quotes:custom:{}"
+HALLOWEEN_ACTIVE_KEY = "quotes:halloween:active"
 CUSTOM_TTL = 3600
 
 
@@ -160,17 +165,22 @@ def _custom(kind: str) -> list[dict]:
 
 async def refresh_custom(s) -> None:
     from sqlalchemy import select
-    from ..models import Quote
+    from ..models import Quote, Setting
     rows = (await s.scalars(select(Quote).where(Quote.enabled.is_(True)))).all()
     r = _redis()
     for kind in KINDS:
         items = [{"who": q.author, "text": q.body, "book": q.source} for q in rows if q.kind == kind]
         r.set(CUSTOM_KEY.format(kind), json.dumps(items, ensure_ascii=False), ex=CUSTOM_TTL)
+    event = await s.get(Setting, "halloween")
+    value = event.value if event else {}
+    from .halloween import active
+    r.set(HALLOWEEN_ACTIVE_KEY, "1" if active(value) else "0", ex=60)
 
 
 async def ensure_custom() -> None:
-    """Подгрузить кэш, если его нет (рестарт Redis / истёк TTL). Дёшево: один EXISTS."""
-    if _redis().exists(CUSTOM_KEY.format("dubious")):
+    """Подгрузить цитаты и освежать флаг события раз в минуту."""
+    r = _redis()
+    if r.exists(CUSTOM_KEY.format("dubious")) and r.exists(HALLOWEEN_ACTIVE_KEY):
         return
     from ..db import session_scope
     async with session_scope() as s:
@@ -184,7 +194,22 @@ def _pick(builtin_n: int, kind: str):
     return None if i < builtin_n else custom[i - builtin_n]
 
 
+def _halloween_quote() -> dict | None:
+    if _redis().get(HALLOWEEN_ACTIVE_KEY) != "1":
+        return None
+    custom = _custom("halloween")
+    if custom:
+        c = rng.choice(custom)
+        return {"lines": [{"who": c["who"], "text": c["text"]}], "book": c["book"],
+                "remote": False, "custom": True, "halloween": True}
+    return {"lines": [{"who": "Я", "text": "Я не обижаюсь. Я просто закисаю в темноте."}],
+            "book": "Хэллоуин", "remote": False, "halloween": True}
+
+
 def dubious(remote: bool = True) -> dict:
+    halloween_quote = _halloween_quote()
+    if halloween_quote:
+        return halloween_quote
     if remote and rng.random() < REMOTE_SHARE:
         q = _remote("dubious", current_app.config.get("QUOTES_DUBIOUS_URLS", ""), "Неизвестный мудрец")
         if q:
@@ -197,6 +222,9 @@ def dubious(remote: bool = True) -> dict:
 
 
 def philosophy() -> dict:
+    halloween_quote = _halloween_quote()
+    if halloween_quote:
+        return halloween_quote
     if rng.random() < REMOTE_SHARE:
         q = _remote("philo", current_app.config.get("QUOTES_PHILO_URLS", ""), "Неизвестный философ")
         if q:

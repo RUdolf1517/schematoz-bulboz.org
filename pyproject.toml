@@ -12,6 +12,7 @@ dependencies = [
     "alembic>=1.13",
     "httpx>=0.27",
     "redis>=5.0",
+    "pywebpush>=2.0",
     "argon2-cffi>=23.1",
     "markdown>=3.6",
     "nh3>=0.2",
