@@ -86,6 +86,54 @@ async function applyEventTheme() {
 
 const HALLOWEEN_SCREAMER_CHANCE = 0.35;
 const HALLOWEEN_SCREAMER_COOLDOWN_MS = 15000;
+const HALLOWEEN_SCREAMERS = [
+  { id: "ghost", face: "👻", caption: "Я УЖЕ ЗДЕСЬ", sound: { type: "sawtooth", from: 280, to: 72, duration: 0.28, gain: 0.07, filter: 900 } },
+  { id: "demon", face: "👹", caption: "НЕ ОБОРАЧИВАЙСЯ", sound: { type: "square", from: 110, to: 42, duration: 0.44, gain: 0.055, filter: 380 } },
+  { id: "skull", face: "💀", caption: "ТЫ СЛЕДУЮЩИЙ", sound: { type: "sawtooth", from: 690, to: 86, duration: 0.32, gain: 0.065, filter: 1500 } },
+  { id: "eyes", face: "👁️　👁️", caption: "МЫ СМОТРИМ", sound: { type: "triangle", from: 145, to: 390, duration: 0.38, gain: 0.06, filter: 760 } },
+  { id: "spider", face: "🕷️", caption: "ПАУТИНА УЖЕ РЯДОМ", sound: { type: "square", from: 980, to: 180, duration: 0.24, gain: 0.045, filter: 2200 } },
+  { id: "mold", face: "🦠", caption: "ПЛЕСЕНЬ ПРОСНУЛАСЬ", sound: { type: "sawtooth", from: 210, to: 48, duration: 0.5, gain: 0.05, filter: 520 } },
+];
+let halloweenScreamerTimer = null, halloweenScreamerScene = null, lastScreamerVariant = "";
+
+function halloweenScreamerOverlay() {
+  let overlay = $("#halloween-screamer-overlay");
+  if (overlay) return overlay;
+  overlay = document.createElement("div");
+  overlay.id = "halloween-screamer-overlay";
+  overlay.className = "halloween-screamer-overlay";
+  overlay.setAttribute("aria-hidden", "true");
+  const face = document.createElement("span");
+  face.className = "screamer-face";
+  const caption = document.createElement("strong");
+  caption.className = "screamer-caption";
+  overlay.append(face, caption);
+  document.body.append(overlay);
+  return overlay;
+}
+
+function playHalloweenScreamerSound(profile) {
+  try {
+    const Audio = window.AudioContext || window.webkitAudioContext;
+    if (!Audio) return;
+    const ctx = new Audio();
+    const osc = ctx.createOscillator(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
+    const duration = profile.duration;
+    filter.type = profile.type === "triangle" ? "bandpass" : "lowpass";
+    filter.frequency.value = profile.filter;
+    osc.type = profile.type;
+    osc.frequency.setValueAtTime(profile.from, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(profile.to, ctx.currentTime + duration * 0.72);
+    gain.gain.setValueAtTime(profile.gain, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    osc.connect(filter).connect(gain).connect(ctx.destination);
+    ctx.resume().catch(() => {});
+    osc.start();
+    osc.stop(ctx.currentTime + duration + 0.02);
+    osc.onended = () => ctx.close().catch(() => {});
+  } catch (_) {}
+}
+
 function maybeHalloweenScreamer(force = false, ignoreCooldown = false) {
   if ((!HALLOWEEN_ACTIVE && !force) || REDUCED_MOTION) return false;
   const now = Date.now(), last = Number(localStorage.getItem("halloween-scream-at") || 0);
@@ -95,23 +143,32 @@ function maybeHalloweenScreamer(force = false, ignoreCooldown = false) {
   }
   if (!force && Math.random() >= HALLOWEEN_SCREAMER_CHANCE) return false;
   localStorage.setItem("halloween-scream-at", String(now));
+  const choices = HALLOWEEN_SCREAMERS.filter((variant) => variant.id !== lastScreamerVariant);
+  const variant = choices[Math.floor(Math.random() * choices.length)] || HALLOWEEN_SCREAMERS[0];
+  lastScreamerVariant = variant.id;
   const scene = $(".kb-scene .kb-svg") || $(".halloween-boss") || $(".profile-skin .kb-svg") || $(".kb-svg");
-  scene?.classList.remove("kb-screamer");
+  const overlay = halloweenScreamerOverlay();
+  clearTimeout(halloweenScreamerTimer);
+  halloweenScreamerScene?.classList.remove("kb-screamer");
   document.body.classList.remove("halloween-scream-flash");
+  overlay.classList.remove("active");
+  void overlay.offsetWidth;
+  overlay.dataset.variant = variant.id;
+  $(".screamer-face", overlay).textContent = variant.face;
+  $(".screamer-caption", overlay).textContent = variant.caption;
+  scene?.classList.remove("kb-screamer");
   void document.body.offsetWidth;
   scene?.classList.add("kb-screamer");
+  halloweenScreamerScene = scene;
+  overlay.classList.add("active");
   document.body.classList.add("halloween-scream-flash");
-  try {
-    const Audio = window.AudioContext || window.webkitAudioContext;
-    if (Audio) {
-      const ctx = new Audio(); ctx.resume().catch(() => {});
-      const osc = ctx.createOscillator(), gain = ctx.createGain();
-      osc.type = "sawtooth"; osc.frequency.setValueAtTime(280, ctx.currentTime); osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.18);
-      gain.gain.setValueAtTime(0.07, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
-      osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.23); osc.onended = () => ctx.close();
-    }
-  } catch (_) {}
-  setTimeout(() => { scene?.classList.remove("kb-screamer"); document.body.classList.remove("halloween-scream-flash"); }, 900);
+  playHalloweenScreamerSound(variant.sound);
+  halloweenScreamerTimer = setTimeout(() => {
+    overlay.classList.remove("active");
+    document.body.classList.remove("halloween-scream-flash");
+    halloweenScreamerScene?.classList.remove("kb-screamer");
+    halloweenScreamerScene = null;
+  }, 1050);
   return true;
 }
 

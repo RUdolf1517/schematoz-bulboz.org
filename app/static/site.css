@@ -926,6 +926,33 @@ body.kb-med-on { overflow: hidden; }
 @keyframes kb-scream { 0%{transform:rotate(0) scale(1)} 22%{transform:rotate(-34deg) scale(1.08)} 48%{transform:rotate(178deg) scale(1.13)} 72%{transform:rotate(194deg) scale(1.06)} 100%{transform:rotate(360deg) scale(1)} }
 .halloween-scream-flash { animation:halloween-flash .68s steps(2,end); }
 @keyframes halloween-flash { 50%{box-shadow:inset 0 0 0 999px #ff203f55} }
+.halloween-screamer-overlay { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; overflow:hidden; isolation:isolate; opacity:0; visibility:hidden; pointer-events:none; background:radial-gradient(circle at 50% 45%,#48101ddc,#08030df2 72%); color:#fff2f4; }
+.halloween-screamer-overlay.active { visibility:visible; opacity:1; animation:screamer-screen-flash .88s steps(3,end); }
+.halloween-screamer-overlay::before { content:""; position:absolute; inset:0; z-index:0; opacity:.27; background:repeating-linear-gradient(0deg,transparent 0 5px,#ff334317 6px 7px); }
+.halloween-screamer-overlay::after { content:""; position:absolute; width:min(78vw,720px); aspect-ratio:1; z-index:0; border:3px solid #ff274744; border-radius:50%; box-shadow:0 0 45px #fc183f55,inset 0 0 45px #fc183f33; animation:screamer-ring .88s ease-out both; }
+.screamer-face { position:relative; z-index:1; display:block; font-size:clamp(120px,34vw,360px); line-height:1; text-align:center; filter:drop-shadow(0 0 24px #f21c4b); transform-origin:center; }
+.screamer-caption { position:fixed; z-index:1; bottom:12vh; max-width:90vw; color:#fff; font-size:clamp(18px,4vw,38px); font-weight:1000; letter-spacing:.22em; text-align:center; text-shadow:0 0 12px #ff2747,0 0 32px #fa124e; animation:screamer-caption .9s steps(2,end); }
+.halloween-screamer-overlay[data-variant="ghost"] { background:radial-gradient(circle at 50% 48%,#8bdff3c9,#07101bf5 68%); }
+.halloween-screamer-overlay[data-variant="ghost"] .screamer-face { filter:drop-shadow(0 0 32px #adf6ff); animation:screamer-ghost .92s cubic-bezier(.1,.8,.18,1) both; }
+.halloween-screamer-overlay[data-variant="demon"] { background:radial-gradient(ellipse at 52% 52%,#b71928e8,#18030bf7 70%); }
+.halloween-screamer-overlay[data-variant="demon"] .screamer-face { filter:drop-shadow(0 0 35px #ff2c12); animation:screamer-demon .72s steps(2,end) both; }
+.halloween-screamer-overlay[data-variant="skull"] { background:radial-gradient(circle at 50% 45%,#b9c2cbcc,#07080df7 70%); }
+.halloween-screamer-overlay[data-variant="skull"] .screamer-face { filter:grayscale(1) drop-shadow(0 0 30px #fff); animation:screamer-skull .82s steps(5,end) both; }
+.halloween-screamer-overlay[data-variant="eyes"] { background:radial-gradient(ellipse at 50% 50%,#6e061beb,#090109f7 66%); }
+.halloween-screamer-overlay[data-variant="eyes"] .screamer-face { font-size:clamp(80px,24vw,250px); letter-spacing:.08em; filter:drop-shadow(0 0 35px #ff1200); animation:screamer-eyes .8s ease-out both; }
+.halloween-screamer-overlay[data-variant="spider"] { background:radial-gradient(circle at 50% 40%,#2f113bdf,#05030bf7 72%); }
+.halloween-screamer-overlay[data-variant="spider"] .screamer-face { filter:drop-shadow(0 0 28px #c26aff); animation:screamer-spider .9s cubic-bezier(.2,.7,.1,1) both; }
+.halloween-screamer-overlay[data-variant="mold"] { background:radial-gradient(circle at 50% 48%,#254517e8,#060b05f7 68%); }
+.halloween-screamer-overlay[data-variant="mold"] .screamer-face { filter:drop-shadow(0 0 34px #8cff38); animation:screamer-mold .92s cubic-bezier(.15,.9,.3,1) both; }
+@keyframes screamer-screen-flash { 0%,100%{filter:brightness(1)} 15%{filter:brightness(2.2)} 32%{filter:brightness(.35)} 56%{filter:brightness(1.8)} }
+@keyframes screamer-ring { 0%{transform:scale(.2);opacity:.85} 100%{transform:scale(1.35);opacity:0} }
+@keyframes screamer-caption { 0%,35%{opacity:0;transform:translateY(16px)} 45%,100%{opacity:1;transform:translateY(0)} }
+@keyframes screamer-ghost { 0%{opacity:0;transform:translateY(38vh) scale(.18) rotate(-15deg)} 60%{opacity:1;transform:translateY(-3vh) scale(1.2) rotate(7deg)} 100%{opacity:1;transform:translateY(0) scale(1) rotate(0)} }
+@keyframes screamer-demon { 0%{opacity:0;transform:translateX(-90vw) rotate(-30deg) scale(.25)} 38%{opacity:1;transform:translateX(8vw) rotate(12deg) scale(1.3)} 52%{transform:translateX(-4vw) rotate(-8deg) scale(.92)} 100%{opacity:1;transform:translateX(0) rotate(0) scale(1)} }
+@keyframes screamer-skull { 0%,100%{opacity:1;transform:translate(0,0) scale(1)} 15%{opacity:.08;transform:translate(-16px,4px) scale(1.15)} 33%{opacity:1;transform:translate(12px,-3px) scale(.9)} 55%{opacity:.2;transform:translate(-5px,0) scale(1.22)} 76%{opacity:1;transform:translate(0,0) scale(1)} }
+@keyframes screamer-eyes { 0%{opacity:0;transform:scaleX(.05) scaleY(.4)} 45%{opacity:1;transform:scaleX(1.35) scaleY(1.3)} 68%{transform:scaleX(.86) scaleY(.9)} 100%{opacity:1;transform:scale(1)} }
+@keyframes screamer-spider { 0%{opacity:0;transform:translateY(-75vh) scale(.08) rotate(-25deg)} 56%{opacity:1;transform:translateY(6vh) scale(1.2) rotate(14deg)} 72%{transform:translateY(-3vh) scale(.9) rotate(-8deg)} 100%{opacity:1;transform:translateY(0) scale(1) rotate(0)} }
+@keyframes screamer-mold { 0%{opacity:0;transform:scale(4) rotate(160deg);filter:blur(20px)} 58%{opacity:1;transform:scale(.82) rotate(-20deg);filter:blur(0)} 76%{transform:scale(1.14) rotate(9deg)} 100%{opacity:1;transform:scale(1) rotate(0);filter:blur(0)} }
 
 body.halloween { --bg:#08050d; --bg2:#120b18; --card:#1a101f; --line:#69203c; --accent:#ff394b; --accent2:#8f25d2; background-color:#08050d; background-image:radial-gradient(ellipse at 78% 2%,#73163c50,transparent 34%),radial-gradient(ellipse at 8% 70%,#25103f55,transparent 45%),repeating-linear-gradient(0deg,#08050d00 0 3px,#fb285506 4px 5px); }
 body.halloween .top { background:#09050eef; border-bottom-color:#8a2443; box-shadow:0 4px 30px #c21b3c22; }
