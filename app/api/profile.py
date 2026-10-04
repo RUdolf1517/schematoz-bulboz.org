@@ -39,15 +39,16 @@ async def profile(username: str):
         stats = await kombucha_stats(s, user.id)
         garden = (await s.scalars(select(Kombucha).where(Kombucha.user_id == user.id, Kombucha.frozen.is_(False))
                                   .order_by(Kombucha.alive.desc(), Kombucha.xp.desc()))).all()
+        event_window = await kb.halloween_decay_window(s)
         for k in garden:
-            kb.tick(k)
+            kb.tick(k, halloween_window=event_window)
         garden_out = [kb.public_out(k) for k in garden]
         pinned = None
         pid = (user.profile or {}).get("pinned_kombucha_id")
         if pid:
             k = await s.get(Kombucha, pid)
             if k and k.user_id == user.id:
-                kb.tick(k)
+                kb.tick(k, halloween_window=event_window)
                 pinned = kb.public_out(k)
         viewer = current_user_id()
 

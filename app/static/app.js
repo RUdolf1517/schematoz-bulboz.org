@@ -84,14 +84,16 @@ async function applyEventTheme() {
   return d;
 }
 
+const HALLOWEEN_SCREAMER_CHANCE = 0.35;
+const HALLOWEEN_SCREAMER_COOLDOWN_MS = 15000;
 function maybeHalloweenScreamer(force = false, ignoreCooldown = false) {
   if ((!HALLOWEEN_ACTIVE && !force) || REDUCED_MOTION) return false;
   const now = Date.now(), last = Number(localStorage.getItem("halloween-scream-at") || 0);
-  if (!ignoreCooldown && now - last < 120000) {
+  if (!ignoreCooldown && now - last < HALLOWEEN_SCREAMER_COOLDOWN_MS) {
     if (force) toast("Скример уже был. Дай нервам передышку ещё немного 👻");
     return false;
   }
-  if (!force && Math.random() >= 0.1) return false;
+  if (!force && Math.random() >= HALLOWEEN_SCREAMER_CHANCE) return false;
   localStorage.setItem("halloween-scream-at", String(now));
   const scene = $(".kb-scene .kb-svg") || $(".halloween-boss") || $(".profile-skin .kb-svg") || $(".kb-svg");
   scene?.classList.remove("kb-screamer");
@@ -968,24 +970,84 @@ async function adminHalloween(panel) {
     const d = new Date(value);
     return Number.isNaN(d.getTime()) ? "" : new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   };
+  const raid = data.raid || { boss_name: "Тыквенная плесень", regen_per_minute: 6,
+    stages: [{ title: "Первая волна", max_hp: 10000, description: "" }], gifts: [] };
+  const makeGiftId = () => `gift-${Math.random().toString(36).slice(2, 10)}`;
+  const stageRow = (stage = {}) => `<div class="raid-admin-row" data-stage-row>
+    <div class="raid-admin-row-head"><b>Стадия</b><button type="button" class="btn btn-ghost btn-sm" data-remove-stage>Удалить</button></div>
+    <label>Название<input class="input" data-stage-title maxlength="80" required value="${esc(stage.title || "")}"></label>
+    <label>Здоровье босса (HP)<input class="input" data-stage-hp type="number" min="1" max="1000000" required value="${Number(stage.max_hp) || 10000}"></label>
+    <label>Описание<input class="input" data-stage-description maxlength="280" value="${esc(stage.description || "")}"></label>
+  </div>`;
+  const giftRow = (gift = {}) => `<div class="raid-admin-row" data-gift-row>
+    <div class="raid-admin-row-head"><b>Подарок</b><button type="button" class="btn btn-ghost btn-sm" data-remove-gift>Удалить</button></div>
+    <input type="hidden" data-gift-id value="${esc(gift.id || makeGiftId())}">
+    <label>Стадия №<input class="input" data-gift-stage type="number" min="1" max="20" required value="${Number(gift.stage) || 1}"></label>
+    <label>Нанести урона на этой стадии<input class="input" data-gift-damage type="number" min="1" max="1000000" required value="${Number(gift.required_damage) || 1}"></label>
+    <label>Эмодзи<input class="input" data-gift-emoji maxlength="12" required value="${esc(gift.emoji || "🎁")}"></label>
+    <label>Название<input class="input" data-gift-title maxlength="80" required value="${esc(gift.title || "")}" placeholder="Например, тыквенный значок"></label>
+    <label>Описание<input class="input" data-gift-description maxlength="240" value="${esc(gift.description || "")}" placeholder="Что получит игрок"></label>
+  </div>`;
   panel.innerHTML = `<form class="panel form" id="halloween-admin-form">
     <h2 style="margin-top:0">🎃 Хэллоуинский ивент</h2>
-    <p class="muted">Переключатель можно включать и выключать в любой момент. Ивент активен только между датами; вводимые даты — в часовом поясе этого браузера.</p>
+    <p class="muted">Ивент активен только между датами. Даты вводятся в часовом поясе браузера. Рейд общий для всех игроков сайта.</p>
     <label class="check"><input type="checkbox" name="enabled" ${data.enabled ? "checked" : ""}> Разрешить событие</label>
     <label>Начало<input class="input" type="datetime-local" name="start_at" required value="${esc(localInput(data.start_at))}"></label>
     <label>Конец<input class="input" type="datetime-local" name="end_at" required value="${esc(localInput(data.end_at))}"></label>
     <p class="event-admin-status">Сейчас: <b>${data.active ? "🟢 активно" : data.enabled ? "🕒 включено, но вне дат" : "⚫ выключено"}</b></p>
-    <button class="btn btn-accent">Сохранить настройки</button>
+    <hr>
+    <h3>Общий босс</h3>
+    <label>Имя босса<input class="input" name="boss_name" maxlength="80" required value="${esc(raid.boss_name)}"></label>
+    <label>Регенерация HP в минуту<input class="input" name="regen_per_minute" type="number" min="0" max="60" required value="${Number(raid.regen_per_minute) || 0}"></label>
+    <h3>Стадии</h3><p class="muted">Здоровье задаётся отдельно для каждой стадии. Когда текущая стадия побеждена, рейд переходит к следующей; после последней босс продолжает появляться с её параметрами.</p>
+    <div class="raid-admin-rows" id="raid-admin-stages">${(raid.stages || []).map(stageRow).join("")}</div>
+    <button class="btn btn-ghost btn-sm" id="raid-add-stage" type="button">＋ Добавить стадию</button>
+    <h3>Подарки за участие</h3><p class="muted">Подарок приходит игрокам после победы над указанной стадией, если каждый игрок лично нанёс на ней не меньше заданного урона. Один подарок выдаётся каждому игроку один раз.</p>
+    <div class="raid-admin-rows" id="raid-admin-gifts">${(raid.gifts || []).map(giftRow).join("")}</div>
+    <button class="btn btn-ghost btn-sm" id="raid-add-gift" type="button">＋ Создать подарок</button>
+    <hr><button class="btn btn-accent">Сохранить настройки</button>
   </form>
-  <div class="panel"><h3>Состав события</h3><p class="muted">Тёмное оформление, скримеры с ограничением раз в 2 минуты, шанс исчезновения гриба раз в сутки, хэллоуинские цитаты (вкладка «Цитаты гриба»), временные мутации, «Сладость или гадость» и общий рейд «Тыквенная плесень».</p><p class="muted">В проекте пока нет модели клубов, поэтому рейд общий для всех игроков сайта.</p></div>`;
+  <div class="panel"><h3>Эффекты события</h3><p class="muted">Скример срабатывает примерно на каждом третьем действии, не чаще одного раза за 15 секунд. Музыка включена по умолчанию. Чистота и счастье грибов во время ивента убывают вдвое быстрее; в рейде каждый выставленный гриб наносит 1 урон, получает +1 чистоты и счастья, но теряет по 1 сахару и заварки.</p>
+  <p class="muted">Также доступны хэллоуинские цитаты, временные мутации, «Сладость или гадость» и исчезновения грибов.</p></div>`;
+  const stagesBox = $("#raid-admin-stages", panel), giftsBox = $("#raid-admin-gifts", panel);
+  $("#raid-add-stage", panel).onclick = () => {
+    if (stagesBox.querySelectorAll("[data-stage-row]").length >= 20) return toast("Максимум 20 стадий", true);
+    stagesBox.insertAdjacentHTML("beforeend", stageRow({ title: `Стадия ${stagesBox.querySelectorAll("[data-stage-row]").length + 1}`, max_hp: 10000 }));
+  };
+  $("#raid-add-gift", panel).onclick = () => {
+    if (giftsBox.querySelectorAll("[data-gift-row]").length >= 100) return toast("Максимум 100 подарков", true);
+    giftsBox.insertAdjacentHTML("beforeend", giftRow());
+  };
+  stagesBox.addEventListener("click", (event) => {
+    if (!event.target.closest("[data-remove-stage]")) return;
+    if (stagesBox.querySelectorAll("[data-stage-row]").length <= 1) return toast("У рейда должна остаться хотя бы одна стадия", true);
+    event.target.closest("[data-stage-row]").remove();
+  });
+  giftsBox.addEventListener("click", (event) => {
+    if (event.target.closest("[data-remove-gift]")) event.target.closest("[data-gift-row]").remove();
+  });
   $("#halloween-admin-form", panel).onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
     const start = new Date(f.get("start_at")), end = new Date(f.get("end_at"));
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return toast("Укажи начало и конец события", true);
+    const stages = [...stagesBox.querySelectorAll("[data-stage-row]")].map((row) => ({
+      title: $("[data-stage-title]", row).value.trim(),
+      max_hp: Number($("[data-stage-hp]", row).value),
+      description: $("[data-stage-description]", row).value.trim(),
+    }));
+    const gifts = [...giftsBox.querySelectorAll("[data-gift-row]")].map((row) => ({
+      id: $("[data-gift-id]", row).value,
+      stage: Number($("[data-gift-stage]", row).value),
+      required_damage: Number($("[data-gift-damage]", row).value),
+      emoji: $("[data-gift-emoji]", row).value.trim(),
+      title: $("[data-gift-title]", row).value.trim(),
+      description: $("[data-gift-description]", row).value.trim(),
+    }));
     try {
       const r = await api("PUT", "/admin/events/halloween", {
         enabled: f.has("enabled"), start_at: start.toISOString(), end_at: end.toISOString(),
+        raid: { boss_name: f.get("boss_name").trim(), regen_per_minute: Number(f.get("regen_per_minute")), stages, gifts },
       });
       toast(r.active ? "🎃 Хэллоуин включён" : "Настройки ивента сохранены");
       await adminHalloween(panel);
@@ -1846,7 +1908,7 @@ async function pageKombucha() {
         <button class="kb-fs-btn" data-fs title="Смотреть гриб во весь экран">⛶</button>
         <button class="kb-tilt-btn" data-tilt title="На телефоне включает управление наклоном">📱 Включить наклон</button>
         ${HALLOWEEN_ACTIVE ? `<button class="kb-music-btn" data-spooky-music aria-pressed="${spookyMusicEnabled ? "true" : "false"}">${spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку"}</button>
-          ${isHalloweenAdmin() ? `<button class="kb-scare-btn" data-screamer-test title="Проверить скример (не чаще раза в две минуты)" aria-label="Проверить скример">👻</button>` : ""}
+          ${isHalloweenAdmin() ? `<button class="kb-scare-btn" data-screamer-test title="Проверить скример" aria-label="Проверить скример">👻</button>` : ""}
           <div class="kb-bat-swarm" aria-hidden="true"><span class="kb-bat bat-a">🦇</span><span class="kb-bat bat-b">🦇</span><span class="kb-bat bat-c">🦇</span></div>` : ""}
         <div class="kb-say" id="kb-say">${esc(halloweenGone ? "В банке только комбуча. Я ненадолго исчез." : k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
         ${kombuchaSVG(k)}
@@ -2167,7 +2229,10 @@ async function pageEvents() {
     status.textContent = event.enabled
       ? `Хэллоуин запланирован: ${fmtDate(event.start_at)} — ${fmtDate(event.end_at)}.`
       : "Сейчас нет активных событий.";
+    const gifts = (event.raid_gifts || []).slice().reverse().map((gift) =>
+      `<li><span>${esc(gift.emoji || "🎁")}</span><div><b>${esc(gift.title)}</b>${gift.description ? `<small>${esc(gift.description)}</small>` : ""}</div></li>`).join("");
     panel.innerHTML = `<h2>🌘 Сейчас тихо</h2><p class="muted">Загляни во время активного ивента — тогда здесь появится общий босс.</p>
+      ${gifts ? `<section class="raid-rewards raid-gift-box"><h3>🎁 Твои подарки за рейды</h3><ul>${gifts}</ul></section>` : ""}
       ${isHalloweenAdmin() ? `<button class="btn btn-ghost scare-test" data-screamer-test>👻 Проверить скример</button>` : ""}`;
   };
   if (!event.active) { renderInactive(); return; }
@@ -2176,37 +2241,108 @@ async function pageEvents() {
   try { raid = await api("GET", "/api/events/halloween/raid", undefined, { quiet: true }); }
   catch (_) { panel.innerHTML = `<p class="muted">Не удалось загрузить босса. Попробуй обновить страницу.</p>`; return; }
   if (!raid.active) { event.active = false; renderInactive(); return; }
-  let tapBusy = false;
-  const canTap = () => !!(event.active && ME && !ME.ban
+
+  let partyIds = (raid.party_ids || []).map(Number);
+  let partyDirty = false, tapBusy = false, tapAllowedAt = 0;
+  const canJoin = () => !!(event.active && ME && !ME.ban
     && (ME.permissions?.includes("kombucha.play") || isHalloweenAdmin()));
+  const canTap = () => canJoin() && !tapBusy && Date.now() >= tapAllowedAt
+    && raid.available_mushrooms?.length > 0 && partyIds.length > 0;
+  const tapLabel = () => {
+    if (!ME) return "🔐 Войди, чтобы вступить в рейд";
+    if (ME.ban) return "🚫 Аккаунт заблокирован";
+    if (!canJoin()) return "🔒 Нет права на участие";
+    if (!raid.available_mushrooms?.length) return "🍄 Сначала заведи живого гриба";
+    if (!partyIds.length) return "Выставь хотя бы одного гриба";
+    return `🗡️ Атаковать · −${partyIds.length} HP`;
+  };
   const tap = async () => {
-    if (tapBusy || !canTap()) return;
+    if (tapBusy || Date.now() < tapAllowedAt || !canTap()) return;
     tapBusy = true;
+    tapAllowedAt = Date.now() + 1000;
     const buttons = [$("#halloween-boss", panel), $("#halloween-tap", panel)];
     buttons.forEach((b) => { if (b) b.disabled = true; });
     try {
-      const r = await api("POST", "/api/events/halloween/raid/tap", {});
-      raid = r; if (r.defeated) toast(r.message || "Фаза побеждена!"); paint();
-    } catch (_) {}
-    setTimeout(() => { tapBusy = false; buttons.forEach((b) => { if (b?.isConnected) b.disabled = false; }); }, 260);
+      const r = await api("POST", "/api/events/halloween/raid/tap", { kombucha_ids: partyIds });
+      raid = r;
+      partyIds = (r.party_ids || partyIds).map(Number);
+      partyDirty = false;
+      paint();
+      if (r.defeated) toast(r.message || "Стадия побеждена!");
+      const boss = $("#halloween-boss", panel);
+      if (boss) {
+        const effect = r.defeated ? "boss-defeat" : "boss-hit";
+        boss.classList.add(effect);
+        setTimeout(() => boss.classList.remove(effect), r.defeated ? 850 : 520);
+      }
+    } catch (_) {} finally {
+      setTimeout(() => { tapBusy = false; if (panel.isConnected) paint(); }, Math.max(0, tapAllowedAt - Date.now()));
+    }
   };
   const paint = () => {
     const pct = Math.max(0, Math.min(100, raid.hp / raid.max_hp * 100));
     const ready = canTap();
+    const available = raid.available_mushrooms || [];
+    const selected = new Set(partyIds);
+    const teamSlots = [0, 1, 2].map((slot) => {
+      const chosen = partyIds[slot] || "";
+      const options = available.map((m) => {
+        const usedElsewhere = partyIds.some((id, index) => index !== slot && id === m.id);
+        return `<option value="${m.id}" ${m.id === chosen ? "selected" : ""} ${usedElsewhere ? "disabled" : ""}>${esc(m.name)} · чистота ${m.stats.clean}, счастье ${m.stats.happy}</option>`;
+      }).join("");
+      return `<label>Слот ${slot + 1}<select class="input raid-team-select" data-raid-slot="${slot}" ${canJoin() && available.length ? "" : "disabled"}>
+        <option value="">— не выставлять —</option>${options}</select></label>`;
+    }).join("");
+    const stageGifts = (raid.stage_gifts || []).map((gift) => {
+      const received = (raid.gifts_received || []).some((item) => item.id === gift.id);
+      const remaining = Math.max(0, gift.required_damage - (raid.stage_damage || 0));
+      return `<li><b>${esc(gift.emoji)} ${esc(gift.title)}</b> — ${received ? "уже получен" : `нанеси ещё ${remaining} урона на этой стадии`}${gift.description ? `<small>${esc(gift.description)}</small>` : ""}</li>`;
+    }).join("");
+    const receivedGifts = (raid.gifts_received || []).slice().reverse().map((gift) =>
+      `<li><span>${esc(gift.emoji || "🎁")}</span><div><b>${esc(gift.title)}</b>${gift.description ? `<small>${esc(gift.description)}</small>` : ""}</div></li>`).join("");
+    const selectedNames = available.filter((m) => selected.has(m.id)).map((m) => esc(m.name));
     panel.innerHTML = `<div class="halloween-event-card">
       <div class="haunt-stage"><span class="haunt-web">🕸️</span><span class="haunt-bats">🦇　🦇</span><span class="haunt-fly fly-a">🪰</span><span class="haunt-fly fly-b">🪰</span>
-        <button id="halloween-boss" class="halloween-boss" aria-label="Тапнуть по боссу" ${ready ? "" : "disabled"}>🎃<span>🦠</span></button><span class="haunt-caption">ОН УЖЕ ЗАМЕТИЛ ТЕБЯ</span></div>
-      <div class="haunt-info"><p class="eyebrow">ОБЩИЙ РЕЙД · ФАЗА ${raid.phase}</p><h2>Тыквенная плесень</h2>
-        <p>Один босс для всех игроков сайта. Он регенерирует медленно — <b>6 HP в минуту</b>; каждый честный тап наносит 1 урон.</p>
+        <button id="halloween-boss" class="halloween-boss" aria-label="Атаковать босса" ${ready ? "" : "disabled"}>🎃<span>🦠</span></button><span class="haunt-caption">ОН УЖЕ ЗАМЕТИЛ ТЕБЯ</span></div>
+      <div class="haunt-info"><p class="eyebrow">ОБЩИЙ РЕЙД · ФАЗА ${raid.phase} · СТАДИЯ ${raid.stage_number}/${raid.stage_count}</p>
+        <h2>${esc(raid.boss)}</h2><h3 class="raid-stage-title">${esc(raid.stage_title)}</h3>
+        <p>${esc(raid.stage_description || "Один босс для всех игроков сайта.")} Регенерация — <b>${raid.regen_per_minute} HP в минуту</b>.</p>
+        <p>Выставь до трёх своих живых грибов: каждый наносит 1 урон. При ударе каждый участник получает +1 чистоты и счастья, но теряет по 1 сахару и заварки.</p>
         <div class="raid-hp"><div class="raid-hp-label"><b>${raid.hp.toLocaleString("ru-RU")} HP</b><span>${raid.max_hp.toLocaleString("ru-RU")} максимум</span></div><div class="raid-hp-bar"><i style="width:${pct}%"></i></div></div>
-        <div class="raid-meta"><span>Твой вклад: <b>${raid.my_damage}</b></span><span>Всего ударов: <b>${raid.total_damage.toLocaleString("ru-RU")}</b></span></div>
-        <button class="btn btn-accent raid-tap" id="halloween-tap" ${ready ? "" : "disabled"}>${ready ? "🗡️ Тапнуть по плесени" : !ME ? "🔐 Войди, чтобы вступить в рейд" : ME.ban ? "🚫 Аккаунт заблокирован" : "🔒 Нет права на участие"}</button>
+        <div class="raid-meta"><span>Твой урон: <b>${raid.my_damage}</b></span><span>Урон на стадии: <b>${raid.stage_damage || 0}</b></span><span>Всего урона: <b>${raid.total_damage.toLocaleString("ru-RU")}</b></span></div>
+        ${ME ? `<section class="raid-party"><h3>🍄 Твоя боевая группа</h3>${available.length ? `<div class="raid-team-slots">${teamSlots}</div>
+          <p class="raid-team-status muted">${partyIds.length ? `Выставлено: ${selectedNames.join(", ")} · урон за удар: ${partyIds.length}` : "Выбери хотя бы одного гриба"}</p>`
+          : `<p class="muted">У тебя пока нет живых незамороженных грибов для рейда. Заведи гриб на <a href="/">подоконнике</a>.</p>`}</section>` : ""}
+        <button class="btn btn-accent raid-tap" id="halloween-tap" ${ready ? "" : "disabled"}>${tapLabel()}</button>
         ${!ME ? `<a class="btn btn-ghost btn-sm" href="/login?next=/events">🔐 Войти и бить босса вместе</a>` : ""}
+        ${stageGifts ? `<section class="raid-rewards"><h3>🎁 Награды этой стадии</h3><ul>${stageGifts}</ul></section>` : ""}
+        ${ME && receivedGifts ? `<section class="raid-rewards raid-gift-box"><h3>🎁 Твои подарки за рейд</h3><ul>${receivedGifts}</ul></section>` : ""}
         <div class="haunt-controls">${isHalloweenAdmin() ? `<button class="btn btn-ghost scare-test" data-screamer-test>👻 Проверить скример</button>` : ""}<button class="btn btn-ghost" data-spooky-music aria-pressed="${spookyMusicEnabled ? "true" : "false"}">${spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку"}</button></div>
         <p class="muted">«Сладость или гадость» раз в день доступна на живых грибах друзей — открой профиль и постучи по банке.</p></div>
     </div>`;
     $("#halloween-boss", panel).onclick = tap;
     $("#halloween-tap", panel).onclick = tap;
+    $$('[data-raid-slot]', panel).forEach((select) => {
+      select.onchange = () => {
+        const next = $$('[data-raid-slot]', panel).map((item) => item.value ? Number(item.value) : null).filter(Boolean);
+        if (new Set(next).size !== next.length) {
+          toast("Одного гриба нельзя выставить в два слота", true);
+          select.value = partyIds[Number(select.dataset.raidSlot)] || "";
+          return;
+        }
+        partyIds = next;
+        partyDirty = true;
+        const statusLine = $(".raid-team-status", panel);
+        const names = available.filter((m) => partyIds.includes(m.id)).map((m) => m.name);
+        if (statusLine) statusLine.textContent = partyIds.length
+          ? `Выставлено: ${names.join(", ")} · урон за удар: ${partyIds.length}` : "Выбери хотя бы одного гриба";
+        [$("#halloween-boss", panel), $("#halloween-tap", panel)].forEach((button) => {
+          if (button) button.disabled = !canTap() || tapBusy;
+        });
+        const attackButton = $("#halloween-tap", panel);
+        if (attackButton) attackButton.textContent = tapLabel();
+      };
+    });
   };
   paint();
   let raidRefreshBusy = false, raidPoll;
@@ -2222,9 +2358,17 @@ async function pageEvents() {
         clearInterval(raidPoll);
         return;
       }
-      const changed = fresh.hp !== raid.hp || fresh.phase !== raid.phase || fresh.total_damage !== raid.total_damage
-        || fresh.my_damage !== raid.my_damage;
-      if (changed) { raid = fresh; paint(); }
+      const changed = fresh.hp !== raid.hp || fresh.max_hp !== raid.max_hp || fresh.phase !== raid.phase
+        || fresh.stage_number !== raid.stage_number || fresh.total_damage !== raid.total_damage
+        || fresh.my_damage !== raid.my_damage || fresh.stage_damage !== raid.stage_damage
+        || JSON.stringify(fresh.available_mushrooms) !== JSON.stringify(raid.available_mushrooms)
+        || JSON.stringify(fresh.gifts_received) !== JSON.stringify(raid.gifts_received);
+      if (changed) {
+        raid = fresh;
+        if (!partyDirty) partyIds = (fresh.party_ids || []).map(Number);
+        else partyIds = partyIds.filter((id) => fresh.available_mushrooms.some((m) => m.id === id));
+        paint();
+      }
     } catch (_) {} finally { raidRefreshBusy = false; }
   };
   raidPoll = setInterval(refreshRaid, 5000);

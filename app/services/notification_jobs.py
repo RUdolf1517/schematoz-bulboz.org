@@ -42,6 +42,7 @@ async def scan_notifications(at: datetime | None = None) -> dict:
     async with _session_scope() as s:
         users = (await s.scalars(select(User))).all()
         by_id = {u.id: u for u in users}
+        event_window = await kb.halloween_decay_window(s)
         kombuchas = (await s.scalars(select(Kombucha).where(
             Kombucha.alive.is_(True), Kombucha.frozen.is_(False)).order_by(Kombucha.id))).all()
         created = 0
@@ -51,7 +52,7 @@ async def scan_notifications(at: datetime | None = None) -> dict:
             if not owner:
                 continue
             was_alive = k.alive
-            kb.tick(k, at)
+            kb.tick(k, at, halloween_window=event_window)
             route = f"/g/{k.id}"
             if was_alive and not k.alive:
                 key = f"dead:{k.id}:{k.died_at.isoformat() if k.died_at else today}"

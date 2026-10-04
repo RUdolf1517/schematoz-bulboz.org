@@ -83,8 +83,11 @@ class HalloweenRaid(Base):
 
 
 class HalloweenRaidPlayer(Base):
-    """Per-player raid tap throttle and contribution counter."""
+    """Player's shared-raid team, per-phase contribution, earned gifts and tap throttle."""
     __tablename__ = "halloween_raid_players"
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     last_tap_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     damage: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    kombucha_ids: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+    stage_damage: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
+    gifts_received: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))

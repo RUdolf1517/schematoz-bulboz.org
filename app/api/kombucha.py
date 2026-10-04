@@ -251,8 +251,9 @@ async def kombucha_top():
         rows = (await s.execute(
             select(Kombucha, User.username).join(User, User.id == Kombucha.user_id)
             .where(Kombucha.alive.is_(True)).order_by(Kombucha.xp.desc(), Kombucha.id).limit(10))).all()
+        event_window = await kb.halloween_decay_window(s)
         for k, _ in rows:
-            kb.tick(k)
+            kb.tick(k, halloween_window=event_window)
     return {"items": [{"id": k.id, "username": u, "name": k.name, "xp": k.xp, "generation": k.generation,
                        "stage": kb.stage_for(k.xp)["title"], "mutations": len(k.mutations or []),
                        "kombucha": kb.public_out(k, u)}
@@ -283,7 +284,7 @@ async def kombucha_diary(kid: int):
         k = await s.get(Kombucha, kid)
         if k is None:
             raise ApiError("Гриб не найден", 404, "not_found")
-        kb.tick(k)
+        kb.tick(k, halloween_window=await kb.halloween_decay_window(s))
         owner = (await s.execute(select(User.username).where(User.id == k.user_id))).scalar()
         d = await kb.diary.read(s, k, before)
         return {"kombucha": kb.public_out(k, owner), "mine": current_user_id() == k.user_id, **d}

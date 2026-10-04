@@ -1,11 +1,14 @@
 """Halloween event rules and persistent, cosmetic event state."""
 from __future__ import annotations
 
+import copy
 import random
+import re
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 
+from ..errors import ApiError
 from ..models import Kombucha, Setting, User
 from . import kombucha_diary as diary
 
@@ -24,12 +27,140 @@ TEMP_MUTATIONS = {
     "halloween_zombie": {"title": "Зомби-зелень", "emoji": "🧟", "color": "#76d66f", "effect": "zombie"},
     "halloween_eyes": {"title": "Светящиеся глаза", "emoji": "👁️", "color": "#ff5b21", "effect": "eyes"},
 }
+DEFAULT_RAID_CONFIG = {
+    "boss_name": "Тыквенная плесень",
+    "regen_per_minute": 6,
+    "stages": [{"title": "Первая волна", "max_hp": 10000,
+                "description": "Пробейся сквозь плесень и помоги всему сайту."}],
+    "gifts": [],
+}
 DEFAULT_CONFIG = {
     # Default season is visible during October 2026; admins can change the dates or disable it.
     "enabled": True,
     "start_at": "2026-10-01T00:00:00+00:00",
     "end_at": "2026-11-02T00:00:00+00:00",
+    "raid": DEFAULT_RAID_CONFIG,
 }
+
+
+def normalize_raid_config(value: dict | None) -> dict:
+    """Merge persisted event settings with safe defaults (including older settings rows)."""
+    raw = value if isinstance(value, dict) else {}
+    defaults = copy.deepcopy(DEFAULT_RAID_CONFIG)
+    stages = raw.get("stages")
+    gifts = raw.get("gifts")
+    if not isinstance(stages, list) or not stages:
+        stages = defaults["stages"]
+    if not isinstance(gifts, list):
+        gifts = defaults["gifts"]
+    normalized_stages = []
+    for index, stage in enumerate(stages[:20]):
+        if not isinstance(stage, dict):
+            continue
+        try:
+            hp = int(stage.get("max_hp", defaults["stages"][0]["max_hp"]))
+        except (TypeError, ValueError):
+            hp = defaults["stages"][0]["max_hp"]
+        normalized_stages.append({
+            "title": str(stage.get("title") or f"Стадия {index + 1}")[:80],
+            "max_hp": max(1, min(hp, 1_000_000)),
+            "description": str(stage.get("description") or "")[:280],
+        })
+    if not normalized_stages:
+        normalized_stages = defaults["stages"]
+    normalized_gifts = []
+    for gift in gifts[:100]:
+        if not isinstance(gift, dict):
+            continue
+        try:
+            stage = int(gift.get("stage", 1))
+            damage = int(gift.get("required_damage", 1))
+        except (TypeError, ValueError):
+            continue
+        gift_id = str(gift.get("id") or "")[:48]
+        if not gift_id:
+            continue
+        normalized_gifts.append({
+            "id": gift_id, "stage": max(1, min(stage, len(normalized_stages))),
+            "required_damage": max(1, min(damage, 1_000_000)),
+            "emoji": str(gift.get("emoji") or "🎁")[:12],
+            "title": str(gift.get("title") or "Подарок за рейд")[:80],
+            "description": str(gift.get("description") or "")[:240],
+        })
+    try:
+        regen = int(raw.get("regen_per_minute", defaults["regen_per_minute"]))
+    except (TypeError, ValueError):
+        regen = defaults["regen_per_minute"]
+    return {
+        "boss_name": str(raw.get("boss_name") or defaults["boss_name"])[:80],
+        "regen_per_minute": max(0, min(regen, 60)),
+        "stages": normalized_stages,
+        "gifts": normalized_gifts,
+    }
+
+
+def validate_raid_config(value: dict) -> dict:
+    """Validate the complete admin-edited raid configuration."""
+    if not isinstance(value, dict):
+        raise ApiError("Настройки рейда должны быть объектом", 400, "validation_error", field="raid")
+
+    def text(value, field, minimum, maximum):
+        if not isinstance(value, str):
+            raise ApiError(f"Поле «{field}» должно быть текстом", 400, "validation_error", field=field)
+        result = value.strip()
+        if not minimum <= len(result) <= maximum:
+            raise ApiError(f"Поле «{field}»: от {minimum} до {maximum} символов", 400,
+                           "validation_error", field=field)
+        return result
+
+    def integer(value, field, minimum, maximum):
+        if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+            raise ApiError(f"Поле «{field}»: целое число от {minimum} до {maximum}", 400,
+                           "validation_error", field=field)
+        return value
+
+    boss_name = text(value.get("boss_name"), "boss_name", 1, 80)
+    regen = integer(value.get("regen_per_minute"), "regen_per_minute", 0, 60)
+    raw_stages = value.get("stages")
+    if not isinstance(raw_stages, list) or not 1 <= len(raw_stages) <= 20:
+        raise ApiError("Добавь от 1 до 20 стадий рейда", 400, "validation_error", field="stages")
+    stages = []
+    for index, stage in enumerate(raw_stages, 1):
+        if not isinstance(stage, dict):
+            raise ApiError(f"Стадия {index} заполнена неверно", 400, "validation_error", field="stages")
+        stages.append({
+            "title": text(stage.get("title"), f"stages[{index}].title", 1, 80),
+            "max_hp": integer(stage.get("max_hp"), f"stages[{index}].max_hp", 1, 1_000_000),
+            "description": text(stage.get("description", ""), f"stages[{index}].description", 0, 280),
+        })
+
+    raw_gifts = value.get("gifts", [])
+    if not isinstance(raw_gifts, list) or len(raw_gifts) > 100:
+        raise ApiError("Можно создать не больше 100 подарков", 400, "validation_error", field="gifts")
+    gifts, gift_ids = [], set()
+    for index, gift in enumerate(raw_gifts, 1):
+        if not isinstance(gift, dict):
+            raise ApiError(f"Подарок {index} заполнен неверно", 400, "validation_error", field="gifts")
+        gift_id = text(gift.get("id"), f"gifts[{index}].id", 1, 48)
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", gift_id) or gift_id in gift_ids:
+            raise ApiError("ID подарков должны быть уникальными латинскими буквами, цифрами, _ или -",
+                           400, "validation_error", field="gifts")
+        gift_ids.add(gift_id)
+        stage = integer(gift.get("stage"), f"gifts[{index}].stage", 1, len(stages))
+        gifts.append({
+            "id": gift_id, "stage": stage,
+            "required_damage": integer(gift.get("required_damage"), f"gifts[{index}].required_damage", 1, 1_000_000),
+            "emoji": text(gift.get("emoji"), f"gifts[{index}].emoji", 1, 12),
+            "title": text(gift.get("title"), f"gifts[{index}].title", 1, 80),
+            "description": text(gift.get("description", ""), f"gifts[{index}].description", 0, 240),
+        })
+    return {"boss_name": boss_name, "regen_per_minute": regen, "stages": stages, "gifts": gifts}
+
+
+def stage_for(config: dict, phase: int) -> tuple[dict, int]:
+    raid = normalize_raid_config(config.get("raid"))
+    number = max(1, min(int(phase or 1), len(raid["stages"])))
+    return raid["stages"][number - 1], number
 
 
 def _parse_dt(value: str | None) -> datetime | None:
@@ -44,17 +175,25 @@ def _parse_dt(value: str | None) -> datetime | None:
     return out.astimezone(timezone.utc)
 
 
-def active(config: dict, at: datetime | None = None) -> bool:
+def decay_window(config: dict) -> tuple[datetime, datetime] | None:
     if not config.get("enabled"):
-        return False
-    at = at or datetime.now(timezone.utc)
+        return None
     start, end = _parse_dt(config.get("start_at")), _parse_dt(config.get("end_at"))
-    return bool(start and end and start <= at < end)
+    return (start, end) if start and end and end > start else None
+
+
+def active(config: dict, at: datetime | None = None) -> bool:
+    at = at or datetime.now(timezone.utc)
+    window = decay_window(config)
+    return bool(window and window[0] <= at < window[1])
 
 
 async def get_config(s) -> dict:
     setting = await s.get(Setting, EVENT_KEY)
-    return {**DEFAULT_CONFIG, **(setting.value or {})} if setting else dict(DEFAULT_CONFIG)
+    saved = (setting.value or {}) if setting else {}
+    config = {**DEFAULT_CONFIG, **saved}
+    config["raid"] = normalize_raid_config(saved.get("raid"))
+    return config
 
 
 def public_state(config: dict, user: User | None = None) -> dict:

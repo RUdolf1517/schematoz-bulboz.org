@@ -195,9 +195,10 @@ def stage_for(xp: int) -> dict:
             "next_title": nxt[1] if nxt else None}
 
 
-def tick(k: Kombucha, at: datetime | None = None) -> None:
-    """Применить все прошедшие 12-часовые ступеньки убывания и проверить, не закис ли гриб.
-    updated_at — якорь ступенек: сдвигается только на целое число периодов."""
+def tick(k: Kombucha, at: datetime | None = None, halloween_active: bool = False,
+         halloween_window: tuple[datetime, datetime] | None = None) -> None:
+    """Применить ступеньки убывания и проверить, не закис ли гриб.
+    В период Хэллоуина чистота и счастье падают вдвое быстрее."""
     at = at or now()
     if not k.alive or k.frozen:
         return
@@ -208,8 +209,11 @@ def tick(k: Kombucha, at: datetime | None = None) -> None:
             break
         if not k.mold and rng.random() < (MOLD_CHANCE if k.clean < MOLD_CLEAN_BELOW else MOLD_CHANCE_CLEAN):
             k.mold = True
+        event_step = halloween_active or bool(
+            halloween_window and halloween_window[0] <= step_at < halloween_window[1])
         for s in STATS:
-            setattr(k, s, max(getattr(k, s) - DROP[s] - (MOLD_EXTRA.get(s, 0.0) if k.mold else 0.0), 0.0))
+            drop = DROP[s] * (2 if event_step and s in ("clean", "happy") else 1)
+            setattr(k, s, max(getattr(k, s) - drop - (MOLD_EXTRA.get(s, 0.0) if k.mold else 0.0), 0.0))
         if k.zero_since is None and any(getattr(k, s) <= 0 for s in STATS):
             k.zero_since = step_at
     k.updated_at = k.updated_at + PERIOD * steps
@@ -271,13 +275,19 @@ def _new(user_id: int, name: str, parent: Kombucha | None = None) -> Kombucha:
                     born_at=t, updated_at=t, mold=False, owners=[])
 
 
+async def halloween_decay_window(s) -> tuple[datetime, datetime] | None:
+    from . import halloween
+    return halloween.decay_window(await halloween.get_config(s))
+
+
 async def list_for(s, user_id: int, lock: bool = False) -> list[Kombucha]:
     q = select(Kombucha).where(Kombucha.user_id == user_id).order_by(Kombucha.id)
     if lock:
         q = q.with_for_update()
     items = list((await s.scalars(q)).all())
+    event_window = await halloween_decay_window(s)
     for k in items:
-        tick(k)
+        tick(k, halloween_window=event_window)
     return items
 
 
@@ -301,7 +311,7 @@ async def get_own(s, user_id: int, kid: int) -> Kombucha:
     k = await s.get(Kombucha, kid, with_for_update=True)
     if k is None or k.user_id != user_id:
         raise ApiError("Гриб не найден", 404, "not_found")
-    tick(k)
+    tick(k, halloween_window=await halloween_decay_window(s))
     return k
 
 

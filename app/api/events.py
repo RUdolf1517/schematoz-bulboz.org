@@ -20,29 +20,109 @@ from . import bp
 from .utils import json_body
 
 UTC = timezone.utc
-RAID_MAX_HP = 10000
-RAID_REGEN_PER_SECOND = 0.1  # 6 HP/minute; player taps do at least 1 damage each.
-RAID_TAP_COOLDOWN = timedelta(milliseconds=250)
+RAID_TAP_COOLDOWN = timedelta(seconds=1)
+RAID_STAT_DELTA = {"clean": 1.0, "happy": 1.0, "sweet": -1.0, "tea": -1.0}
 
 
-def _raid_hp(raid: HalloweenRaid, at: datetime) -> int:
+def _raid_hp(raid: HalloweenRaid, at: datetime, regen_per_minute: int) -> int:
     elapsed = max(0.0, (at - raid.updated_at).total_seconds())
-    return min(raid.max_hp, raid.hp + int(elapsed * RAID_REGEN_PER_SECOND))
+    regen_rate = max(0, regen_per_minute) / 60
+    return min(raid.max_hp, raid.hp + int(elapsed * regen_rate))
 
 
-async def _ensure_raid(s, *, lock: bool = True) -> HalloweenRaid:
+async def _ensure_raid(s, initial_hp: int, *, lock: bool = True) -> HalloweenRaid:
     query = select(HalloweenRaid).where(HalloweenRaid.id == 1)
     if lock:
         query = query.with_for_update()
     raid = await s.scalar(query)
     if raid is not None:
         return raid
-    await s.execute(insert(HalloweenRaid).values(id=1, hp=RAID_MAX_HP, max_hp=RAID_MAX_HP, phase=1, total_damage=0)
-                    .on_conflict_do_nothing(index_elements=["id"]))
+    await s.execute(insert(HalloweenRaid).values(
+        id=1, hp=initial_hp, max_hp=initial_hp, phase=1, total_damage=0
+    ).on_conflict_do_nothing(index_elements=["id"]))
     query = select(HalloweenRaid).where(HalloweenRaid.id == 1)
     if lock:
         query = query.with_for_update()
     return await s.scalar(query)
+
+
+def _stage_damage(player: HalloweenRaidPlayer | None, phase: int) -> int:
+    if not player:
+        return 0
+    try:
+        return max(0, int((player.stage_damage or {}).get(str(phase), 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _mushroom_out(k: Kombucha) -> dict:
+    return {"id": k.id, "name": k.name, "stats": {name: round(getattr(k, name)) for name in kb.STATS}}
+
+
+async def _raid_state(s, raid: HalloweenRaid, player: HalloweenRaidPlayer | None,
+                      config: dict, at: datetime, user_id: int | None) -> dict:
+    raid_config = halloween.normalize_raid_config(config.get("raid"))
+    stage, stage_number = halloween.stage_for({"raid": raid_config}, raid.phase)
+    hp = _raid_hp(raid, at, raid_config["regen_per_minute"])
+    if user_id is None:
+        available, party_ids = [], []
+    else:
+        rows = (await s.scalars(select(Kombucha).where(
+            Kombucha.user_id == user_id, Kombucha.alive.is_(True), Kombucha.frozen.is_(False)
+        ).order_by(Kombucha.id))).all()
+        event_window = halloween.decay_window(config)
+        for k in rows:
+            kb.tick(k, at, halloween_window=event_window)
+        available = [k for k in rows if k.alive and not k.frozen]
+        available_ids = {k.id for k in available}
+        saved = [kid for kid in (player.kombucha_ids or [])
+                 if isinstance(kid, int) and not isinstance(kid, bool) and kid in available_ids] if player else []
+        party_ids = saved or ([available[0].id] if available else [])
+    return {
+        "active": True,
+        "boss": raid_config["boss_name"],
+        "stage_title": stage["title"],
+        "stage_description": stage["description"],
+        "stage_number": stage_number,
+        "stage_count": len(raid_config["stages"]),
+        "hp": hp,
+        "max_hp": raid.max_hp,
+        "phase": raid.phase,
+        "total_damage": raid.total_damage,
+        "my_damage": player.damage if player else 0,
+        "stage_damage": _stage_damage(player, raid.phase),
+        "regen_per_minute": raid_config["regen_per_minute"],
+        "stage_gifts": [gift for gift in raid_config["gifts"] if gift["stage"] == stage_number],
+        "gifts_received": (player.gifts_received or []) if player else [],
+        "party_ids": party_ids,
+        "available_mushrooms": [_mushroom_out(k) for k in available],
+    }
+
+
+async def _award_stage_gifts(s, raid_config: dict, stage_number: int, phase: int, at: datetime) -> None:
+    gifts = [gift for gift in raid_config["gifts"] if gift["stage"] == stage_number]
+    if not gifts:
+        return
+    players = (await s.scalars(select(HalloweenRaidPlayer).with_for_update())).all()
+    for participant in players:
+        damage = _stage_damage(participant, phase)
+        if not damage:
+            continue
+        received = list(participant.gifts_received or [])
+        received_ids = {gift.get("id") for gift in received if isinstance(gift, dict)}
+        for gift in gifts:
+            if damage < gift["required_damage"] or gift["id"] in received_ids:
+                continue
+            entry = {**gift, "received_at": at.isoformat(), "phase": phase, "damage": damage}
+            received.append(entry)
+            received_ids.add(gift["id"])
+            body = f"{gift['emoji']} За участие в стадии «{gift['title']}» ты получил(а) подарок. {gift['description']}".strip()[:300]
+            key = f"halloween_raid_gift:{gift['id']}:{participant.user_id}"
+            await notify_once(s, participant.user_id, "halloween", key, text=body,
+                              gift_id=gift["id"], category="raid_gift")
+            await enqueue_push(s, participant.user_id, "halloween", "Подарок за рейд 🎁", body,
+                               "/events", key)
+        participant.gifts_received = received
 
 
 @bp.get("/events/state")
@@ -52,6 +132,8 @@ async def event_state():
         config = await halloween.get_config(s)
         user = await s.get(User, uid) if uid else None
         state = halloween.public_state(config, user)
+        player = await s.get(HalloweenRaidPlayer, uid) if uid else None
+        state["raid_gifts"] = (player.gifts_received or []) if player else []
         if state["active"] and user:
             await halloween.award_survivor(s, user.id)
     return state
@@ -64,56 +146,113 @@ async def halloween_raid_state():
     uid = current_user_id()
     async with session_scope() as s:
         config = await halloween.get_config(s)
-        is_active = halloween.active(config, at)
-        if not is_active:
+        if not halloween.active(config, at):
             return {"active": False}
-        raid = await _ensure_raid(s, lock=False)
+        raid_config = halloween.normalize_raid_config(config.get("raid"))
+        initial_stage, _ = halloween.stage_for({"raid": raid_config}, 1)
+        raid = await _ensure_raid(s, initial_stage["max_hp"], lock=False)
         player = await s.get(HalloweenRaidPlayer, uid) if uid else None
-        return {"boss": "Тыквенная плесень", "hp": _raid_hp(raid, at), "max_hp": raid.max_hp,
-                "phase": raid.phase, "total_damage": raid.total_damage,
-                "my_damage": player.damage if player else 0, "regen_per_minute": 6, "active": is_active}
+        return await _raid_state(s, raid, player, config, at, uid)
 
 
 @bp.post("/events/halloween/raid/tap")
 @require_any_perm("kombucha.play", "role.assign")
 async def halloween_raid_tap():
     at = datetime.now(UTC)
+    data = json_body()
     async with session_scope() as s:
         config = await halloween.get_config(s)
         if not halloween.active(config, at):
             raise ApiError("Хэллоуинский рейд сейчас закрыт", 409, "event_inactive")
-        await s.get(User, g.user.id, with_for_update=True)
-        await s.execute(insert(HalloweenRaidPlayer).values(user_id=g.user.id, damage=0)
-                        .on_conflict_do_nothing(index_elements=["user_id"]))
+        user = await s.get(User, g.user.id, with_for_update=True)
+        await s.execute(insert(HalloweenRaidPlayer).values(
+            user_id=user.id, damage=0, kombucha_ids=[], stage_damage={}, gifts_received=[]
+        ).on_conflict_do_nothing(index_elements=["user_id"]))
         player = await s.scalar(select(HalloweenRaidPlayer).where(
-            HalloweenRaidPlayer.user_id == g.user.id).with_for_update())
+            HalloweenRaidPlayer.user_id == user.id).with_for_update())
         if player.last_tap_at and at - player.last_tap_at < RAID_TAP_COOLDOWN:
-            raise ApiError("Дай плесени долю секунды", 429, "raid_too_fast", retry_after=0.25)
-        raid = await _ensure_raid(s)
-        if raid.hp < raid.max_hp:
+            left = max(0.05, (RAID_TAP_COOLDOWN - (at - player.last_tap_at)).total_seconds())
+            raise ApiError("Подожди секунду, грибам нужно перевести дух", 429,
+                           "raid_too_fast", retry_after=left)
+
+        raw_ids = data.get("kombucha_ids", player.kombucha_ids or [])
+        if not raw_ids:
+            first = await s.scalar(select(Kombucha.id).where(
+                Kombucha.user_id == user.id, Kombucha.alive.is_(True), Kombucha.frozen.is_(False)
+            ).order_by(Kombucha.id).limit(1))
+            raw_ids = [first] if first else []
+        if (not isinstance(raw_ids, list) or not 1 <= len(raw_ids) <= 3
+                or any(isinstance(kid, bool) or not isinstance(kid, int) for kid in raw_ids)
+                or len(set(raw_ids)) != len(raw_ids)):
+            raise ApiError("Выставь от одного до трёх разных грибов", 400, "invalid_raid_team")
+        fighters = (await s.scalars(select(Kombucha).where(
+            Kombucha.user_id == user.id, Kombucha.id.in_(raw_ids),
+            Kombucha.alive.is_(True), Kombucha.frozen.is_(False)
+        ).order_by(Kombucha.id).with_for_update())).all()
+        if len(fighters) != len(raw_ids):
+            raise ApiError("В команду можно поставить только своих живых и незамороженных грибов",
+                           409, "invalid_raid_team")
+        event_window = halloween.decay_window(config)
+        for k in fighters:
+            kb.tick(k, at, halloween_window=event_window)
+            if not k.alive:
+                raise ApiError(f"Гриб «{k.name}» уже закис — замени его в команде", 409, "raid_mushroom_dead")
+
+        raid_config = halloween.normalize_raid_config(config.get("raid"))
+        initial_stage, _ = halloween.stage_for({"raid": raid_config}, 1)
+        raid = await _ensure_raid(s, initial_stage["max_hp"])
+        stage, stage_number = halloween.stage_for({"raid": raid_config}, raid.phase)
+        configured_hp = stage["max_hp"]
+        if raid.max_hp != configured_hp:
+            old_max = max(raid.max_hp, 1)
+            raid.hp = max(1, min(configured_hp, round(raid.hp * configured_hp / old_max)))
+            raid.max_hp = configured_hp
+            raid.updated_at = at
+
+        regen_rate = raid_config["regen_per_minute"] / 60
+        if raid.hp < raid.max_hp and regen_rate > 0:
             elapsed = max(0.0, (at - raid.updated_at).total_seconds())
-            regen = int(elapsed * RAID_REGEN_PER_SECOND)
+            regen = int(elapsed * regen_rate)
             if regen:
                 raid.hp = min(raid.max_hp, raid.hp + regen)
-                raid.updated_at += timedelta(seconds=regen / RAID_REGEN_PER_SECOND)
+                raid.updated_at += timedelta(seconds=regen / regen_rate)
             if raid.hp == raid.max_hp:
                 raid.updated_at = at
         else:
             raid.updated_at = at
-        raid.hp = max(0, raid.hp - 1)
-        raid.total_damage += 1
-        player.damage += 1
+
+        phase = raid.phase
+        damage = len(fighters)
+        for k in fighters:
+            for stat, delta in RAID_STAT_DELTA.items():
+                setattr(k, stat, max(0.0, min(100.0, getattr(k, stat) + delta)))
+            if all(getattr(k, stat) > 0 for stat in kb.STATS):
+                k.zero_since = None
+            elif k.zero_since is None:
+                k.zero_since = at
+        player.kombucha_ids = list(raw_ids)
+        stage_damage = dict(player.stage_damage or {})
+        stage_damage[str(phase)] = _stage_damage(player, phase) + damage
+        player.stage_damage = stage_damage
+        player.damage += damage
         player.last_tap_at = at
+        raid.hp = max(0, raid.hp - damage)
+        raid.total_damage += damage
         defeated = raid.hp <= 0
+        message = None
         if defeated:
+            await _award_stage_gifts(s, raid_config, stage_number, phase, at)
             raid.phase += 1
+            next_stage, _ = halloween.stage_for({"raid": raid_config}, raid.phase)
+            raid.max_hp = next_stage["max_hp"]
             raid.hp = raid.max_hp
             raid.updated_at = at
-        await halloween.award_survivor(s, g.user.id)
-        return {"boss": "Тыквенная плесень", "hp": raid.hp, "max_hp": raid.max_hp,
-                "phase": raid.phase, "total_damage": raid.total_damage,
-                "my_damage": player.damage, "defeated": defeated,
-                "message": "Плесень рассыпалась… и тут же выросла новая!" if defeated else None}
+            message = f"Стадия «{stage['title']}» пала — но впереди новая!"
+        await halloween.award_survivor(s, user.id)
+        result = await _raid_state(s, raid, player, config, at, user.id)
+        result.update({"defeated": defeated, "damage_dealt": damage, "message": message,
+                       "fighters": [_mushroom_out(k) for k in fighters]})
+        return result
 
 
 @bp.post("/events/halloween/treat/<int:kid>")

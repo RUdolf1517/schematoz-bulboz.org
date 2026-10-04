@@ -9,7 +9,7 @@ from sqlalchemy import delete, func, select
 from ..auth.rbac import invalidate_perms, require_perm
 from ..db import session_scope
 from ..errors import ApiError
-from ..models import Kombucha, LegalPage, LegalPageVersion, ModAction, Role, Setting, User, UserRole, WoodTx
+from ..models import HalloweenRaid, Kombucha, LegalPage, LegalPageVersion, ModAction, Role, Setting, User, UserRole, WoodTx
 from ..moderation import modlog_out
 from ..services.captcha import invalidate_captcha_settings, validate_captcha_settings
 from ..services.modlog import log_action
@@ -48,15 +48,28 @@ async def update_halloween_settings():
     if start.tzinfo is None or end.tzinfo is None or end <= start:
         raise ApiError("Конец события должен быть позже начала; даты должны содержать часовой пояс", 400,
                        "validation_error")
-    value = {"enabled": enabled, "start_at": start.astimezone(timezone.utc).isoformat(),
-             "end_at": end.astimezone(timezone.utc).isoformat()}
+
     async with session_scope() as s:
+        current = await halloween.get_config(s)
+        raid_config = halloween.validate_raid_config(data.get("raid", current["raid"]))
+        value = {"enabled": enabled, "start_at": start.astimezone(timezone.utc).isoformat(),
+                 "end_at": end.astimezone(timezone.utc).isoformat(), "raid": raid_config}
         row = await s.get(Setting, "halloween", with_for_update=True)
         old = row.value if row else None
         if row is None:
             s.add(Setting(key="halloween", value=value, updated_by=g.user.id))
         else:
             row.value, row.updated_by = value, g.user.id
+
+        raid = await s.scalar(select(HalloweenRaid).where(HalloweenRaid.id == 1).with_for_update())
+        if raid:
+            stage, _ = halloween.stage_for(value, raid.phase)
+            target_hp = stage["max_hp"]
+            if raid.max_hp != target_hp:
+                previous_max = max(raid.max_hp, 1)
+                raid.hp = max(1, min(target_hp, round(raid.hp * target_hp / previous_max)))
+                raid.max_hp = target_hp
+                raid.updated_at = datetime.now(timezone.utc)
         log_action(s, g.user.id, "settings.update", "setting", None, key="halloween", old=old, new=value)
         await s.flush()
         await quotes.refresh_custom(s)
@@ -247,7 +260,7 @@ async def kb_debug_edit(kid: int):
         if k is None:
             raise ApiError("Гриб не найден", 404, "not_found")
         if k.alive and not k.frozen:
-            kb.tick(k)          # досчитать убывание до «сейчас», дальше правим уже актуальные значения
+            kb.tick(k, halloween_window=await kb.halloween_decay_window(s))  # досчитать убывание до сейчас
         changed = {}
         if "stage" in data:
             sizes = {sz: xp for xp, _, sz in kb.STAGES}
