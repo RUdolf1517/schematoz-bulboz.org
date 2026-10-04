@@ -82,10 +82,7 @@ def login_required(view):
     return wrapper
 
 
-def require_perm(*perms: str):
-    """Пропускает, только если у пользователя есть ВСЕ перечисленные права и нет активного бана."""
-    needed = set(perms)
-
+def _require_permissions(perms: set[str], *, any_of: bool):
     def deco(view):
         @wraps(view)
         async def wrapper(*args, **kwargs):
@@ -98,9 +95,22 @@ def require_perm(*perms: str):
                     reason=ban.reason,
                 )
             granted = await get_user_perms(user.id)
-            if not needed <= granted:
+            allowed = bool(perms & granted) if any_of else perms <= granted
+            if not allowed:
                 raise ApiError("Недостаточно прав", 403, "forbidden")
             g.perms = granted
             return await view(*args, **kwargs)
         return wrapper
     return deco
+
+
+def require_perm(*perms: str):
+    """Пропускает, только если у пользователя есть ВСЕ перечисленные права и нет активного бана."""
+    return _require_permissions(set(perms), any_of=False)
+
+
+def require_any_perm(*perms: str):
+    """Пропускает, если есть хотя бы одно из прав (и нет активного бана)."""
+    if not perms:
+        raise ValueError("require_any_perm requires at least one permission")
+    return _require_permissions(set(perms), any_of=True)

@@ -8,7 +8,7 @@ from flask import g
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
-from ..auth.rbac import require_perm
+from ..auth.rbac import require_any_perm, require_perm
 from ..auth.sessions import current_user_id
 from ..db import session_scope
 from ..errors import ApiError
@@ -75,7 +75,7 @@ async def halloween_raid_state():
 
 
 @bp.post("/events/halloween/raid/tap")
-@require_perm("kombucha.play")
+@require_any_perm("kombucha.play", "role.assign")
 async def halloween_raid_tap():
     at = datetime.now(UTC)
     async with session_scope() as s:

@@ -84,28 +84,32 @@ async function applyEventTheme() {
   return d;
 }
 
-function maybeHalloweenScreamer(force = false) {
+function maybeHalloweenScreamer(force = false, ignoreCooldown = false) {
   if ((!HALLOWEEN_ACTIVE && !force) || REDUCED_MOTION) return false;
   const now = Date.now(), last = Number(localStorage.getItem("halloween-scream-at") || 0);
-  if (now - last < 120000) {
+  if (!ignoreCooldown && now - last < 120000) {
     if (force) toast("Скример уже был. Дай нервам передышку ещё немного 👻");
     return false;
   }
   if (!force && Math.random() >= 0.1) return false;
   localStorage.setItem("halloween-scream-at", String(now));
   const scene = $(".kb-scene .kb-svg") || $(".halloween-boss") || $(".profile-skin .kb-svg") || $(".kb-svg");
-  if (scene) scene.classList.add("kb-screamer");
+  scene?.classList.remove("kb-screamer");
+  document.body.classList.remove("halloween-scream-flash");
+  void document.body.offsetWidth;
+  scene?.classList.add("kb-screamer");
   document.body.classList.add("halloween-scream-flash");
   try {
     const Audio = window.AudioContext || window.webkitAudioContext;
     if (Audio) {
-      const ctx = new Audio(); const osc = ctx.createOscillator(), gain = ctx.createGain();
+      const ctx = new Audio(); ctx.resume().catch(() => {});
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
       osc.type = "sawtooth"; osc.frequency.setValueAtTime(280, ctx.currentTime); osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.18);
       gain.gain.setValueAtTime(0.07, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
       osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.23); osc.onended = () => ctx.close();
     }
   } catch (_) {}
-  setTimeout(() => { scene?.classList.remove("kb-screamer"); document.body.classList.remove("halloween-scream-flash"); }, 650);
+  setTimeout(() => { scene?.classList.remove("kb-screamer"); document.body.classList.remove("halloween-scream-flash"); }, 900);
   return true;
 }
 
@@ -223,10 +227,11 @@ document.addEventListener("click", (event) => {
   if (event.target.closest("[data-spooky-music]")) toggleSpookyMusic();
   if (event.target.closest("[data-screamer-test]") && isHalloweenAdmin()) {
     if (REDUCED_MOTION) toast("Скример отключён системной настройкой reduced motion");
-    else maybeHalloweenScreamer(true);
+    else maybeHalloweenScreamer(true, true);
   }
 });
 document.addEventListener("pointerdown", (e) => {
+  if (e.target.closest("[data-screamer-test]")) return;
   if (e.target.closest("button, a, [role=button]")) maybeHalloweenScreamer();
 }, { passive: true });
 
@@ -2172,7 +2177,8 @@ async function pageEvents() {
   catch (_) { panel.innerHTML = `<p class="muted">Не удалось загрузить босса. Попробуй обновить страницу.</p>`; return; }
   if (!raid.active) { event.active = false; renderInactive(); return; }
   let tapBusy = false;
-  const canTap = () => !!(event.active && ME && !ME.ban && ME.permissions?.includes("kombucha.play"));
+  const canTap = () => !!(event.active && ME && !ME.ban
+    && (ME.permissions?.includes("kombucha.play") || isHalloweenAdmin()));
   const tap = async () => {
     if (tapBusy || !canTap()) return;
     tapBusy = true;
@@ -2194,7 +2200,7 @@ async function pageEvents() {
         <p>Один босс для всех игроков сайта. Он регенерирует медленно — <b>6 HP в минуту</b>; каждый честный тап наносит 1 урон.</p>
         <div class="raid-hp"><div class="raid-hp-label"><b>${raid.hp.toLocaleString("ru-RU")} HP</b><span>${raid.max_hp.toLocaleString("ru-RU")} максимум</span></div><div class="raid-hp-bar"><i style="width:${pct}%"></i></div></div>
         <div class="raid-meta"><span>Твой вклад: <b>${raid.my_damage}</b></span><span>Всего ударов: <b>${raid.total_damage.toLocaleString("ru-RU")}</b></span></div>
-        <button class="btn btn-accent raid-tap" id="halloween-tap" ${ready ? "" : "disabled"}>${ready ? "🗡️ Тапнуть по плесени" : ME ? "🚫 Действие недоступно" : "🔐 Войди, чтобы вступить в рейд"}</button>
+        <button class="btn btn-accent raid-tap" id="halloween-tap" ${ready ? "" : "disabled"}>${ready ? "🗡️ Тапнуть по плесени" : !ME ? "🔐 Войди, чтобы вступить в рейд" : ME.ban ? "🚫 Аккаунт заблокирован" : "🔒 Нет права на участие"}</button>
         ${!ME ? `<a class="btn btn-ghost btn-sm" href="/login?next=/events">🔐 Войти и бить босса вместе</a>` : ""}
         <div class="haunt-controls">${isHalloweenAdmin() ? `<button class="btn btn-ghost scare-test" data-screamer-test>👻 Проверить скример</button>` : ""}<button class="btn btn-ghost" data-spooky-music aria-pressed="${spookyMusicEnabled ? "true" : "false"}">${spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку"}</button></div>
         <p class="muted">«Сладость или гадость» раз в день доступна на живых грибах друзей — открой профиль и постучи по банке.</p></div>

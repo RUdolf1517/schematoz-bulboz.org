@@ -924,8 +924,8 @@ body.kb-med-on { overflow: hidden; }
 .kb-screamer { animation:kb-scream .56s steps(2,end); filter:drop-shadow(0 0 18px #ff2500) drop-shadow(0 0 28px #f30); }
 .kb-screamer .kb-face { filter:drop-shadow(0 0 7px #ff1a00); }
 @keyframes kb-scream { 0%{transform:rotate(0) scale(1)} 22%{transform:rotate(-34deg) scale(1.08)} 48%{transform:rotate(178deg) scale(1.13)} 72%{transform:rotate(194deg) scale(1.06)} 100%{transform:rotate(360deg) scale(1)} }
-.halloween-scream-flash { animation:halloween-flash .48s steps(2,end); }
-@keyframes halloween-flash { 50%{box-shadow:inset 0 0 0 999px #ff2b1a25} }
+.halloween-scream-flash { animation:halloween-flash .68s steps(2,end); }
+@keyframes halloween-flash { 50%{box-shadow:inset 0 0 0 999px #ff203f55} }
 
 body.halloween { --bg:#08050d; --bg2:#120b18; --card:#1a101f; --line:#69203c; --accent:#ff394b; --accent2:#8f25d2; background-color:#08050d; background-image:radial-gradient(ellipse at 78% 2%,#73163c50,transparent 34%),radial-gradient(ellipse at 8% 70%,#25103f55,transparent 45%),repeating-linear-gradient(0deg,#08050d00 0 3px,#fb285506 4px 5px); }
 body.halloween .top { background:#09050eef; border-bottom-color:#8a2443; box-shadow:0 4px 30px #c21b3c22; }
@@ -1003,6 +1003,7 @@ body.halloween .site-footer { border-color:#43243f; }
 .halloween-event-card > * { position:relative; z-index:1; }
 .halloween-boss { border-color:#f03b56; background:radial-gradient(circle at 46% 31%,#ffd369 0 12%,#ef5b28 38%,#79162d 76%); box-shadow:0 0 22px #ff3c58aa,0 0 65px #9a123b66,inset 0 0 35px #280314; text-shadow:0 2px 12px #24000a; }
 .halloween-boss:disabled { cursor:not-allowed; filter:saturate(.65); opacity:.9; }
+.halloween-boss.kb-screamer { animation:kb-scream .82s steps(2,end) !important; filter:drop-shadow(0 0 18px #ff2500) drop-shadow(0 0 28px #f30); }
 .haunt-caption { color:#ff8294; text-shadow:0 0 9px #ff234e; }
 .raid-hp-bar i { background:linear-gradient(90deg,#5e1025,#e41e4e,#ff723c); box-shadow:0 0 15px #f31b55; }
 .haunt-web { filter:drop-shadow(0 0 10px #c9164c); opacity:.8; }
