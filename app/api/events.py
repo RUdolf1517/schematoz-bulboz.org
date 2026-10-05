@@ -388,7 +388,7 @@ async def halloween_treat(kid: int):
 
 
 @bp.post("/events/halloween/hat/<int:kid>")
-@require_perm("kombucha.play")
+@require_any_perm("kombucha.play", "role.assign")
 async def halloween_equip_hat(kid: int):
     data = json_body()
     code = data.get("code")
