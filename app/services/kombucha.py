@@ -15,9 +15,10 @@
 - Если любой показатель лежит на нуле 24 часа — гриб закисает. Можно перезавести
   (поколение +1) или реанимировать за $₽.
 - Имя гриба уникально на весь сайт (без учёта регистра).
-- Несколько банок: одна бесплатно, остальные покупаются за «Деревянные».
-- Отросток: если гриб дошёл до последней стадии и за ним ухаживали 7+ разных дней,
-  от него отрастает новый гриб (в свободную банку, либо ждёт, пока купишь).
+- Несколько банок: первая бесплатно, дополнительные банки покупаются за «Деревянные»;
+  нового гриба в пустую банку можно купить за 1000 $₽ или дождаться бесплатного отростка.
+- Отросток: если гриб дошёл до последней стадии и выполнил условия ухода, от него
+  отрастает новый гриб в свободной банке либо ждёт, пока игрок выберет его.
 - 20 мутаций: выпадают случайно при действиях, у каждой своя стадия и условие.
   Остаются на грибе навсегда + попадают в коллекцию юзера (kombucha_codex).
 """
@@ -345,17 +346,15 @@ async def plant(s, user: User, name: str | None = None, parent: Kombucha | None 
     return k
 
 
-async def place_pending_sprouts(s, user: User) -> list[Kombucha]:
-    """После покупки банки — сначала сажаем отростки, которые ждали."""
-    planted = []
-    parents = (await s.scalars(select(Kombucha).where(Kombucha.user_id == user.id, Kombucha.sprout_pending.is_(True))
-                               .order_by(Kombucha.id).with_for_update())).all()
-    for p in parents:
-        if (await jars_info(s, user))["free"] <= 0:
-            break
-        planted.append(await plant(s, user, parent=p))
-        p.sprout_pending = False
-    return planted
+async def plant_pending_sprout(s, user: User, parent: Kombucha) -> Kombucha:
+    """Plant one offspring that was held until the player had an empty jar."""
+    if not parent.sprout_pending:
+        raise ApiError("У этого гриба нет ожидающего отростка", 409, "no_pending_sprout")
+    if (await jars_info(s, user))["free"] <= 0:
+        raise ApiError("Нет свободной банки для отростка", 409, "no_free_jar")
+    child = await plant(s, user, parent=parent)
+    parent.sprout_pending = False
+    return child
 
 
 async def buy_jar(s, user: User) -> dict:
@@ -366,7 +365,8 @@ async def buy_jar(s, user: User) -> dict:
     await s.flush()
     if user.jars >= wood.MAX_JARS:
         await kb_achievements.award(s, user.id, "kb_jars")
-    return {"sprouts": [k.name for k in await place_pending_sprouts(s, user)]}
+    # Keep the new jar empty so the player can buy a mushroom or choose an offspring.
+    return {"sprouts": []}
 
 
 # ---------------------------------------------------------------- действия

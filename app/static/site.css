@@ -622,6 +622,10 @@ main.main-wide { max-width: 1180px; }
 .kb-sprout .ok { color: var(--good); }
 .kb-dead-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .kb-empty { text-align: center; }
+.kb-empty-jar { max-width: 720px; margin: 0 auto; }
+.kb-empty-jar h2 { margin: 0 0 8px; }
+.kb-empty-choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 16px 0; }
+.kb-empty-choices .btn { min-height: 44px; }
 .kb-codex-lead { margin-top: -6px; font-size: 13px; }
 #kb-codex h2 { margin-top: 0; }
 .kb-codex { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }

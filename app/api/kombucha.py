@@ -232,7 +232,19 @@ async def kombucha_plant():
     async with session_scope() as s:
         user = await s.get(User, g.user.id, with_for_update=True)
         k = await kb.plant(s, user, name)
-        return {"kombucha": kb.out(k)}, 201
+        balance = await wood.spend(s, user.id, wood.PRICES["mushroom"], "buy_new_kombucha", f"kombucha:{k.id}")
+        return {"kombucha": kb.out(k), "wood": balance}, 201
+
+
+@bp.post("/kombucha/sprout/<int:kid>/plant")
+@login_required
+async def kombucha_plant_sprout(kid: int):
+    async with session_scope() as s:
+        user = await s.get(User, g.user.id, with_for_update=True)
+        parent = await kb.get_own(s, user.id, kid)
+        child = await kb.plant_pending_sprout(s, user, parent)
+        return {"kombucha": kb.out(child), "parent": kb.out(parent),
+                "jars": await kb.jars_info(s, user), "wood": await wood.balance(s, user.id)}, 201
 
 
 @bp.post("/shop/jar")

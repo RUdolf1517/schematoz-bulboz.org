@@ -1962,6 +1962,7 @@ async function pageKombucha() {
     return;
   }
   let S, sel = Number(localStorage.getItem("kb-sel")) || null, timer;
+  let emptyJarSelected = false, emptyJarIndex = 0, waitingForSprout = false;
   const BTN = [["sugar", "🍬", "Сахар"], ["tea", "☕", "Заварка"], ["clean", "🧽", "Помыть банку"], ["pet", "🤚", "Погладить"]];
   const STAT = [["sweet", "🍬 Сахар"], ["tea", "☕ Заварка"], ["clean", "🧽 Чистота"], ["happy", "😊 Настроение"]];
   const say = (text) => { const b = $("#kb-say"); if (b) { b.textContent = text; b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop"); } };
@@ -1973,20 +1974,40 @@ async function pageKombucha() {
   };
 
   const renderJars = () => {
-    const tabs = S.items.map((k) => `<button class="kb-jar-tab ${k.id === cur()?.id ? "active" : ""} ${k.alive ? "" : "dead"} ${k.frozen ? "frozen" : ""}" data-sel="${k.id}">
+    const tabs = S.items.map((k) => `<button class="kb-jar-tab ${!emptyJarSelected && k.id === cur()?.id ? "active" : ""} ${k.alive ? "" : "dead"} ${k.frozen ? "frozen" : ""}" data-sel="${k.id}">
       <span class="kb-jar-mini">${kombuchaSVG(k, { small: true })}</span><span class="kb-jar-name">${esc(k.name)}</span>
       <small>${k.frozen ? (k.price != null ? `🏷 ${k.price} $₽` : "🧊 на полке") : k.alive ? esc(k.stage.title) : "закис 🪦"}${k.dies_in != null && !k.frozen ? " · ⚠️" : ""}</small></button>`);
-    for (let i = 0; i < S.jars.free; i++) tabs.push(`<button class="kb-jar-tab empty" data-plant><span class="kb-jar-plus">＋</span><span class="kb-jar-name">Пустая банка</span><small>посадить гриб</small></button>`);
+    for (let i = 0; i < S.jars.free; i++) tabs.push(`<button class="kb-jar-tab empty ${emptyJarSelected && i === emptyJarIndex ? "active" : ""}" data-empty-jar="${i}">
+      <span class="kb-jar-plus">＋</span><span class="kb-jar-name">Пустая банка</span><small>${emptyJarSelected && i === emptyJarIndex ? "выбрана" : "выбрать"}</small></button>`);
     if (S.jars.jars < S.jars.max) tabs.push(`<button class="kb-jar-tab shop" data-buy><span class="kb-jar-plus">🫙</span><span class="kb-jar-name">Купить банку</span><small>${S.prices.jar} $₽</small></button>`);
     return `<div class="kb-jars">${tabs.join("")}</div>`;
   };
 
+  const renderEmptyJar = () => {
+    const pending = S.items.find((item) => item.sprout_pending);
+    return `<div class="panel kb-empty kb-empty-jar">
+      <h2>🫙 Пустая банка</h2>
+      <p>Выбери, кого поселить: купить нового гриба или оставить банку для потомства.</p>
+      <div class="kb-empty-choices">
+        <button class="btn btn-accent" data-buy-mushroom>🍄 Купить гриб · ${S.prices.mushroom} $₽</button>
+        ${pending
+          ? `<button class="btn btn-ghost" data-plant-pending="${pending.id}">🌱 Посадить готовый отросток «${esc(pending.name)}»</button>`
+          : `<button class="btn btn-ghost" data-wait-sprout${waitingForSprout ? " disabled" : ""}>${waitingForSprout ? "✅ Ждём потомство" : "🌱 Подождать потомство"}</button>`}
+      </div>
+      <p class="muted">${pending
+        ? "Отросток уже готов. Посади его сюда бесплатно или оставь банку для нового гриба."
+        : "Если оставить банку пустой, любой твой гриб сможет поселить сюда отросток, когда будет готов разделиться."}</p>
+    </div>`;
+  };
+
   const renderMain = (k) => {
-    if (!k) return `<div class="panel kb-empty"><p>Банка пустая. Посади новый гриб!</p><button class="btn btn-accent" data-plant>🌱 Посадить гриб</button></div>`;
+    if (!k) return renderEmptyJar();
     const st = k.stage;
     const pct = st.next_xp ? Math.round(((k.xp - st.from_xp) / (st.next_xp - st.from_xp)) * 100) : 100;
     const sp = k.sprout_progress;
-    const sprout = k.sprout_pending ? `<div class="kb-note">🌱 Отросток готов и ждёт свободную банку. <button class="link-btn" data-buy>Купить банку за ${S.prices.jar} $₽</button></div>`
+    const sprout = k.sprout_pending ? `<div class="kb-note">🌱 Отросток уже готов.${S.jars.free
+        ? ` <button class="link-btn" data-open-empty>Выбери пустую банку, чтобы поселить его.</button>`
+        : ` Банки пока нет — <button class="link-btn" data-buy>купить за ${S.prices.jar} $₽</button>.`}</div>`
       : !sp.legend ? `<div class="kb-note muted">🌱 Гриб делится только на последней стадии — «Легенда трёхлитровой банки». Сейчас: «${esc(st.title)}».</div>`
       : sp.count >= sp.max ? `<div class="kb-note muted">🌳 Гриб уже разделился ${sp.max} раза — больше отростков не будет. Династия продолжается в малышах!</div>`
       : `<div class="kb-sprout" title="Легенда делится раз в 7 дней, всего до ${sp.max} раз, если 3 дня за ней ухаживали и на ней нет плесени"><span>🌱 Деление ${sp.count}/${sp.max}:</span>
@@ -2074,28 +2095,51 @@ async function pageKombucha() {
   };
 
   const render = () => {
-    if (!cur() && S.items.length) sel = S.items[0].id;
-    const k = cur();
+    if (emptyJarSelected && !S.jars.free) emptyJarSelected = false;
+    if (emptyJarSelected && emptyJarIndex >= S.jars.free) emptyJarIndex = Math.max(0, S.jars.free - 1);
+    if (!emptyJarSelected && !S.items.length && S.jars.free) { emptyJarSelected = true; emptyJarIndex = 0; }
+    const k = emptyJarSelected ? null : cur();
+    if (!k && !emptyJarSelected && S.items.length) sel = S.items[0].id;
     if (k) { sel = k.id; localStorage.setItem("kb-sel", sel); }
     root.innerHTML = `<div class="kb-bar-top"><span>🫙 Банки: <b>${S.jars.used}/${S.jars.jars}</b></span><span>Баланс: <a href="/wallet"><b>${S.wood} $₽</b></a></span></div>
-      ${renderJars()}${renderMain(k)}${renderHalloweenTools(k)}`;
+      ${renderJars()}${emptyJarSelected || !k ? renderEmptyJar() : renderMain(k)}${renderHalloweenTools(k)}`;
     initTiltScene($(".kb-scene", root));
     renderCodex();
     setWood(S.wood);
-    $$("[data-sel]", root).forEach((b) => (b.onclick = () => { sel = Number(b.dataset.sel); render(); }));
+    $$("[data-sel]", root).forEach((b) => (b.onclick = () => { emptyJarSelected = false; sel = Number(b.dataset.sel); render(); }));
+    $$("[data-empty-jar]", root).forEach((b) => (b.onclick = () => { emptyJarSelected = true; emptyJarIndex = Number(b.dataset.emptyJar); render(); }));
+    $$("[data-open-empty]", root).forEach((b) => (b.onclick = () => { emptyJarSelected = true; emptyJarIndex = 0; render(); }));
     $$("[data-act]", root).forEach((b) => (b.onclick = () => doAct(b.dataset.act)));
     $$("[data-buy]", root).forEach((b) => (b.onclick = async () => {
       if (!confirm(`Купить банку за ${S.prices.jar} $₽?`)) return;
+      const emptyIndex = S.jars.free;
       const r = await call("POST", "/api/shop/jar");
       if (!r) return;
-      toast(r.sprouts.length ? `🫙 Банка куплена, в неё сел отросток «${r.sprouts[0]}» 🌱` : "🫙 Банка куплена — посади в неё гриб!");
+      emptyJarSelected = true;
+      emptyJarIndex = emptyIndex;
       await load();
+      toast("🫙 Банка куплена и выбрана — посели нового гриба или оставь её для потомства.");
     }));
-    $$("[data-plant]", root).forEach((b) => (b.onclick = async () => {
+    $$("[data-buy-mushroom]", root).forEach((b) => (b.onclick = async () => {
+      if (!confirm(`Купить нового гриба за ${S.prices.mushroom} $₽?`)) return;
       const name = ask("Имя нового гриба (уникальное на весь сайт). Оставь пустым — придумаем сами:");
       if (name === null) return;
+      b.disabled = true;
       const r = await call("POST", "/api/kombucha/plant", { name });
-      if (r) { sel = r.kombucha.id; await load(); toast("🌱 Гриб посажен"); }
+      if (r) { waitingForSprout = false; emptyJarSelected = false; sel = r.kombucha.id; await load(); toast(`🍄 Гриб куплен за ${S.prices.mushroom} $₽ и посажен`); }
+      else b.disabled = false;
+    }));
+    $$("[data-plant-pending]", root).forEach((b) => (b.onclick = async () => {
+      const parentId = Number(b.dataset.plantPending);
+      b.disabled = true;
+      const r = await call("POST", `/api/kombucha/sprout/${parentId}/plant`);
+      if (r) { waitingForSprout = false; emptyJarSelected = false; sel = r.kombucha.id; await load(); toast(`🌱 Отросток «${r.kombucha.name}» посажен`); }
+      else b.disabled = false;
+    }));
+    $$("[data-wait-sprout]", root).forEach((b) => (b.onclick = () => {
+      waitingForSprout = true;
+      render();
+      toast("🌱 Банка остаётся пустой и ждёт отросток от любого готового гриба");
     }));
     const btn = (sel_) => $(sel_, root);
     if (btn("[data-fs]")) btn("[data-fs]").onclick = () => kbFullscreen(() => cur());
@@ -2154,7 +2198,13 @@ async function pageKombucha() {
     const k = cur();
     const r = await call("POST", `/api/kombucha/${k.id}/${action}`);
     if (!r) return;
-    S = r; render();
+    const oldIds = new Set(S.items.map((item) => item.id));
+    S = r;
+    if (waitingForSprout) {
+      const child = S.items.find((item) => item.is_sprout && !oldIds.has(item.id));
+      if (child) { sel = child.id; emptyJarSelected = false; waitingForSprout = false; }
+    }
+    render();
     // В облачке — только цитаты. Исключение — сахарная кома: там гриб стонет.
     const kk = r.kombucha;
     if (kk.mood === "sticky") say(action === "sugar" ? r.message : kk.phrase);
@@ -2169,7 +2219,19 @@ async function pageKombucha() {
     if (action === "daily" || r.stage_up || r.sprout) loadTop();
   };
   const load = async () => {
-    try { S = await api("GET", "/api/kombucha"); render(); } catch (_) {}
+    try {
+      const oldIds = new Set((S?.items || []).map((item) => item.id));
+      const next = await api("GET", "/api/kombucha");
+      if (waitingForSprout) {
+        const child = next.items.find((item) => item.is_sprout && !oldIds.has(item.id));
+        if (child) {
+          sel = child.id; emptyJarSelected = false; waitingForSprout = false;
+          toast(`🌱 В банке появился отросток «${child.name}»`);
+        }
+      }
+      S = next;
+      render();
+    } catch (_) {}
   };
   await load();
   clearInterval(timer);
@@ -2285,7 +2347,7 @@ async function pageWallet() {
     $("#w-balance").textContent = `${d.balance} $₽`;
     setWood(d.balance);
     if (!more) $("#w-rules").innerHTML = d.rules.map((r) => `<div class="wallet-rule"><b class="plus">+${r.amount} $₽</b><span>${esc(r.title)}${r.reason === "daily_login" ? " (+ до 10 $₽ за стрик)" : ""}</span>${r.daily_cap ? `<small class="muted">до ${r.daily_cap} раз в день</small>` : ""}</div>`).join("")
-      + `<p class="muted">Потратить: банка для гриба — ${d.prices.jar} $₽, реанимация гриба — ${d.prices.revive} $₽, грибы на <a href="/market">рынке</a>. Продажа на рынке: тебе 95%, 5% сгорает.</p>`;
+      + `<p class="muted">Потратить: банка — ${d.prices.jar} $₽, новый гриб — ${d.prices.mushroom} $₽, реанимация — ${d.prices.revive} $₽, грибы на <a href="/market">рынке</a>. Продажа на рынке: тебе 95%, 5% сгорает.</p>`;
     const rows = d.items.map((t) => `<div class="wallet-row"><span class="${t.delta > 0 ? "plus" : "minus"}">${t.delta > 0 ? "+" : ""}${t.delta} $₽</span><span>${esc(t.title)}</span><small class="muted">${esc(fmtDate(t.created_at))} · баланс ${t.balance_after}</small></div>`).join("");
     if (more) hist.insertAdjacentHTML("beforeend", rows);
     else hist.innerHTML = rows || `<p class="muted">Пока пусто. Ответь на вопрос — и первые деревянные твои.</p>`;
