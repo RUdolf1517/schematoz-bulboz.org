@@ -74,6 +74,13 @@ def register_cli(app: Flask) -> None:
         except Exception as e:  # noqa: BLE001
             ok = False
             click.echo("  ❌ " + (redis_problem(e, rurl) or f"{type(e).__name__}: {e}"))
+        from .services.push import vapid_status
+        push_ok, push_reason = vapid_status(app.config)
+        if push_ok:
+            click.echo("  ✅ Web Push: VAPID-ключи и контакт владельца на месте")
+        else:
+            click.echo(f"  ⚪ Web Push выключен ({push_reason}); сайт и внутренние уведомления работают")
+            click.echo("     включить: flask --app app generate-vapid → VAPID_* в .env → systemctl restart bulboz")
         if not ok:
             raise SystemExit(1)
         click.echo("Всё готово: hypercorn \"app.asgi:asgi_app\" --bind 0.0.0.0:8000")
@@ -98,13 +105,19 @@ def register_cli(app: Flask) -> None:
         click.echo(json.dumps(_run_db(app, _run()), ensure_ascii=False))
 
     @app.cli.command("generate-vapid")
-    def generate_vapid():
-        """Сгенерировать P-256 VAPID-пару в PEM/base64url-формате."""
+    @click.option("--subject", default="", help="Контакт владельца домена для push-сервисов: mailto: с реальным адресом (RFC 8292).")
+    def generate_vapid(subject: str):
+        """Сгенерировать P-256 VAPID-пару: приватный ключ одной строкой base64 — удобно для .env."""
         try:
             from cryptography.hazmat.primitives import serialization
             from cryptography.hazmat.primitives.asymmetric import ec
         except ImportError:
             raise click.ClickException("Для генерации установи зависимости проекта: pip install -e .") from None
+        from .services.push import vapid_subject_ok
+        if subject and not vapid_subject_ok(subject):
+            raise click.ClickException(
+                "VAPID_SUBJECT должен быть реальным контактом владельца: mailto: с адресом владельца домена (RFC 8292)."
+            )
         private = ec.generate_private_key(ec.SECP256R1())
         private_pem = private.private_bytes(
             serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
@@ -115,10 +128,17 @@ def register_cli(app: Flask) -> None:
         )
         public_b64 = base64.urlsafe_b64encode(public).rstrip(b"=").decode("ascii")
         private_b64 = base64.urlsafe_b64encode(private_pem.encode("ascii")).rstrip(b"=").decode("ascii")
-        click.echo("Добавь эти строки в .env (private key закодирован одной строкой — безопасно для systemd):")
+        click.echo("Добавь эти строки в .env (VAPID_PRIVATE_KEY — одной строкой, безопасно для systemd).")
+        click.echo("Ключи генерируются один раз: не пересоздавай их на каждом деплое и не коммить в git.")
         click.echo(f"VAPID_PUBLIC_KEY={public_b64}")
         click.echo(f"VAPID_PRIVATE_KEY=base64:{private_b64}")
-        click.echo("VAPID_SUBJECT=mailto:admin@schematoz-bulboz.org")
+        if subject:
+            click.echo(f"VAPID_SUBJECT={subject}")
+        else:
+            click.echo("VAPID_SUBJECT=mailto:CHANGE-ME@example.com   ← замени на реальный адрес владельца домена")
+        click.echo("Затем: sudo systemctl restart bulboz")
+        click.echo("Планировщик отправки (каждые 5 минут): flask --app app run-notification-jobs "
+                   "(deploy.sh ставит таймер bulboz-notifications.timer)")
 
     @app.cli.command("create-db-dev")
     def create_db_dev():

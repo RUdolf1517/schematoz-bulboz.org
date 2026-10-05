@@ -47,7 +47,7 @@ git clone https://github.com/RUdolf1517/schematoz-bulboz.org.git && cd schematoz
 sudo ./scripts/deploy.sh schematoz-bulboz.org you@mail.ru
 ```
 
-Ставит PostgreSQL, Redis, Python 3.12, создаёт базу и `.env` со случайными секретами, миграции, админа (пароль печатается в конце), systemd-сервис, nginx + HTTPS, ежедневные бэкапы и файрвол. Обновление: `git pull && sudo ./scripts/deploy.sh --update`.
+Ставит PostgreSQL, Redis, Python 3.12, создаёт базу и `.env` со случайными секретами, миграции, админа (пароль печатается в конце), systemd-сервис, таймер напоминаний и Web Push, nginx + HTTPS, ежедневные бэкапы и файрвол. Обновление: `git pull && sudo ./scripts/deploy.sh --update` — работает идемпотентно и безопасно: код и зависимости собираются в промежуточной папке (`/srv/bulboz/stage`), при ошибке `pip` миграции и перезапуск не выполняются, а перед подменой кода сохраняется точка отката — если сайт не поднимется, deploy сам вернёт прежний код и venv. `.env`, база и `var/uploads` не перезаписываются.
 
 nginx перед приложением: `sudo ./scripts/install_nginx.sh твой-домен.ru почта@для-letsencrypt.ru` — ставит nginx, отдаёт `/static` и `/media` с диска, проксирует остальное на `127.0.0.1:8000`, rate limit на `/api`, HTTPS через certbot (если указан email).
 
@@ -143,11 +143,34 @@ $₽ начисляются **только** за уход за грибом, м
 
 `/manifest.webmanifest`, `/sw.js` (из `app/static/pwa/`), `/offline`. Статика и картинки — cache-first (версия кэша = хеш ассетов), страницы — из сети с офлайн-заглушкой, `/api` не кэшируется. Service worker работает только по HTTPS (или на localhost). Баннер «Установить» показывается один раз.
 
-Web Push настраивается отдельно: `flask --app app generate-vapid` создаёт VAPID-пару; скопируй однострочные `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (значение `base64:…`) и `VAPID_SUBJECT` в `.env`, затем перезапусти приложение. Пользователь включает push и категории в `/settings` → «🔔 Уведомления». Планировщик создаёт уведомления на сайте и outbox push; отправщик учитывает тихие часы, согласие по категориям и максимум 8 push в локальный день. Запускай одним cron/systemd timer каждые пять минут (не нужно запускать отдельный процесс на каждый worker):
+### Если `pip` падает с `ResolutionImpossible`
+
+`deploy.sh` печатает полный блок ошибки resolver'а и путь к логу (`/var/log/bulboz/pip-*.log`). Типовой случай в этом проекте:
+`pywebpush` требует `http-ece`, который на PyPI выложен **только как sdist** (без wheel). Если окружение/зеркало запрещает sdist
+(`PIP_ONLY_BINARY=:all:`, `only-binary = :all:` в `pip.conf` или зеркало, куда не залиты sdists), pip объявляет дерево неразрешимым:
+`Cannot install schematoz-bulboz … / Additionally, some packages … no matching distributions available … http-ece / ResolutionImpossible`.
+Причина — политика индекса, а не версии в `pyproject.toml`: на чистом Python 3.12 с доступным PyPI и GitHub `pip install -e .` проходит.
+Починка: разрешить sdist (`pip config unset global.only-binary`, снять `PIP_ONLY_BINARY`) или добавить в зеркало wheel `http-ece`
+(`pip wheel http-ece`). Отдельно проверь, что сервер видит GitHub — зависимость `kremle-detect` ставится из git, а не с PyPI.
+
+### Web Push (необязательно)
+
+Без VAPID-ключей обычный сайт и внутренние уведомления (`/notifications`) работают как обычно — браузеры просто не получают push, а кнопка в `/settings` → «🔔 Уведомления» выключена.
+
+1. Сгенерировать пару один раз (в проде — из папки приложения, от пользователя `bulboz`):
+   ```bash
+   sudo -u bulboz /srv/bulboz/app/.venv/bin/flask --app app generate-vapid
+   ```
+2. Вписать вывод в `/srv/bulboz/app/.env` — три переменные: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (значение `base64:…` одной строкой) и `VAPID_SUBJECT=mailto:адрес-владельца-домена`. Контакт обязателен (RFC 8292): заглушку вида `admin@example.com` push-сервисы отклонят. Существующие ключи `deploy.sh --update` никогда не перезаписывает и новые не генерирует.
+3. `sudo systemctl restart bulboz`.
+
+Отправку напоминаний и очереди push выполняет ровно один планировщик — `flask --app app run-notification-jobs` каждые 5 минут (не по процессу на worker). `sudo ./scripts/deploy.sh` и `--update` сами ставят идемпотентный systemd-таймер `bulboz-notifications.timer` от пользователя `bulboz`. Если systemd нет — то же самое через cron (`/etc/cron.d/bulboz-notifications`, каталог `/var/log/bulboz` должен существовать и принадлежать `bulboz`):
 
 ```cron
-*/5 * * * * cd /srv/schematoz-bulboz.org && /srv/schematoz-bulboz.org/.venv/bin/flask --app app run-notification-jobs >> /var/log/schematoz-notifications.log 2>&1
+*/5 * * * * bulboz cd /srv/bulboz/app && /srv/bulboz/app/.venv/bin/flask --app app run-notification-jobs >> /var/log/bulboz/notifications.log 2>&1
 ```
+
+Пользователь включает push и категории в `/settings` → «🔔 Уведомления». Отправщик учитывает тихие часы, согласие по категориям и максимум 8 push в локальный день.
 
 `/events` показывает активные сезонные события и рейд; расписание и цитаты Хэллоуина настраиваются из админки.
 

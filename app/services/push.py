@@ -180,15 +180,38 @@ def _private_key_pem(value: str) -> str:
     return value.replace("\\n", "\n")
 
 
+# Заглушки, которые нельзя принимать за рабочую настройку (те же, что предупреждает deploy.sh).
+SUBJECT_PLACEHOLDERS = ("admin@example.com", "admin@schematoz-bulboz.org", "change-me", "your-domain", "ваш-домен")
+
+
+def vapid_subject_ok(subject: str | None) -> bool:
+    """RFC 8292 требует контакт владельца (mailto:… или https:…) — иначе push-сервисы отвечают ошибкой."""
+    value = (subject or "").strip()
+    if not value.lower().startswith(("mailto:", "https://")):
+        return False
+    return not any(marker in value.lower() for marker in SUBJECT_PLACEHOLDERS)
+
+
+def vapid_status(config) -> tuple[bool, str]:
+    """Настроен ли Web Push. Возвращает (настроен, причина) — причина для логов, CLI и deploy-скрипта."""
+    public = (config.get("VAPID_PUBLIC_KEY") or "").strip()
+    private = (config.get("VAPID_PRIVATE_KEY") or "").strip()
+    if not public or not private:
+        return False, "нет VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY"
+    if not vapid_subject_ok(config.get("VAPID_SUBJECT")):
+        return False, "VAPID_SUBJECT пустой или похож на пример: нужен mailto: владельца домена"
+    return True, ""
+
+
 async def dispatch_pushes(limit: int = 200, now: datetime | None = None) -> dict:
     """Deliver due outbox rows. Safe to run repeatedly from cron/systemd timer."""
     now = now or datetime.now(timezone.utc)
-    public_key = current_app.config.get("VAPID_PUBLIC_KEY")
-    private_key = current_app.config.get("VAPID_PRIVATE_KEY")
-    subject = current_app.config.get("VAPID_SUBJECT", "mailto:admin@example.com")
-    if not public_key or not private_key:
-        return {"configured": False, "sent": 0, "deferred": 0, "failed": 0}
-    private_key = _private_key_pem(private_key)
+    configured, reason = vapid_status(current_app.config)
+    if not configured:
+        # Сайт и внутренние уведомления продолжают работать; push просто не отправляется.
+        return {"configured": False, "reason": reason, "sent": 0, "deferred": 0, "failed": 0}
+    private_key = _private_key_pem(current_app.config["VAPID_PRIVATE_KEY"])
+    subject = current_app.config["VAPID_SUBJECT"]
 
     sent = deferred = failed = 0
     async with _session_scope_for_push() as s:
