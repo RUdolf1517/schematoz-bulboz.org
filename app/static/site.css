@@ -1113,11 +1113,11 @@ body.halloween .site-footer { border-color:#69203c; }
 
 @media (max-width:700px) {
   .halloween-event-card { grid-template-columns:1fr; gap:8px; padding:15px; }
-  .haunt-stage { min-height:270px; }
+  .haunt-stage { min-height:320px; }
   .halloween-event-card .halloween-boss { width:116px; height:116px; font-size:60px; }
   .halloween-event-card .halloween-boss span { right:8px; bottom:9px; font-size:29px; }
-  .raid-fighter-line { bottom:27px; gap:5px; }
-  .raid-fighter { width:44px; height:48px; }
+  .raid-fighter-line { bottom:35px; gap:4px; }
+  .raid-fighter { width:60px; height:66px; }
   .raid-team-slots { grid-template-columns:1fr; }
   .raid-admin-row { grid-template-columns:1fr; }
   .raid-admin-row label:last-child { grid-column:auto; }
