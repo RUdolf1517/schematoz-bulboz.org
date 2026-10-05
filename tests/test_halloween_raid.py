@@ -74,6 +74,10 @@ def test_shared_raid_party_damage_stats_and_stage_gift(app, make_user, monkeypat
     state = player.get("/api/events/halloween/raid").get_json()
     assert state["active"] is True
     assert len(state["available_mushrooms"]) == 3
+    fighter = state["available_mushrooms"][0]
+    assert {"alive", "frozen", "mood", "stage", "mutations", "halloween_hat"} <= fighter.keys()
+    assert {"size", "title"} <= fighter["stage"].keys()
+    assert fighter["halloween_gone"] is False
 
     one = player.post("/api/events/halloween/raid/tap", json={"kombucha_ids": ids[:1]}).get_json()
     two = player.post("/api/events/halloween/raid/tap", json={"kombucha_ids": ids[:2]}).get_json()

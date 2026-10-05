@@ -2373,7 +2373,7 @@ async function pageEvents() {
       `<li><span>${esc(gift.emoji || "🎁")}</span><div><b>${esc(gift.title)}</b>${gift.description ? `<small>${esc(gift.description)}</small>` : ""}</div></li>`).join("");
     const selectedNames = available.filter((m) => selected.has(m.id)).map((m) => esc(m.name));
     const battleFighters = available.filter((m) => selected.has(m.id)).slice(0, 3).map((m, index) =>
-      `<span class="raid-fighter raid-fighter-${index + 1}" title="${esc(m.name)}">🍄</span>`).join("");
+      `<span class="raid-fighter raid-fighter-${index + 1}" title="${esc(m.name)}">${kombuchaSVG({ ...m, id: `raid-${m.id}` }, { small: true })}</span>`).join("");
     panel.innerHTML = `<div class="halloween-event-card">
       <div class="haunt-stage" id="raid-arena"><span class="haunt-web">🕸️</span><span class="haunt-bats">🦇　🦇</span><span class="haunt-fly fly-a">🪰</span><span class="haunt-fly fly-b">🪰</span>
         <div class="raid-projectiles" aria-hidden="true"><span class="raid-projectile raid-projectile-one">⚡</span><span class="raid-projectile raid-projectile-two">💫</span><span class="raid-projectile raid-projectile-three">🔥</span></div>
@@ -2415,7 +2415,7 @@ async function pageEvents() {
             const fighter = document.createElement("span");
             fighter.className = `raid-fighter raid-fighter-${index + 1}`;
             fighter.title = mushroom?.name || "Боец";
-            fighter.textContent = "🍄";
+            if (mushroom) fighter.innerHTML = kombuchaSVG({ ...mushroom, id: `raid-${mushroom.id}` }, { small: true });
             return fighter;
           }));
         }

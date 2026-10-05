@@ -969,7 +969,7 @@ body.halloween::after { content:"🦇　🦇　🦇"; position:fixed; top:calc(v
 body.halloween .panel { box-shadow:0 10px 32px #17091955; }
 body.halloween .site-footer { border-color:#43243f; }
 .halloween-event-card { display:grid; grid-template-columns:minmax(210px,.8fr) minmax(0,1.2fr); gap:24px; align-items:center; background:radial-gradient(ellipse at 20% 45%,#4d1d4945,transparent 65%),linear-gradient(145deg,#160f1e,#211526); border:1px solid #713647; border-radius:22px; padding:24px; overflow:hidden; }
-.haunt-stage { min-height:270px; position:relative; display:grid; place-items:center; isolation:isolate; background:radial-gradient(ellipse,#5a194342,transparent 66%); border-radius:20px; }
+.haunt-stage { min-height:300px; position:relative; display:grid; place-items:center; isolation:isolate; background:radial-gradient(ellipse,#5a194342,transparent 66%); border-radius:20px; }
 .halloween-boss { width:174px; height:174px; border:2px solid #a7472e; border-radius:46% 54% 48% 52%; background:radial-gradient(circle at 45% 36%,#ffac44,#9b321e 70%); box-shadow:0 0 45px #fc582466,inset 0 0 28px #30151f; cursor:pointer; font-size:83px; position:relative; transition:transform .12s,filter .12s; animation:boss-pulse 2.4s ease-in-out infinite; }
 .halloween-boss:hover { transform:scale(1.05) rotate(-2deg); filter:brightness(1.14); }
 .halloween-boss span { position:absolute; right:14px; bottom:16px; font-size:42px; }
@@ -1058,8 +1058,9 @@ body.halloween .site-footer { border-color:#69203c; }
 .haunt-fly { z-index:2; }
 @keyframes raid-web-sway { to{transform:rotate(8deg) scale(1.08);opacity:.48} }
 @keyframes raid-bat-flight { 0%{transform:translate(22px,5px) rotate(-8deg)} 50%{transform:translate(-28px,27px) rotate(12deg) scale(1.18)} 100%{transform:translate(-72px,4px) rotate(-15deg) scale(.9)} }
-.raid-fighter-line { position:absolute; z-index:4; left:50%; bottom:36px; display:flex; align-items:center; justify-content:center; gap:10px; transform:translateX(-50%); pointer-events:none; }
-.raid-fighter { display:inline-block; font-size:27px; line-height:1; filter:drop-shadow(0 0 8px #69ffbe); animation:raid-fighter-hover 1.25s ease-in-out infinite alternate; }
+.raid-fighter-line { position:absolute; z-index:4; left:50%; bottom:36px; display:flex; align-items:center; justify-content:center; gap:8px; transform:translateX(-50%); pointer-events:none; }
+.raid-fighter { display:block; width:48px; height:52px; filter:drop-shadow(0 0 8px #69ffbe); animation:raid-fighter-hover 1.25s ease-in-out infinite alternate; }
+.raid-fighter .kb-svg { display:block; width:100%; height:100%; }
 .raid-fighter-2 { animation-delay:-.35s; }
 .raid-fighter-3 { animation-delay:-.7s; }
 @keyframes raid-fighter-hover { to{transform:translateY(-7px) rotate(8deg) scale(1.12);filter:drop-shadow(0 0 14px #9bffb8)} }
@@ -1112,11 +1113,11 @@ body.halloween .site-footer { border-color:#69203c; }
 
 @media (max-width:700px) {
   .halloween-event-card { grid-template-columns:1fr; gap:8px; padding:15px; }
-  .haunt-stage { min-height:230px; }
+  .haunt-stage { min-height:270px; }
   .halloween-event-card .halloween-boss { width:116px; height:116px; font-size:60px; }
   .halloween-event-card .halloween-boss span { right:8px; bottom:9px; font-size:29px; }
-  .raid-fighter-line { bottom:27px; gap:8px; }
-  .raid-fighter { font-size:24px; }
+  .raid-fighter-line { bottom:27px; gap:5px; }
+  .raid-fighter { width:44px; height:48px; }
   .raid-team-slots { grid-template-columns:1fr; }
   .raid-admin-row { grid-template-columns:1fr; }
   .raid-admin-row label:last-child { grid-column:auto; }

@@ -56,7 +56,13 @@ def _stage_damage(player: HalloweenRaidPlayer | None, phase: int) -> int:
 
 
 def _mushroom_out(k: Kombucha) -> dict:
-    return {"id": k.id, "name": k.name, "stats": {name: round(getattr(k, name)) for name in kb.STATS}}
+    # Reuse the same visual/game state as the player's mushroom card so the raid shows
+    # each actual jar (including stage, mutations, Halloween cosmetics and mood).
+    view = kb.out(k)
+    return {key: view[key] for key in (
+        "id", "name", "alive", "frozen", "stats", "mood", "stage", "mutations",
+        "mold", "halloween_hat", "halloween_mutations", "halloween_web_until",
+    )} | {"halloween_gone": False}
 
 
 async def _raid_state(s, raid: HalloweenRaid, player: HalloweenRaidPlayer | None,
