@@ -116,6 +116,11 @@ install_deps() {
   fi
   : >"$logf"; chown "$APP_USER:$APP_USER" "$logf" 2>/dev/null || true
   {
+    echo "=== pip config list -v (как $APP_USER, HOME=$APP_HOME) ==="
+  } >>"$logf"
+  as_user_env "$APP_HOME" "$venv/bin/pip" config list -v >>"$logf" 2>&1 || true
+  {
+    echo
     echo "=== pip --version ==="
   } >>"$logf"
   run_pip "$venv" "$logf" --version || rc=$?
@@ -178,10 +183,14 @@ report_pip_failure() {
     echo "  ── диагностика pip ────────────────────────────────────────────────"
     {
       "$venv/bin/pip" --version 2>&1 || true
-      echo "--- pip config list (может содержать index-url; пароли замаскированы) ---"
+      echo "--- pip config list как $APP_USER (именно так pip и запускается; пароли замаскированы) ---"
+      as_user_env "$APP_HOME" "$venv/bin/pip" config list 2>&1 || echo "(не удалось прочитать конфиг пользователя)"
+      echo "--- pip config list как root ---"
       "$venv/bin/pip" config list 2>&1 || true
-      echo "--- политика wheel/sdist из окружения ---"
+      echo "--- политика wheel/sdist: PIP_*/UV_* в окружении deploy-скрипта ---"
       env | grep -E '^(PIP|UV)_' | mask_secrets || echo "(переменных PIP_* нет)"
+      echo "--- политика wheel/sdist: PIP_*/UV_* у $APP_USER ---"
+      as_user_env "$APP_HOME" env 2>/dev/null | grep -E '^(PIP|UV)_' | mask_secrets || echo "(переменных PIP_* нет)"
     } | mask_secrets
   } >&2
 }

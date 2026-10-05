@@ -224,9 +224,14 @@ def test_pip_failure_reports_stage_and_log_path(sandbox):
     assert f"Полный лог pip: {sandbox.logs}" in out
     assert "Миграции и перезапуск сервиса НЕ выполнялись" in out
     assert "Рабочая версия в" in out and "не изменена" in out
-    # диагностика окружения pip тоже печатается
+    # диагностика окружения pip тоже печатается — и глазами пользователя bulboz, а не только root
     assert "pip config list" in out
+    assert "pip config list как" in out
     assert "политика wheel/sdist" in out
+    assert f"PIP_*/UV_* у {pwd.getpwuid(os.getuid()).pw_name}" in out
+    # эффективный конфиг pip попадает в лог ещё до установки
+    log = (sandbox.logs / next(iter(p.name for p in sandbox.logs.glob("pip-*.log")))).read_text()
+    assert "pip config list -v" in log
 
 
 def test_pip_error_masks_secrets_in_diagnostics(sandbox):
