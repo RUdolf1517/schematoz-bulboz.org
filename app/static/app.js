@@ -1061,31 +1061,23 @@ async function adminHalloween(panel) {
   };
   const raid = data.raid || { boss_name: "Тыквенная плесень", regen_per_minute: 6,
     stages: [{ title: "Первая волна", max_hp: 10000, description: "" }], gifts: [] };
-  const makeGiftId = () => `gift-${Math.random().toString(36).slice(2, 10)}`;
+  const makeGiftId = () => `badge-${Math.random().toString(36).slice(2, 10)}`;
   const stageRow = (stage = {}) => `<div class="raid-admin-row" data-stage-row>
     <div class="raid-admin-row-head"><b>Стадия</b><button type="button" class="btn btn-ghost btn-sm" data-remove-stage>Удалить</button></div>
     <label>Название<input class="input" data-stage-title maxlength="80" required value="${esc(stage.title || "")}"></label>
     <label>Здоровье босса (HP)<input class="input" data-stage-hp type="number" min="1" max="1000000" required value="${Number(stage.max_hp) || 10000}"></label>
     <label>Описание<input class="input" data-stage-description maxlength="280" value="${esc(stage.description || "")}"></label>
   </div>`;
-  const giftRow = (gift = {}) => {
-    const rewardType = ["gift", "hat", "badge"].includes(gift.reward_type) ? gift.reward_type : "gift";
-    return `<div class="raid-admin-row" data-gift-row>
-      <div class="raid-admin-row-head"><b>Награда за вклад</b><button type="button" class="btn btn-ghost btn-sm" data-remove-gift>Удалить</button></div>
-      <input type="hidden" data-gift-id value="${esc(gift.id || makeGiftId())}">
-      <label>Что выдавать<select class="input" data-gift-type>
-        <option value="gift"${rewardType === "gift" ? " selected" : ""}>Обычный подарок</option>
-        <option value="hat"${rewardType === "hat" ? " selected" : ""}>Уникальная шапка</option>
-        <option value="badge"${rewardType === "badge" ? " selected" : ""}>Бейдж достижения</option>
-      </select></label>
-      <label>Стадия №<input class="input" data-gift-stage type="number" min="1" max="20" required value="${Number(gift.stage) || 1}"></label>
-      <label>Нанести урона на этой стадии<input class="input" data-gift-damage type="number" min="1" max="1000000" required value="${Number(gift.required_damage) || 1}"></label>
-      <label>Эмодзи / значок<input class="input" data-gift-emoji maxlength="12" required value="${esc(gift.emoji || "🎁")}"></label>
-      <label>Название<input class="input" data-gift-title maxlength="80" required value="${esc(gift.title || "")}" placeholder="Например, Шапка тыквенного стража"></label>
-      <label>Описание<input class="input" data-gift-description maxlength="240" value="${esc(gift.description || "")}" placeholder="Что получит игрок"></label>
-      <p class="muted raid-reward-hint" data-gift-help></p>
-    </div>`;
-  };
+  const giftRow = (gift = {}) => `<div class="raid-admin-row" data-gift-row>
+    <div class="raid-admin-row-head"><b>Бейдж за вклад</b><button type="button" class="btn btn-ghost btn-sm" data-remove-gift>Удалить</button></div>
+    <input type="hidden" data-gift-id value="${esc(gift.id || makeGiftId())}">
+    <input type="hidden" data-gift-type value="badge">
+    <label>Стадия №<input class="input" data-gift-stage type="number" min="1" max="20" required value="${Number(gift.stage) || 1}"></label>
+    <label>Личный урон на этой стадии<input class="input" data-gift-damage type="number" min="1" max="1000000" required value="${Number(gift.required_damage) || 1}"></label>
+    <label>Эмодзи / значок<input class="input" data-gift-emoji maxlength="12" required value="${esc(gift.emoji || "🏅")}"></label>
+    <label>Название<input class="input" data-gift-title maxlength="80" required value="${esc(gift.title || "")}" placeholder="Например, Страж тыквенной грядки"></label>
+    <label>Описание<input class="input" data-gift-description maxlength="240" value="${esc(gift.description || "")}" placeholder="За что выдан бейдж"></label>
+  </div>`;
   panel.innerHTML = `<form class="panel form" id="halloween-admin-form">
     <h2 style="margin-top:0">🎃 Хэллоуинский ивент</h2>
     <p class="muted">Ивент активен только между датами. Даты вводятся в часовом поясе браузера. Рейд общий для всех игроков сайта.</p>
@@ -1100,37 +1092,22 @@ async function adminHalloween(panel) {
     <h3>Стадии</h3><p class="muted">Здоровье задаётся отдельно для каждой стадии. Когда текущая стадия побеждена, рейд переходит к следующей; после последней босс продолжает появляться с её параметрами.</p>
     <div class="raid-admin-rows" id="raid-admin-stages">${(raid.stages || []).map(stageRow).join("")}</div>
     <button class="btn btn-ghost btn-sm" id="raid-add-stage" type="button">＋ Добавить стадию</button>
-    <h3>Награды и достижения за вклад</h3><p class="muted">Награда выдаётся сразу, как игрок лично наберёт нужный урон на указанной стадии: обычный подарок, уникальная шапка в постоянную коллекцию или бейдж в профиль. Каждая награда выдаётся один раз за рейд.</p>
+    <h3>Личные бейджи за вклад</h3><p class="muted">Бейдж выдаётся сразу, как игрок наберёт заданный личный урон на указанной стадии. Он появится в профиле; один бейдж выдаётся игроку один раз за рейд.</p>
     <div class="raid-admin-rows" id="raid-admin-gifts">${(raid.gifts || []).map(giftRow).join("")}</div>
-    <button class="btn btn-ghost btn-sm" id="raid-add-gift" type="button">＋ Создать подарок</button>
+    <button class="btn btn-ghost btn-sm" id="raid-add-gift" type="button">＋ Создать бейдж</button>
     <hr><button class="btn btn-accent">Сохранить настройки</button>
   </form>
   <div class="panel"><h3>Эффекты события</h3><p class="muted">Скример срабатывает примерно на каждом третьем действии, не чаще одного раза за 15 секунд. Музыка включена по умолчанию. Чистота и счастье грибов во время ивента убывают вдвое быстрее; в рейде каждый выставленный гриб наносит 1 урон, получает +1 чистоты и счастья, но теряет по 1 сахару и заварки.</p>
   <p class="muted">Также доступны хэллоуинские цитаты, временные мутации, «Сладость или гадость» и исчезновения грибов.</p></div>
   ${raidArchiveMarkup(archive)}`;
   const stagesBox = $("#raid-admin-stages", panel), giftsBox = $("#raid-admin-gifts", panel);
-  const setRewardHint = (row) => {
-    const type = $("[data-gift-type]", row)?.value || "gift";
-    const hints = {
-      gift: "Уведомление и постоянная запись в истории наград рейда; это не предмет игрового инвентаря.",
-      hat: "Уникальная шапка навсегда попадёт в коллекцию игрока; её можно надеть на любого своего гриба.",
-      badge: "Персональный бейдж появится в профиле и его можно будет добавить на витрину.",
-    };
-    const hint = $("[data-gift-help]", row);
-    if (hint) hint.textContent = hints[type] || hints.gift;
-  };
-  giftsBox.querySelectorAll("[data-gift-row]").forEach(setRewardHint);
-  giftsBox.addEventListener("change", (event) => {
-    if (event.target.matches("[data-gift-type]")) setRewardHint(event.target.closest("[data-gift-row]"));
-  });
   $("#raid-add-stage", panel).onclick = () => {
     if (stagesBox.querySelectorAll("[data-stage-row]").length >= 20) return toast("Максимум 20 стадий", true);
     stagesBox.insertAdjacentHTML("beforeend", stageRow({ title: `Стадия ${stagesBox.querySelectorAll("[data-stage-row]").length + 1}`, max_hp: 10000 }));
   };
   $("#raid-add-gift", panel).onclick = () => {
-    if (giftsBox.querySelectorAll("[data-gift-row]").length >= 100) return toast("Максимум 100 подарков", true);
+    if (giftsBox.querySelectorAll("[data-gift-row]").length >= 100) return toast("Максимум 100 бейджей", true);
     giftsBox.insertAdjacentHTML("beforeend", giftRow());
-    setRewardHint(giftsBox.lastElementChild);
   };
   stagesBox.addEventListener("click", (event) => {
     if (!event.target.closest("[data-remove-stage]")) return;
@@ -2346,8 +2323,8 @@ function raidLeaderboardMarkup(entries, participants, myRank = null, myDamage = 
     ${rows ? `<ol>${rows}</ol>` : `<p class="muted">Пока нет участников — нанеси первый удар!</p>`}${personal}</section>`;
 }
 
-function raidRewardLabel(type) {
-  return ({ hat: "🎩 Уникальная шапка", badge: "🏅 Бейдж достижения", gift: "🎁 Награда за вклад" })[type] || "🎁 Награда за вклад";
+function raidRewardLabel() {
+  return "🏅 Бейдж достижения";
 }
 
 function raidArchiveMarkup(data) {
@@ -2367,9 +2344,8 @@ function raidArchiveMarkup(data) {
   const entries = items.map((item) => {
     const medals = (item.medals || []).map((winner) =>
       `<span title="${Number(winner.damage || 0).toLocaleString("ru-RU")} урона">${esc(winner.medal)} <b>@${esc(winner.username)}</b></span>`).join("");
-    const rewardIcons = { gift: "🎁", hat: "🎩", badge: "🏅" };
-    const rewardList = (item.contribution_rewards || []).map((reward) =>
-      `<span>${rewardIcons[reward.reward_type] || "🎁"} ${esc(reward.title)}</span>`).join("");
+    const rewardList = (item.contribution_rewards || []).filter((reward) => reward.reward_type === "badge").map((reward) =>
+      `<span>🏅 ${esc(reward.title)}</span>`).join("");
     const outcome = item.boss_defeated ? "Босс повержен" : "Событие завершено";
     return `<details class="raid-archive-entry"><summary>
       <span class="raid-archive-boss">🎃 ${esc(item.boss || "Хэллоуинский босс")}</span>
@@ -2377,7 +2353,7 @@ function raidArchiveMarkup(data) {
       <span class="raid-archive-podium">${medals || "Медалистов пока нет"}</span>
     </summary><div class="raid-archive-body"><p class="raid-result-outcome">${outcome} · ${Number(item.completed_stages || 0)}/${Number(item.stage_count || 0)} стадий · архивировано ${item.archived_at ? esc(fmtDate(item.archived_at)) : ""}</p>
       ${raidLeaderboardMarkup(item.leaderboard, item.participants, null, 0, "🏆 Итоговый рейтинг")}
-      ${rewardList ? `<div class="raid-archive-rewards"><b>Награды сезона</b>${rewardList}</div>` : ""}</div></details>`;
+      ${rewardList ? `<div class="raid-archive-rewards"><b>Бейджи сезона</b>${rewardList}</div>` : ""}</div></details>`;
   }).join("");
   return `<section class="raid-archive"><div class="raid-archive-heading"><h3>📚 Архив прошлых рейдов</h3><small>${archive.total || 0} ${plural(Number(archive.total || 0), "событие", "события", "событий")}</small></div>
     ${recordCards ? `<div class="raid-record-grid">${recordCards}</div>` : ""}
@@ -2392,75 +2368,6 @@ async function pageEvents() {
   catch (_) { status.textContent = "Не удалось загрузить расписание события."; return; }
   let raidArchiveData = { items: [], records: {}, total: 0 };
   try { raidArchiveData = await api("GET", "/api/events/halloween/archive", undefined, { quiet: true }); } catch (_) {}
-  let hatGarden = null, hatTargetId = null;
-  const refreshHatGarden = async () => {
-    if (!ME || ME.ban) return;
-    try {
-      hatGarden = await api("GET", "/api/kombucha", undefined, { quiet: true });
-      event.owned_hats = hatGarden.halloween?.owned_hats || event.owned_hats || [];
-      event.hats = hatGarden.halloween?.hats || event.hats || {};
-      if (!hatTargetId || !(hatGarden.items || []).some((item) => item.id === hatTargetId)) {
-        hatTargetId = hatGarden.items?.[0]?.id || null;
-      }
-    } catch (_) {}
-  };
-  const canEquipRaidHats = () => !!(ME && !ME.ban
-    && (ME.permissions?.includes("kombucha.play") || isHalloweenAdmin()));
-  if (canEquipRaidHats() && (event.owned_hats || []).length) await refreshHatGarden();
-  const collectNewRaidHat = async (gifts, eventKey) => {
-    const known = new Set(event.owned_hats || []);
-    const reward = (gifts || []).find((gift) => gift && gift.event_key === eventKey
-      && gift.reward_type === "hat" && gift.hat_code && !known.has(gift.hat_code));
-    if (!reward) return false;
-    event.owned_hats = [...known, reward.hat_code];
-    event.hats = { ...(event.hats || {}), [reward.hat_code]: {
-      title: reward.title, emoji: reward.emoji, description: reward.description, unique: true,
-    } };
-    await refreshHatGarden();
-    toast("🎩 Новая шапка в коллекции — выбери гриб и надень её прямо здесь.");
-    return true;
-  };
-  const raidHatEquipMarkup = () => {
-    if (!canEquipRaidHats()) return "";
-    const hats = (event.owned_hats || []).map((code) => [code, (event.hats || {})[code]])
-      .filter(([, hat]) => hat);
-    if (!hats.length) return "";
-    const mushrooms = hatGarden?.items || [];
-    if (!mushrooms.length) return `<section class="raid-hat-equip"><h3>🎩 Надеть рейдовую шапку</h3>
-      <p class="muted">Шапка сохранена в коллекции. Открой подоконник, чтобы выбрать гриб и надеть её.</p>
-      <a class="btn btn-sm btn-ghost" href="/">🍄 Перейти в мой сад</a></section>`;
-    if (!hatTargetId || !mushrooms.some((item) => item.id === hatTargetId)) hatTargetId = mushrooms[0].id;
-    const selectedMushroom = mushrooms.find((item) => item.id === hatTargetId) || mushrooms[0];
-    const hatOptions = hats.map(([code, hat]) => `<option value="${esc(code)}"${selectedMushroom.halloween_hat === code ? " selected" : ""}>${esc(hat.emoji)} ${esc(hat.title)}</option>`).join("");
-    const mushroomOptions = mushrooms.map((item) => `<option value="${item.id}"${item.id === hatTargetId ? " selected" : ""}>${esc(item.name)}${item.frozen ? " · на полке" : item.alive ? " · живой" : " · закис"}</option>`).join("");
-    return `<section class="raid-hat-equip"><h3>🎩 Надеть шапку на своего гриба</h3>
-      <div class="raid-hat-controls"><label>Шапка<select class="input" id="raid-hat-code"><option value="">Без шапки</option>${hatOptions}</select></label>
-        <label>Гриб<select class="input" id="raid-hat-target">${mushroomOptions}</select></label>
-        <button class="btn btn-accent" type="button" data-raid-equip-hat>Надеть</button></div>
-      <p class="muted">Шапку можно переодеть и после окончания события.</p></section>`;
-  };
-  const bindRaidHatEquip = () => {
-    const target = $("#raid-hat-target", panel);
-    if (target) target.onchange = () => { hatTargetId = Number(target.value) || null; };
-    const button = $(`[data-raid-equip-hat]`, panel);
-    if (!button) return;
-    button.onclick = async () => {
-      const kid = Number($("#raid-hat-target", panel)?.value || 0);
-      const code = $("#raid-hat-code", panel)?.value || null;
-      if (!kid) return toast("Сначала заведи гриб в своём саду", true);
-      button.disabled = true;
-      try {
-        const result = await api("POST", `/api/events/halloween/hat/${kid}`, { code });
-        if (hatGarden) hatGarden.items = (hatGarden.items || []).map((item) => item.id === kid ? result.kombucha : item);
-        event.owned_hats = result.owned_hats || event.owned_hats || [];
-        if (event.active) paint(); else renderInactive();
-        toast(code ? "Шапка надета 🎩" : "Шапка снята");
-      } catch (err) {
-        toast(err.data?.message || "Не удалось надеть шапку", true);
-        button.disabled = false;
-      }
-    };
-  };
   const renderInactive = () => {
     const upcoming = event.enabled && new Date(event.start_at).getTime() > Date.now();
     status.textContent = upcoming
@@ -2470,8 +2377,8 @@ async function pageEvents() {
       ? "Событие завершилось. Вклад каждого участника вошёл в общий итог."
       : upcoming ? "Рейд начнётся в указанное время. Следи за банками!"
         : "Загляни во время активного ивента — тогда здесь появится общий босс.";
-    const gifts = (event.raid_gifts || []).slice().reverse().map((gift) =>
-      `<li><span>${esc(gift.emoji || "🎁")}</span><div><b>${esc(gift.title)}</b><small>${raidRewardLabel(gift.reward_type)}${gift.event_key ? ` · ${esc(fmtDate(gift.event_key))}` : ""}${gift.description ? ` · ${esc(gift.description)}` : ""}</small></div></li>`).join("");
+    const gifts = (event.raid_gifts || []).filter((gift) => gift?.reward_type === "badge").slice().reverse().map((gift) =>
+      `<li><span>${esc(gift.emoji || "🏅")}</span><div><b>${esc(gift.title)}</b><small>${raidRewardLabel(gift.reward_type)}${gift.event_key ? ` · ${esc(fmtDate(gift.event_key))}` : ""}${gift.description ? ` · ${esc(gift.description)}` : ""}</small></div></li>`).join("");
     const summary = event.raid_summary;
     const resultDates = summary?.start_at && summary?.end_at
       ? `<p class="muted">${fmtDate(summary.start_at)} — ${fmtDate(summary.end_at)}</p>` : "";
@@ -2484,11 +2391,9 @@ async function pageEvents() {
       ${raidLeaderboardMarkup(summary.leaderboard, summary.participants, null, 0, "🏆 Рейтинг участников")}</section>` : "";
     panel.innerHTML = `<h2>🌘 Сейчас тихо</h2><p class="muted">${inactiveMessage}</p>
       ${results}
-      ${gifts ? `<section class="raid-rewards raid-gift-box"><h3>🎁 Твои подарки и награды за все рейды</h3><ul>${gifts}</ul></section>` : ""}
-      ${raidHatEquipMarkup()}
+      ${gifts ? `<section class="raid-rewards raid-gift-box"><h3>🏅 Твои бейджи за все рейды</h3><ul>${gifts}</ul></section>` : ""}
       ${raidArchiveMarkup(raidArchiveData)}
       ${isHalloweenAdmin() ? `<button class="btn btn-ghost scare-test" data-screamer-test>👻 Проверить скример</button>` : ""}`;
-    bindRaidHatEquip();
   };
   if (!event.active) { renderInactive(); return; }
   status.textContent = `Хэллоуин идёт до ${fmtDate(event.end_at)}. Не оставляй грибов одних в темноте.`;
@@ -2519,7 +2424,6 @@ async function pageEvents() {
     buttons.forEach((b) => { if (b) b.disabled = true; });
     try {
       const r = await api("POST", "/api/events/halloween/raid/tap", { kombucha_ids: partyIds });
-      await collectNewRaidHat(r.gifts_received, r.event_key);
       raid = r;
       partyIds = (r.party_ids || partyIds).map(Number);
       partyDirty = false;
@@ -2571,17 +2475,17 @@ async function pageEvents() {
       return `<label>Слот ${slot + 1}<select class="input raid-team-select" data-raid-slot="${slot}" ${canJoin() && available.length ? "" : "disabled"}>
         <option value="">— не выставлять —</option>${options}</select></label>`;
     }).join("");
-    const stageGifts = (raid.stage_gifts || []).map((gift) => {
+    const stageGifts = (raid.stage_gifts || []).filter((gift) => gift?.reward_type === "badge").map((gift) => {
       const received = (raid.gifts_received || []).some((item) => item && item.id === gift.id
         && (item.event_key || raid.event_key) === raid.event_key);
       const remaining = Math.max(0, gift.required_damage - (raid.stage_damage || 0));
       const progress = received ? "уже получен" : remaining === 0
-        ? "порог выполнен — награда выдастся при следующей атаке рейда"
+        ? "порог выполнен — бейдж выдаётся сразу после достижения нужного урона"
         : `нанеси ещё ${remaining} урона на этой стадии`;
       return `<li><b>${esc(gift.emoji)} ${esc(gift.title)}</b> <small>${raidRewardLabel(gift.reward_type)}</small> — ${progress}${gift.description ? `<small>${esc(gift.description)}</small>` : ""}</li>`;
     }).join("");
-    const receivedGifts = (raid.gifts_received || []).slice().reverse().map((gift) =>
-      `<li><span>${esc(gift.emoji || "🎁")}</span><div><b>${esc(gift.title)}</b><small>${raidRewardLabel(gift.reward_type)}${gift.event_key ? ` · ${esc(fmtDate(gift.event_key))}` : ""}${gift.description ? ` · ${esc(gift.description)}` : ""}</small></div></li>`).join("");
+    const receivedGifts = (raid.gifts_received || []).filter((gift) => gift?.reward_type === "badge").slice().reverse().map((gift) =>
+      `<li><span>${esc(gift.emoji || "🏅")}</span><div><b>${esc(gift.title)}</b><small>${raidRewardLabel(gift.reward_type)}${gift.event_key ? ` · ${esc(fmtDate(gift.event_key))}` : ""}${gift.description ? ` · ${esc(gift.description)}` : ""}</small></div></li>`).join("");
     const selectedNames = available.filter((m) => selected.has(m.id)).map((m) => esc(m.name));
     const battleFighters = available.filter((m) => selected.has(m.id)).slice(0, 3).map((m, index) =>
       `<span class="raid-fighter raid-fighter-${index + 1}" title="${esc(m.name)}">${kombuchaSVG({ ...m, id: `raid-${m.id}` }, { small: true })}</span>`).join("");
@@ -2603,13 +2507,11 @@ async function pageEvents() {
           : `<p class="muted">У тебя пока нет живых незамороженных грибов для рейда. Заведи гриб на <a href="/">подоконнике</a>.</p>`}</section>` : ""}
         <button class="btn btn-accent raid-tap" id="halloween-tap" ${ready ? "" : "disabled"}>${tapLabel()}</button>
         ${!ME ? `<a class="btn btn-ghost btn-sm" href="/login?next=/events">🔐 Войти и бить босса вместе</a>` : ""}
-        ${stageGifts ? `<section class="raid-rewards"><h3>🎁 Награды этой стадии</h3><ul>${stageGifts}</ul></section>` : ""}
-        ${ME && receivedGifts ? `<section class="raid-rewards raid-gift-box"><h3>🎁 Твои подарки и награды за все рейды</h3><ul>${receivedGifts}</ul></section>` : ""}
-        ${raidHatEquipMarkup()}
-        <div class="haunt-controls">${isHalloweenAdmin() ? `<button class="btn btn-ghost scare-test" data-screamer-test>👻 Проверить скример</button>` : ""}<button class="btn btn-ghost" data-spooky-music aria-pressed="${spookyMusicEnabled ? "true" : "false"}">${spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку"}</button></div>
+        ${stageGifts ? `<section class="raid-rewards"><h3>🏅 Бейджи этой стадии</h3><ul>${stageGifts}</ul></section>` : ""}
+        ${ME && receivedGifts ? `<section class="raid-rewards raid-gift-box"><h3>🏅 Твои бейджи за все рейды</h3><ul>${receivedGifts}</ul></section>` : ""}
+          <div class="haunt-controls">${isHalloweenAdmin() ? `<button class="btn btn-ghost scare-test" data-screamer-test>👻 Проверить скример</button>` : ""}<button class="btn btn-ghost" data-spooky-music aria-pressed="${spookyMusicEnabled ? "true" : "false"}">${spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку"}</button></div>
         <p class="muted">«Сладость или гадость» раз в день доступна на живых грибах друзей — открой профиль и постучи по банке.</p></div>
     </div>${raidArchiveMarkup(raidArchiveData)}`;
-    bindRaidHatEquip();
     $("#halloween-boss", panel).onclick = tap;
     $("#halloween-tap", panel).onclick = tap;
     $$('[data-raid-slot]', panel).forEach((select) => {
@@ -2669,7 +2571,6 @@ async function pageEvents() {
         || JSON.stringify(fresh.available_mushrooms) !== JSON.stringify(raid.available_mushrooms)
         || JSON.stringify(fresh.gifts_received) !== JSON.stringify(raid.gifts_received);
       if (changed) {
-        await collectNewRaidHat(fresh.gifts_received, fresh.event_key);
         raid = fresh;
         if (!partyDirty) partyIds = (fresh.party_ids || []).map(Number);
         else partyIds = partyIds.filter((id) => fresh.available_mushrooms.some((m) => m.id === id));

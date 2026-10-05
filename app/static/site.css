@@ -1153,12 +1153,6 @@ body.halloween .site-footer { border-color:#69203c; }
 .raid-archive-rewards { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; font-size:12px; }
 .raid-archive-rewards b { width:100%; }
 .raid-archive-rewards span { padding:4px 8px; border:1px solid #734056; border-radius:999px; color:#ffe3a4; }
-.raid-reward-hint { grid-column:1/-1; margin:0; font-size:12px; }
-.raid-hat-equip { margin:12px 0; padding:14px; border:1px solid #87643e; border-radius:12px; background:#20170e; }
-.raid-hat-equip h3 { margin:0 0 10px; color:#ffe3a4; }
-.raid-hat-controls { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; align-items:end; gap:10px; }
-.raid-hat-controls label { display:grid; gap:5px; }
-.raid-hat-equip > .muted { margin:8px 0 0; font-size:12px; }
 .raid-results { border-color:#b4325b; background:radial-gradient(ellipse at 85% 0%,#7b1a3f55,transparent 45%),linear-gradient(145deg,#1e1024,#0e0a13); }
 .raid-results > h2 { margin:3px 0; color:#ffe3a4; font-size:clamp(21px,3vw,29px); }
 .raid-results > .muted { margin:4px 0 12px; font-size:12px; }
@@ -1195,7 +1189,6 @@ body.halloween .site-footer { border-color:#69203c; }
   .raid-team-slots { grid-template-columns:1fr; }
   .raid-archive-entry > summary { grid-template-columns:1fr; }
   .raid-archive-meta { text-align:left; }
-  .raid-hat-controls { grid-template-columns:1fr; }
   .raid-admin-row { grid-template-columns:1fr; }
   .raid-admin-row label:last-child { grid-column:auto; }
   body.halloween::before { font-size:60px; }

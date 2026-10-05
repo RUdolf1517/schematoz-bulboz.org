@@ -14,7 +14,7 @@ from ..db import session_scope
 from ..errors import ApiError
 from ..models import HalloweenRaid, HalloweenRaidPlayer, HalloweenTreat, Kombucha, User
 from ..services import halloween, halloween_raid, kombucha as kb
-from ..services.notifications import notify, notify_once
+from ..services.notifications import notify
 from ..services.push import enqueue_push
 from . import bp
 from .utils import json_body
@@ -104,7 +104,8 @@ async def _raid_state(s, raid: HalloweenRaid, player: HalloweenRaidPlayer | None
         "stage_damage": _stage_damage(player, raid.phase),
         "regen_per_minute": raid_config["regen_per_minute"],
         "stage_gifts": [gift for gift in raid_config["gifts"] if gift["stage"] == stage_number],
-        "gifts_received": (player.gifts_received or []) if player else [],
+        "gifts_received": [entry for entry in (player.gifts_received or [])
+                           if isinstance(entry, dict) and entry.get("reward_type") == "badge"] if player else [],
         "party_ids": party_ids,
         "available_mushrooms": [_mushroom_out(k) for k in available],
     }
@@ -112,9 +113,9 @@ async def _raid_state(s, raid: HalloweenRaid, player: HalloweenRaidPlayer | None
 
 async def _award_stage_gifts(s, raid_config: dict, stage_number: int, phase: int,
                              at: datetime, season_key: str) -> None:
-    """Grant each configured reward as soon as a contributor reaches its stage threshold."""
-    gifts = [gift for gift in raid_config["gifts"] if gift["stage"] == stage_number]
-    if not gifts:
+    """Grant configured personal raid badges as soon as contributors reach the threshold."""
+    badges = [gift for gift in raid_config["gifts"] if gift["stage"] == stage_number]
+    if not badges:
         return
     players = (await s.scalars(select(HalloweenRaidPlayer).with_for_update())).all()
     for participant in players:
@@ -124,43 +125,27 @@ async def _award_stage_gifts(s, raid_config: dict, stage_number: int, phase: int
         received = list(participant.gifts_received or [])
         received_keys = {
             (str(item.get("event_key") or season_key), str(item.get("id") or ""))
-            for item in received if isinstance(item, dict)
+            for item in received if isinstance(item, dict) and item.get("reward_type") == "badge"
         }
-        for gift in gifts:
-            reward_key = (season_key, gift["id"])
-            if damage < gift["required_damage"] or reward_key in received_keys:
+        for badge in badges:
+            reward_key = (season_key, badge["id"])
+            if damage < badge["required_damage"] or reward_key in received_keys:
                 continue
             recipient = await s.get(User, participant.user_id, with_for_update=True)
             if recipient is None:
                 continue
-            reward_type = gift.get("reward_type", "gift")
-            entry = {**gift, "event_key": season_key, "received_at": at.isoformat(),
-                     "phase": phase, "damage": damage}
-            if reward_type in {"hat", "badge"}:
-                reward_code = halloween.reward_code(reward_type, season_key, gift["id"])
-                if reward_type == "hat":
-                    entry["hat_code"] = halloween.grant_raid_hat(recipient, gift, season_key)
-                else:
-                    from ..services.gamification import award_custom_raid_badge
-                    await award_custom_raid_badge(s, recipient.id, reward_code, gift["title"],
-                                                  gift["emoji"], gift["description"], at)
-                    entry["badge_code"] = reward_code
+            badge_code = halloween.reward_code(season_key, badge["id"])
+            entry = {**badge, "event_key": season_key, "received_at": at.isoformat(),
+                     "phase": phase, "damage": damage, "badge_code": badge_code}
+            from ..services.gamification import award_custom_raid_badge
+            await award_custom_raid_badge(s, recipient.id, badge_code, badge["title"],
+                                          badge["emoji"], badge["description"], at)
             received.append(entry)
             received_keys.add(reward_key)
-            if reward_type == "hat":
-                body = f"{gift['emoji']} Уникальная шапка «{gift['title']}» добавлена в коллекцию! Надень её на гриба в своём саду."
-                title = "Новая рейдовая шапка 🎩"
-            elif reward_type == "badge":
-                body = f"{gift['emoji']} Получен бейдж «{gift['title']}» за вклад в рейд."
-                title = "Новое достижение рейда 🏅"
-            else:
-                body = f"{gift['emoji']} За участие в стадии «{gift['title']}» ты получил(а) подарок. {gift['description']}".strip()[:300]
-                title = "Подарок за рейд 🎁"
-            key = f"halloween_raid_gift:{halloween.reward_code('badge', season_key, gift['id'])}:{participant.user_id}"
-            if reward_type != "badge":
-                await notify_once(s, participant.user_id, "halloween", key, text=body,
-                                  gift_id=gift["id"], category="raid_gift")
-            await enqueue_push(s, participant.user_id, "halloween", title, body, "/events", key)
+            body = f"{badge['emoji']} Получен бейдж «{badge['title']}» за вклад в рейд."
+            key = f"halloween_raid_badge:{badge_code}:{participant.user_id}"
+            await enqueue_push(s, participant.user_id, "halloween", "Новое достижение рейда 🏅",
+                               body, "/events", key)
         participant.gifts_received = received
 
 
@@ -173,7 +158,8 @@ async def event_state():
         user = await s.get(User, uid) if uid else None
         state = halloween.public_state(config, user, at)
         player = await s.get(HalloweenRaidPlayer, uid) if uid else None
-        state["raid_gifts"] = (player.gifts_received or []) if player else []
+        state["raid_gifts"] = [entry for entry in (player.gifts_received or [])
+                               if isinstance(entry, dict) and entry.get("reward_type") == "badge"] if player else []
         if state["active"]:
             if user:
                 await halloween.award_survivor(s, user.id)

@@ -172,7 +172,14 @@ async def archive_index(s, limit: int = 100) -> dict:
             records[metric] = max(candidates, key=lambda candidate: candidate[0])[1]
     total = int(await s.scalar(select(func.count()).select_from(HalloweenRaidArchive)) or 0)
     return {
-        "items": [dict(row.summary) | {"archived_at": row.archived_at.isoformat()} for row in latest],
+        "items": [
+            dict(row.summary) | {
+                "contribution_rewards": [reward for reward in (row.summary or {}).get("contribution_rewards", [])
+                                         if isinstance(reward, dict) and reward.get("reward_type") == "badge"],
+                "archived_at": row.archived_at.isoformat(),
+            }
+            for row in latest
+        ],
         "total": total,
         "records": records,
     }

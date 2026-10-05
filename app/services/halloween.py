@@ -82,15 +82,15 @@ def normalize_raid_config(value: dict | None) -> dict:
         gift_id = str(gift.get("id") or "")[:48]
         if not gift_id:
             continue
-        reward_type = gift.get("reward_type", "gift")
-        if not isinstance(reward_type, str) or reward_type not in {"gift", "hat", "badge"}:
-            reward_type = "gift"
+        reward_type = gift.get("reward_type")
+        if reward_type != "badge":
+            continue
         normalized_gifts.append({
             "id": gift_id, "stage": max(1, min(stage, len(normalized_stages))),
             "required_damage": max(1, min(damage, 1_000_000)),
             "reward_type": reward_type,
-            "emoji": str(gift.get("emoji") or "🎁")[:12],
-            "title": str(gift.get("title") or "Подарок за рейд")[:80],
+            "emoji": str(gift.get("emoji") or "🏅")[:12],
+            "title": str(gift.get("title") or "Бейдж за вклад")[:80],
             "description": str(gift.get("description") or "")[:240],
         })
     try:
@@ -142,20 +142,20 @@ def validate_raid_config(value: dict) -> dict:
 
     raw_gifts = value.get("gifts", [])
     if not isinstance(raw_gifts, list) or len(raw_gifts) > 100:
-        raise ApiError("Можно создать не больше 100 подарков", 400, "validation_error", field="gifts")
+        raise ApiError("Можно создать не больше 100 бейджей", 400, "validation_error", field="gifts")
     gifts, gift_ids = [], set()
     for index, gift in enumerate(raw_gifts, 1):
         if not isinstance(gift, dict):
-            raise ApiError(f"Подарок {index} заполнен неверно", 400, "validation_error", field="gifts")
+            raise ApiError(f"Бейдж {index} заполнен неверно", 400, "validation_error", field="gifts")
         gift_id = text(gift.get("id"), f"gifts[{index}].id", 1, 48)
         if not re.fullmatch(r"[A-Za-z0-9_-]+", gift_id) or gift_id in gift_ids:
-            raise ApiError("ID подарков должны быть уникальными латинскими буквами, цифрами, _ или -",
+            raise ApiError("ID бейджей должны быть уникальными латинскими буквами, цифрами, _ или -",
                            400, "validation_error", field="gifts")
         gift_ids.add(gift_id)
         stage = integer(gift.get("stage"), f"gifts[{index}].stage", 1, len(stages))
-        reward_type = gift.get("reward_type", "gift")
-        if not isinstance(reward_type, str) or reward_type not in {"gift", "hat", "badge"}:
-            raise ApiError("Тип награды должен быть gift, hat или badge", 400,
+        reward_type = gift.get("reward_type", "badge")
+        if reward_type != "badge":
+            raise ApiError("В рейде можно настраивать только бейджи", 400,
                            "validation_error", field=f"gifts[{index}].reward_type")
         gifts.append({
             "id": gift_id, "stage": stage,
@@ -219,48 +219,14 @@ async def get_config(s, *, lock: bool = False) -> dict:
     return config
 
 
-def custom_hats(user: User | None = None) -> dict[str, dict]:
-    profile = (user.profile or {}) if user else {}
-    result = {}
-    for item in profile.get("halloween_custom_hats") or []:
-        if not isinstance(item, dict):
-            continue
-        code = str(item.get("code") or "")
-        if re.fullmatch(r"hrh_[a-f0-9]{20}", code):
-            result[code] = {
-                "title": str(item.get("title") or "Рейдовая шапка")[:80],
-                "emoji": str(item.get("emoji") or "🎩")[:12],
-                "description": str(item.get("description") or "Уникальная награда рейда.")[:240],
-                "unique": True,
-            }
-    return result
-
-
 def hat_catalog(user: User | None = None) -> dict[str, dict]:
-    return {**HATS, **custom_hats(user)}
+    """The pre-existing Halloween hats collected via trick-or-treat."""
+    return HATS
 
 
-def reward_code(kind: str, season_key: str, reward_id: str) -> str:
-    prefix = "hrh_" if kind == "hat" else "hrb_"
+def reward_code(season_key: str, reward_id: str) -> str:
     digest = hashlib.sha256(f"{season_key}:{reward_id}".encode()).hexdigest()[:20]
-    return prefix + digest
-
-
-def grant_raid_hat(user: User, gift: dict, season_key: str) -> str:
-    """Persist a snapshot of an exclusive, admin-defined hat in the player's inventory."""
-    code = reward_code("hat", season_key, gift["id"])
-    profile = dict(user.profile or {})
-    custom = [item for item in (profile.get("halloween_custom_hats") or [])
-              if isinstance(item, dict) and item.get("code") != code]
-    custom.append({"code": code, "title": gift["title"], "emoji": gift["emoji"],
-                   "description": gift.get("description", ""), "event_key": season_key})
-    owned = list(profile.get("halloween_hats") or [])
-    if code not in owned:
-        owned.append(code)
-    profile["halloween_custom_hats"] = custom
-    profile["halloween_hats"] = list(dict.fromkeys(owned))
-    user.profile = profile
-    return code
+    return "hrb_" + digest
 
 
 def _owned_hat_codes(user: User | None = None) -> list[str]:

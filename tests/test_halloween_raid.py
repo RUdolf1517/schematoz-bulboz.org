@@ -33,7 +33,7 @@ def test_halloween_decay_doubles_cleanliness_and_happiness(monkeypatch):
     assert kombucha.happy == 40
 
 
-def test_shared_raid_party_damage_stats_and_stage_gift(app, make_user, monkeypatch):
+def test_shared_raid_party_damage_stats_and_stage_badge(app, make_user, monkeypatch):
     from app.api import events as event_api
     from app.db import session_scope
     from app.services import kombucha as kb
@@ -52,8 +52,8 @@ def test_shared_raid_party_damage_stats_and_stage_gift(app, make_user, monkeypat
                 {"title": "Первая волна", "max_hp": 6, "description": "Проверка команды"},
                 {"title": "Финал", "max_hp": 9, "description": "Последняя стадия"},
             ],
-            "gifts": [{"id": "raid-test-gift", "stage": 1, "required_damage": 6,
-                       "emoji": "🎁", "title": "Награда за вклад", "description": "Спасибо за бой!"}],
+            "gifts": [{"id": "raid-test-badge", "stage": 1, "required_damage": 6,
+                       "reward_type": "badge", "emoji": "🏅", "title": "Бейдж за вклад", "description": "Спасибо за бой!"}],
         },
     })
     assert setup.status_code == 200, setup.get_json()
@@ -93,7 +93,9 @@ def test_shared_raid_party_damage_stats_and_stage_gift(app, make_user, monkeypat
     assert three_response["phase"] == 2 and three_response["stage_number"] == 2
     assert three_response["hp"] == three_response["max_hp"] == 9
     assert three_response["total_damage"] == 6
-    assert three_response["gifts_received"][0]["id"] == "raid-test-gift"
+    assert three_response["gifts_received"][0]["id"] == "raid-test-badge"
+    assert three_response["gifts_received"][0]["reward_type"] == "badge"
+    assert three_response["gifts_received"][0]["badge_code"].startswith("hrb_")
 
     by_id = {item["id"]: item["stats"] for item in three_response["available_mushrooms"]}
     assert by_id[ids[0]] == {"sweet": 67, "tea": 67, "clean": 93, "happy": 73}
@@ -161,7 +163,7 @@ def test_shared_leaderboard_and_latest_completed_summary(app, make_user, monkeyp
     ]
 
 
-def test_admin_hat_badge_rewards_and_raid_archive(app, make_user, monkeypatch):
+def test_admin_badges_and_raid_archive(app, make_user, monkeypatch):
     from app.api import events as event_api
 
     admin, _ = make_user(role="admin")
@@ -169,49 +171,42 @@ def test_admin_hat_badge_rewards_and_raid_archive(app, make_user, monkeypatch):
     second, second_user = make_user(username="raidmedalist")
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=1)
+    badge = {"id": "raid-badge", "stage": 1, "required_damage": 1, "reward_type": "badge",
+             "emoji": "🦇", "title": "Ночной дозор", "description": "Внёс вклад в общий бой."}
     raid = {
         "boss_name": "Архивный кошмар", "regen_per_minute": 0,
         "stages": [{"title": "Последняя ночь", "max_hp": 4, "description": ""}],
-        "gifts": [
-            {"id": "exclusive-hat", "stage": 1, "required_damage": 1, "reward_type": "hat",
-             "emoji": "🎩", "title": "Шляпа тёмного грибника", "description": "Эксклюзив рейда."},
-            {"id": "ordinary-gift", "stage": 1, "required_damage": 1, "reward_type": "gift",
-             "emoji": "🍬", "title": "Тыквенная конфета", "description": "Обычная награда."},
-            {"id": "raid-badge", "stage": 1, "required_damage": 2, "reward_type": "badge",
-             "emoji": "🦇", "title": "Ночной дозор", "description": "Внёс вклад в общий бой."},
-        ],
+        "gifts": [badge],
     }
+
+    for removed_type in ("hat", "gift"):
+        removed_raid = {**raid, "gifts": [{**badge, "reward_type": removed_type}]}
+        rejected = admin.put("/admin/events/halloween", json={
+            "enabled": True, "start_at": start.isoformat(),
+            "end_at": (now + timedelta(days=1)).isoformat(), "raid": removed_raid,
+        })
+        assert rejected.status_code == 400
+
     configured = admin.put("/admin/events/halloween", json={
         "enabled": True, "start_at": start.isoformat(),
         "end_at": (now + timedelta(days=1)).isoformat(), "raid": raid,
     })
     assert configured.status_code == 200, configured.get_json()
-    assert configured.get_json()["raid"]["gifts"][0]["reward_type"] == "hat"
+    assert configured.get_json()["raid"]["gifts"][0]["reward_type"] == "badge"
     monkeypatch.setattr(event_api, "RAID_TAP_COOLDOWN", timedelta(0))
 
     first_hit = first.post("/api/events/halloween/raid/tap", json={}).get_json()
     assert first_hit["defeated"] is False
-    assert {item["id"] for item in first_hit["gifts_received"]} >= {"exclusive-hat", "ordinary-gift"}
+    badge_reward = next(item for item in first_hit["gifts_received"] if item["reward_type"] == "badge")
+    assert badge_reward["badge_code"].startswith("hrb_")
     second.post("/api/events/halloween/raid/tap", json={})
     first.post("/api/events/halloween/raid/tap", json={})
     final_hit = second.post("/api/events/halloween/raid/tap", json={}).get_json()
     assert final_hit["defeated"] is True
-    hat_reward = next(item for item in final_hit["gifts_received"] if item["reward_type"] == "hat")
-    badge_reward = next(item for item in final_hit["gifts_received"] if item["reward_type"] == "badge")
-    assert hat_reward["hat_code"].startswith("hrh_")
-    assert badge_reward["badge_code"].startswith("hrb_")
-
-    state = first.get("/api/kombucha").get_json()
-    assert hat_reward["hat_code"] in state["halloween"]["owned_hats"]
-    assert state["halloween"]["hats"][hat_reward["hat_code"]]["title"] == "Шляпа тёмного грибника"
-    kid = state["items"][0]["id"]
-    equipped = first.post(f"/api/events/halloween/hat/{kid}", json={"code": hat_reward["hat_code"]}).get_json()
-    assert equipped["kombucha"]["halloween_hat"] == hat_reward["hat_code"]
-    assert equipped["kombucha"]["halloween_hat_meta"]["emoji"] == "🎩"
 
     profile = first.get(f"/api/users/{first_user['username']}").get_json()
-    badge = next(item for item in profile["badges"] if item["code"] == badge_reward["badge_code"])
-    assert badge["title"] == "Ночной дозор"
+    profile_badge = next(item for item in profile["badges"] if item["code"] == badge_reward["badge_code"])
+    assert profile_badge["title"] == "Ночной дозор"
     assert "raid_contributor" in {item["code"] for item in profile["badges"]}
     showcase = first.patch("/api/me/profile", json={"showcase_badges": [badge_reward["badge_code"]]})
     assert showcase.status_code == 200, showcase.get_json()
@@ -230,6 +225,7 @@ def test_admin_hat_badge_rewards_and_raid_archive(app, make_user, monkeypatch):
     assert archive["records"]["total_damage"]["value"] == 4
     assert archive["records"]["participants"]["value"] == 2
     assert archive["items"][0]["event_key"] == start.isoformat()
+    assert archive["items"][0]["contribution_rewards"] == [badge]
     assert "raid_champion" in {item["code"] for item in first.get(f"/api/users/{first_user['username']}").get_json()["badges"]}
     assert "raid_medalist" in {item["code"] for item in second.get(f"/api/users/{second_user['username']}").get_json()["badges"]}
 
@@ -240,5 +236,5 @@ def test_admin_hat_badge_rewards_and_raid_archive(app, make_user, monkeypatch):
     })
     assert next_event.status_code == 200, next_event.get_json()
     history = first.get("/api/events/state").get_json()["raid_gifts"]
-    assert {item["id"] for item in history} >= {"exclusive-hat", "ordinary-gift", "raid-badge"}
+    assert {item["id"] for item in history} == {"raid-badge"}
     assert all(item["event_key"] == start.isoformat() for item in history)
