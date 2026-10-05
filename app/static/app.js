@@ -1739,7 +1739,7 @@ async function kbMeditate(k, onDone) {
   raf = requestAnimationFrame(loop);
 }
 
-// Полноэкранный просмотр гриба: только банка, весь интерфейс сайта скрыт. Выход — Esc, клик/тап или кнопка.
+// Полноэкранный просмотр гриба: наклон работает как в обычной банке. Выход — Esc или тап.
 function kbFullscreen(getK) {
   if ($(".kb-fs")) return;
   const k = getK();
@@ -1748,19 +1748,55 @@ function kbFullscreen(getK) {
   el.className = "kb-fs";
   el.setAttribute("role", "dialog");
   el.setAttribute("aria-label", `Гриб ${k.name} во весь экран`);
-  el.innerHTML = `<div class="kb-fs-art">${kombuchaSVG({ ...k, id: "fs" + k.id })}</div><div class="kb-fs-hint">Esc или тап — выйти</div>`;
+  const tiltButton = canOfferDeviceTilt()
+    ? `<button class="kb-tilt-btn kb-fs-tilt-btn" data-tilt title="Наклони телефон или проведи пальцем по банке" aria-label="Включить наклон телефона" aria-pressed="false">↕️</button>`
+    : "";
+  const fullscreenHint = REDUCED_MOTION ? "Esc или тап — выйти" : "Курсор / наклон / свайп · Esc / тап — выйти";
+  el.innerHTML = `<div class="kb-fs-art">${kombuchaSVG({ ...k, id: "fs" + k.id })}</div>${tiltButton}<div class="kb-fs-hint">${fullscreenHint}</div>`;
   document.body.appendChild(el);
   document.body.classList.add("kb-fs-on");
+  initTiltScene(el);
+  const fullscreenTiltControl = el.querySelector("[data-tilt]");
+  fullscreenTiltControl?.addEventListener("pointerdown", (event) => event.stopPropagation());
+  fullscreenTiltControl?.addEventListener("click", (event) => event.stopPropagation());
+
+  let touchStart = null, touchDraggedAt = 0;
+  el.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "touch") touchStart = { x: event.clientX, y: event.clientY };
+  }, { passive: true });
+  el.addEventListener("pointermove", (event) => {
+    if (event.pointerType === "touch" && touchStart
+      && Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y) >= 8) {
+      touchDraggedAt = performance.now();
+    }
+  }, { passive: true });
+  el.addEventListener("pointerup", (event) => { if (event.pointerType === "touch") touchStart = null; }, { passive: true });
+  el.addEventListener("pointercancel", (event) => { if (event.pointerType === "touch") touchStart = null; }, { passive: true });
+
   const close = () => {
     document.removeEventListener("keydown", onKey);
     document.removeEventListener("fullscreenchange", onFs);
     el.remove();
     document.body.classList.remove("kb-fs-on");
+    const mainScene = document.querySelector(".kb-main .kb-scene");
+    if (mainScene) {
+      const mainSvg = $(".kb-svg", mainScene);
+      if (mainSvg) {
+        mainSvg.style.setProperty("--cursor-x", "0px");
+        mainSvg.style.setProperty("--cursor-y", "0px");
+        mainSvg.style.setProperty("--cursor-tilt", "0deg");
+      }
+      initTiltScene(mainScene);
+    }
     if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
   };
-  const onKey = (e) => { if (e.key === "Escape") close(); };
+  const onKey = (event) => { if (event.key === "Escape") close(); };
   const onFs = () => { if (!document.fullscreenElement) close(); };
-  el.onclick = close;
+  el.onclick = (event) => {
+    if (event.target.closest?.("[data-tilt]")) return;
+    if (touchDraggedAt && performance.now() - touchDraggedAt < 600) { touchDraggedAt = 0; return; }
+    close();
+  };
   document.addEventListener("keydown", onKey);
   el.requestFullscreen?.().then(() => document.addEventListener("fullscreenchange", onFs)).catch(() => {});
   setTimeout(() => el.classList.add("hint-off"), 2500);
@@ -1839,9 +1875,7 @@ function kombuchaSVG(k, { small = false } = {}) {
       <path class="kb-liquid" data-y="${top}" d="M30,${top} Q70,${top - 4} 110,${top} T190,${top} L420,400 L-200,400 Z" fill="${tint}"/>
       <path class="kb-liquid-surface" data-y="${top}" d="M30,${top} Q70,${top - 4} 110,${top} T190,${top}" stroke="#ffffff55" stroke-width="2" fill="none"/>
       ${stars}${bubbles}${FX.liquid.join("")}
-      ${HALLOWEEN_ACTIVE && k.halloween_gone
-        ? `<g class="kb-float"><g class="kb-gone-mush" transform="translate(${cx},${cy})" aria-hidden="true"><text x="0" y="${(h * 0.6).toFixed(1)}" text-anchor="middle" font-size="${Math.max(34, Math.min(58, w * 0.56))}">👻</text></g></g>`
-        : `<g class="${k.alive ? "kb-float" : ""}"><g class="kb-mush" data-cx="${cx}" data-cy="${cy}" transform="translate(${cx},${cy})"${FX.glow.length ? ` style="filter:${FX.glow.slice(0, 3).join(" ")}"` : ""}>
+      ${HALLOWEEN_ACTIVE && k.halloween_gone ? "" : `<g class="${k.alive ? "kb-float" : ""}"><g class="kb-mush" data-cx="${cx}" data-cy="${cy}" transform="translate(${cx},${cy})"${FX.glow.length ? ` style="filter:${FX.glow.slice(0, 3).join(" ")}"` : ""}>
         <g class="kb-disc-wrap">
           <ellipse rx="${w}" ry="${h}" class="kb-disc" ${discFill ? `style="fill:${discFill};stroke:${shade(FX.discColors[0])}"` : disc ? `style="fill:${disc[1]};stroke:${disc[2]}"` : ""}/>
           <ellipse rx="${w * 0.8}" ry="${h * 0.5}" cy="-${h * 0.3}" class="kb-disc-hi"/>
@@ -2056,9 +2090,9 @@ async function pageKombucha() {
         ${HALLOWEEN_ACTIVE ? `<button class="kb-music-btn" data-spooky-music aria-pressed="${spookyMusicEnabled ? "true" : "false"}">${spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку"}</button>
           ${isHalloweenAdmin() ? `<button class="kb-scare-btn" data-screamer-test title="Проверить скример" aria-label="Проверить скример">👻</button>` : ""}
           <div class="kb-bat-swarm" aria-hidden="true"><span class="kb-bat bat-a">🦇</span><span class="kb-bat bat-b">🦇</span><span class="kb-bat bat-c">🦇</span></div>` : ""}
-        <div class="kb-say" id="kb-say">${esc(halloweenGone ? "👻 Я стал призраком и скоро вернусь." : k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
+        <div class="kb-say" id="kb-say">${esc(halloweenGone ? "В банке только комбуча. Я ненадолго исчез." : k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
         ${kombuchaSVG(k)}
-        ${halloweenGone ? `<div class="kb-gone-note">👻 Сегодня гриб стал призраком — загляни завтра.</div>` : ""}
+        ${halloweenGone ? `<div class="kb-gone-note">🍵 Гриб пропал. В банке осталась комбуча. Попробуй вернуться завтра.</div>` : ""}
       </div>
       <div class="kb-info">
         <div class="kb-name"><h2>${esc(k.name)}</h2><button class="link-btn" data-rename title="Переименовать">✏️</button><a class="link-btn kb-diary-link" href="/g/${k.id}" title="Дневник гриба — можно поделиться">📖 Дневник</a><a class="link-btn kb-diary-link" href="/g/${k.id}#tree" title="Родственное дерево">🌳 Род</a></div>
@@ -2122,7 +2156,7 @@ async function pageKombucha() {
     return `<section class="panel kb-halloween-tools"><h3>🎃 Хэллоуинские находки</h3>
       ${S.halloween?.active ? `<p class="muted">Событие активно — шапки останутся у тебя и после его конца.</p><a class="btn btn-sm btn-ghost" href="/events">🦇 Перейти к ивентам и рейду</a>` : `<p class="muted">Шапки можно носить и после окончания события.</p>`}
       ${k?.halloween_web_until ? `<p class="kb-note">🕸️ На банке временная паутина — исчезнет ${esc(fmtDate(k.halloween_web_until))}.</p>` : ""}
-      ${HALLOWEEN_ACTIVE && k?.halloween_gone ? `<p class="kb-note">👻 Сегодня меня нет в банке. Вернусь — или нет.</p>` : ""}
+      ${HALLOWEEN_ACTIVE && k?.halloween_gone ? `<p class="kb-note">🍵 Сегодня меня нет в банке. Загляни завтра.</p>` : ""}
       ${hats.length && k ? `<div class="kb-hat-equip"><label>Надеть на «${esc(k.name)}» <select class="input" id="kb-hat-select"><option value="">Без шапки</option>${hats.map(([code, hat]) => `<option value="${esc(code)}"${k.halloween_hat === code ? " selected" : ""}>${esc(hat.emoji)} ${esc(hat.title)}</option>`).join("")}</select></label><button class="btn btn-sm btn-accent" data-equip-hat>Надеть</button></div>` : owned.length ? `<p>В коллекции ${owned.length} ${plural(owned.length, "шапка", "шапки", "шапок")}.</p>` : `<p class="muted">Пока шапок нет. Загляни к другу и нажми «Сладость или гадость».</p>`}
     </section>`;
   };
@@ -2240,8 +2274,7 @@ async function pageKombucha() {
     render();
     // В облачке — только цитаты. Исключение — сахарная кома: там гриб стонет.
     const kk = r.kombucha;
-    if (HALLOWEEN_ACTIVE && kk.halloween_gone) say("👻 Я стал призраком и скоро вернусь.");
-    else if (kk.mood === "sticky") say(action === "sugar" ? r.message : kk.phrase);
+    if (kk.mood === "sticky") say(action === "sugar" ? r.message : kk.phrase);
     else if (action === "pet" || action === "talk") say(r.message);   // гриб говорит сам, от первого лица
     else { say(kk.phrase); if (r.message && action !== "talk") toast(r.message); }
     if (r.quote && kk.mood !== "sticky") { const b = $("#kb-say"); if (b) b.title = r.quote.lines.map((l) => l.who).join(", ") + (r.quote.book ? ` — ${r.quote.book}` : ""); }

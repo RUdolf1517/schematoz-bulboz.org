@@ -109,6 +109,38 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
     if (oldMatchMedia) d.window.matchMedia = oldMatchMedia;
     else delete d.window.matchMedia;
   }
+  const beforeFullscreenMatchMedia = d.window.matchMedia;
+  d.window.matchMedia = (query) => ({ matches: query === "(hover: hover)" });
+  d.window.document.querySelector("[data-fs]").click();
+  const fullscreenScene = d.window.document.querySelector(".kb-fs");
+  const fullscreenSurface = fullscreenScene?.querySelector(".kb-liquid-surface");
+  check("гриб: наклон доступен и в полноэкранном просмотре", !!fullscreenScene && !!fullscreenSurface);
+  if (fullscreenScene && fullscreenSurface) {
+    fullscreenScene.getBoundingClientRect = () => ({ left: 0, top: 0, width: 800, height: 800 });
+    const fullPointer = new d.window.MouseEvent("pointermove", { bubbles: true, clientX: 800, clientY: 400 });
+    Object.defineProperty(fullPointer, "pointerType", { value: "mouse" });
+    fullscreenScene.dispatchEvent(fullPointer);
+    check("гриб: курсор наклоняет банку в полноэкранном режиме",
+      fullscreenSurface.getAttribute("transform")?.startsWith("rotate(-12 110 "));
+    const touchPointer = (type, x) => {
+      const event = new d.window.MouseEvent(type, { bubbles: true, clientX: x, clientY: 400 });
+      Object.defineProperty(event, "pointerType", { value: "touch" });
+      fullscreenScene.dispatchEvent(event);
+    };
+    touchPointer("pointerdown", 100);
+    touchPointer("pointermove", 600);
+    check("гриб: перетаскивание пальцем наклоняет банку на полном экране",
+      fullscreenSurface.getAttribute("transform")?.startsWith("rotate(-6 110 "));
+    touchPointer("pointerup", 600);
+    check("гриб: после отпускания пальца жидкость выравнивается на полном экране",
+      fullscreenSurface.getAttribute("transform")?.startsWith("rotate(0 110 "));
+    fullscreenScene.dispatchEvent(new d.window.MouseEvent("click", { bubbles: true }));
+    check("гриб: перетаскивание не закрывает полноэкранный просмотр", !!d.window.document.querySelector(".kb-fs"));
+  }
+  fullscreenScene?.dispatchEvent(new d.window.MouseEvent("click", { bubbles: true }));
+  check("гриб: полноэкранный просмотр закрывается после проверки наклона", !d.window.document.querySelector(".kb-fs"));
+  if (beforeFullscreenMatchMedia) d.window.matchMedia = beforeFullscreenMatchMedia;
+  else delete d.window.matchMedia;
   check("гриб: пункт «Мой гриб» активен", !!d.window.document.querySelector('.main-nav a[href="/"].active'));
   const desktopMatchMedia = d.window.matchMedia, desktopOrientation = d.window.DeviceOrientationEvent;
   d.window.matchMedia = (query) => ({ matches: query === "(pointer: coarse)" });
@@ -130,6 +162,24 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   d.window.dispatchEvent(orientation);
   const mobileSurface = d.window.document.querySelector(".kb-main .kb-liquid-surface");
   check("гриб: датчик телефона наклоняет жидкость", mobileSurface?.getAttribute("transform")?.startsWith("rotate(-14 110 "));
+  d.window.document.querySelector("[data-fs]").click();
+  const mobileFullscreen = d.window.document.querySelector(".kb-fs");
+  const fullscreenTiltButton = mobileFullscreen?.querySelector("[data-tilt]");
+  const mobileFullscreenSurface = mobileFullscreen?.querySelector(".kb-liquid-surface");
+  check("гриб: кнопка датчика доступна и в полноэкранном режиме",
+    !!fullscreenTiltButton && fullscreenTiltButton.getAttribute("aria-pressed") === "true");
+  const fullscreenOrientation = new d.window.Event("deviceorientation");
+  Object.defineProperty(fullscreenOrientation, "gamma", { value: -9 });
+  d.window.dispatchEvent(fullscreenOrientation);
+  check("гриб: наклон телефона управляет жидкостью на полном экране",
+    mobileFullscreenSurface?.getAttribute("transform")?.startsWith("rotate(9 110 "));
+  d.window.document.dispatchEvent(new d.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  check("гриб: после выхода из полного экрана наклон возвращается к основной банке", !d.window.document.querySelector(".kb-fs"));
+  const restoredOrientation = new d.window.Event("deviceorientation");
+  Object.defineProperty(restoredOrientation, "gamma", { value: 7 });
+  d.window.dispatchEvent(restoredOrientation);
+  check("гриб: датчик продолжает наклонять основную банку после выхода",
+    d.window.document.querySelector(".kb-main .kb-liquid-surface")?.getAttribute("transform")?.startsWith("rotate(-7 110 "));
   if (desktopMatchMedia) d.window.matchMedia = desktopMatchMedia;
   else delete d.window.matchMedia;
   if (desktopOrientation) d.window.DeviceOrientationEvent = desktopOrientation;

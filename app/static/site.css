@@ -778,7 +778,9 @@ body.kb-fs-on > *:not(.kb-fs) { display: none !important; }
   display: grid; place-items: center; cursor: zoom-out; }
 .kb-fs-art { width: min(96vw, calc(96vh * 220 / 230)); height: min(96vh, calc(96vw * 230 / 220)); }
 .kb-fs-art .kb-svg { width: 100%; height: 100%; }
+.kb-fs-art > .kb-svg { transform: translate3d(var(--cursor-x, 0px), var(--cursor-y, 0px), 0) rotate(var(--cursor-tilt, 0deg)); transition: transform .2s ease-out; touch-action: pan-y; }
 .kb-fs-art .kb-mood-badge { display: none; }
+.kb-fs-tilt-btn { position: fixed; left: 14px; bottom: 54px; z-index: 5; width: 42px; height: 42px; font-size: 20px; }
 .kb-fs-hint { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); color: #fff9; font-size: 13px; transition: opacity .6s; }
 .kb-fs.hint-off .kb-fs-hint { opacity: 0; }
 /* «Медитация гриба» — ритм-тапалка */
@@ -925,9 +927,6 @@ body.kb-med-on { overflow: hidden; }
 .kb-tilt-btn:hover { background:#000b; border-color:var(--accent); }
 .kb-gone-note { position:absolute; left:50%; bottom:8px; transform:translateX(-50%); width:max-content; max-width:100%; padding:6px 10px; border-radius:10px; background:#0d0b12d9; color:#f6d49b; font-size:12px; text-align:center; }
 .halloween-gone .kb-svg { filter:saturate(.75); }
-.kb-gone-mush { opacity:.76; filter:drop-shadow(0 0 8px #c8efff); }
-.kb-gone-mush text { animation:kb-ghost-pulse 2.2s ease-in-out infinite alternate; }
-@keyframes kb-ghost-pulse { from { opacity:.55; } to { opacity:1; } }
 .kb-halloween-tools { margin-top:12px; }
 .kb-halloween-tools h3 { margin:0 0 6px; }
 .kb-halloween-tools > p { margin:8px 0; }
