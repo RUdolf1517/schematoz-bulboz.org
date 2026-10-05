@@ -175,6 +175,8 @@ def test_admin_hat_badge_rewards_and_raid_archive(app, make_user, monkeypatch):
         "gifts": [
             {"id": "exclusive-hat", "stage": 1, "required_damage": 1, "reward_type": "hat",
              "emoji": "🎩", "title": "Шляпа тёмного грибника", "description": "Эксклюзив рейда."},
+            {"id": "ordinary-gift", "stage": 1, "required_damage": 1, "reward_type": "gift",
+             "emoji": "🍬", "title": "Тыквенная конфета", "description": "Обычная награда."},
             {"id": "raid-badge", "stage": 1, "required_damage": 2, "reward_type": "badge",
              "emoji": "🦇", "title": "Ночной дозор", "description": "Внёс вклад в общий бой."},
         ],
@@ -187,7 +189,9 @@ def test_admin_hat_badge_rewards_and_raid_archive(app, make_user, monkeypatch):
     assert configured.get_json()["raid"]["gifts"][0]["reward_type"] == "hat"
     monkeypatch.setattr(event_api, "RAID_TAP_COOLDOWN", timedelta(0))
 
-    first.post("/api/events/halloween/raid/tap", json={})
+    first_hit = first.post("/api/events/halloween/raid/tap", json={}).get_json()
+    assert first_hit["defeated"] is False
+    assert {item["id"] for item in first_hit["gifts_received"]} >= {"exclusive-hat", "ordinary-gift"}
     second.post("/api/events/halloween/raid/tap", json={})
     first.post("/api/events/halloween/raid/tap", json={})
     final_hit = second.post("/api/events/halloween/raid/tap", json={}).get_json()
@@ -228,3 +232,13 @@ def test_admin_hat_badge_rewards_and_raid_archive(app, make_user, monkeypatch):
     assert archive["items"][0]["event_key"] == start.isoformat()
     assert "raid_champion" in {item["code"] for item in first.get(f"/api/users/{first_user['username']}").get_json()["badges"]}
     assert "raid_medalist" in {item["code"] for item in second.get(f"/api/users/{second_user['username']}").get_json()["badges"]}
+
+    next_start = now + timedelta(days=3)
+    next_event = admin.put("/admin/events/halloween", json={
+        "enabled": True, "start_at": next_start.isoformat(),
+        "end_at": (next_start + timedelta(days=1)).isoformat(), "raid": raid,
+    })
+    assert next_event.status_code == 200, next_event.get_json()
+    history = first.get("/api/events/state").get_json()["raid_gifts"]
+    assert {item["id"] for item in history} >= {"exclusive-hat", "ordinary-gift", "raid-badge"}
+    assert all(item["event_key"] == start.isoformat() for item in history)

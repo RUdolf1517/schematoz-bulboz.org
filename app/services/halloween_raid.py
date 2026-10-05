@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from ..models import HalloweenRaid, HalloweenRaidArchive, HalloweenRaidPlayer, Setting, User
@@ -186,16 +186,32 @@ async def _has_contributions(s, raid: HalloweenRaid) -> bool:
     ))
 
 
-async def _reset_raid(s, raid: HalloweenRaid | None, config: dict, at: datetime) -> None:
+async def _reset_raid(s, raid: HalloweenRaid | None, config: dict, at: datetime,
+                     previous_event_key: str = "") -> None:
     stage, _ = halloween.stage_for(config, 1)
     if raid is not None:
         raid.hp = raid.max_hp = stage["max_hp"]
         raid.phase = 1
         raid.total_damage = 0
         raid.updated_at = at
-    await s.execute(update(HalloweenRaidPlayer).values(
-        last_tap_at=None, damage=0, kombucha_ids=[], stage_damage={}, gifts_received=[]
-    ))
+    players = (await s.scalars(select(HalloweenRaidPlayer).with_for_update())).all()
+    if previous_event_key:
+        for player in players:
+            rewards = list(player.gifts_received or [])
+            tagged = []
+            changed = False
+            for reward in rewards:
+                if isinstance(reward, dict) and not reward.get("event_key"):
+                    reward = {**reward, "event_key": previous_event_key}
+                    changed = True
+                tagged.append(reward)
+            if changed:
+                player.gifts_received = tagged
+    for player in players:
+        player.last_tap_at = None
+        player.damage = 0
+        player.kombucha_ids = []
+        player.stage_damage = {}
 
 
 async def apply_config_change(s, old_config: dict, new_config: dict,
@@ -215,7 +231,7 @@ async def apply_config_change(s, old_config: dict, new_config: dict,
         if has_contributions or _event_has_ended(previous_config, at):
             summary = await make_summary(s, raid, previous_config, current_key)
             last_summary = await archive_summary(s, summary)
-        await _reset_raid(s, raid, new_config, at)
+        await _reset_raid(s, raid, new_config, at, current_key)
 
     value = _meta_value(new_config, last_summary)
     if meta is None:

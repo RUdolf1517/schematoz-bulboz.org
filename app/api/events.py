@@ -87,6 +87,7 @@ async def _raid_state(s, raid: HalloweenRaid, player: HalloweenRaidPlayer | None
     standings = await halloween_raid.leaderboard(s, user_id, player)
     return {
         "active": True,
+        "event_key": halloween_raid.event_key(config),
         "boss": raid_config["boss_name"],
         "stage_title": stage["title"],
         "stage_description": stage["description"],
@@ -111,6 +112,7 @@ async def _raid_state(s, raid: HalloweenRaid, player: HalloweenRaidPlayer | None
 
 async def _award_stage_gifts(s, raid_config: dict, stage_number: int, phase: int,
                              at: datetime, season_key: str) -> None:
+    """Grant each configured reward as soon as a contributor reaches its stage threshold."""
     gifts = [gift for gift in raid_config["gifts"] if gift["stage"] == stage_number]
     if not gifts:
         return
@@ -120,16 +122,21 @@ async def _award_stage_gifts(s, raid_config: dict, stage_number: int, phase: int
         if not damage:
             continue
         received = list(participant.gifts_received or [])
-        received_ids = {gift.get("id") for gift in received if isinstance(gift, dict)}
+        received_keys = {
+            (str(item.get("event_key") or season_key), str(item.get("id") or ""))
+            for item in received if isinstance(item, dict)
+        }
         for gift in gifts:
-            if damage < gift["required_damage"] or gift["id"] in received_ids:
+            reward_key = (season_key, gift["id"])
+            if damage < gift["required_damage"] or reward_key in received_keys:
+                continue
+            recipient = await s.get(User, participant.user_id, with_for_update=True)
+            if recipient is None:
                 continue
             reward_type = gift.get("reward_type", "gift")
-            entry = {**gift, "received_at": at.isoformat(), "phase": phase, "damage": damage}
+            entry = {**gift, "event_key": season_key, "received_at": at.isoformat(),
+                     "phase": phase, "damage": damage}
             if reward_type in {"hat", "badge"}:
-                recipient = await s.get(User, participant.user_id, with_for_update=True)
-                if recipient is None:
-                    continue
                 reward_code = halloween.reward_code(reward_type, season_key, gift["id"])
                 if reward_type == "hat":
                     entry["hat_code"] = halloween.grant_raid_hat(recipient, gift, season_key)
@@ -139,7 +146,7 @@ async def _award_stage_gifts(s, raid_config: dict, stage_number: int, phase: int
                                                   gift["emoji"], gift["description"], at)
                     entry["badge_code"] = reward_code
             received.append(entry)
-            received_ids.add(gift["id"])
+            received_keys.add(reward_key)
             if reward_type == "hat":
                 body = f"{gift['emoji']} Уникальная шапка «{gift['title']}» добавлена в коллекцию! Надень её на гриба в своём саду."
                 title = "Новая рейдовая шапка 🎩"
@@ -288,8 +295,8 @@ async def halloween_raid_tap():
         raid.total_damage += damage
         defeated = raid.hp <= 0
         message = None
+        await _award_stage_gifts(s, raid_config, stage_number, phase, at, halloween_raid.event_key(config))
         if defeated:
-            await _award_stage_gifts(s, raid_config, stage_number, phase, at, halloween_raid.event_key(config))
             raid.phase += 1
             next_stage, _ = halloween.stage_for({"raid": raid_config}, raid.phase)
             raid.max_hp = next_stage["max_hp"]
