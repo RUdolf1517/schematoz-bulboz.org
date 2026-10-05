@@ -35,6 +35,9 @@ BADGES: dict[str, Badge] = {b.code: b for b in [
     Badge("streak_100", "Сотка", "💯", "Стрик 100 дней"),
     Badge("night_watch", "Ночной дозор", "🌙", "Ухаживал за грибом между 2 и 5 ночи по Москве"),
     Badge("halloween_survivor_2026", "Пережил Хэллоуин 2026", "🎃", "Заглянул на подоконник во время Хэллоуина 2026"),
+    Badge("raid_contributor", "Удар по плесени", "🗡️", "Нанёс урон общему хэллоуинскому боссу."),
+    Badge("raid_medalist", "Призовое место в рейде", "🥉", "Попал(а) в тройку лучших по вкладу в рейд."),
+    Badge("raid_champion", "Герой рейда", "🥇", "Занял(а) первое место по вкладу в общий рейд."),
 ]}
 # достижения мини-игры «Чайный гриб»
 from .kombucha_achievements import KB_BADGES as _KB  # noqa: E402
@@ -106,6 +109,28 @@ async def award(s: AsyncSession, user_id: int, code: str) -> bool:
     return new
 
 
+async def award_custom_raid_badge(s: AsyncSession, user_id: int, code: str, title: str,
+                                  emoji: str, description: str,
+                                  awarded_at: datetime | None = None) -> bool:
+    """Store event-configured raid badges on the profile without adding a DB catalogue row."""
+    if not code or len(code) > 32:
+        return False
+    user = await s.get(User, user_id, with_for_update=True)
+    if user is None:
+        return False
+    profile = dict(user.profile or {})
+    custom = list(profile.get("halloween_raid_badges") or [])
+    if any(isinstance(item, dict) and item.get("code") == code for item in custom):
+        return False
+    entry = {"code": code, "title": title[:80], "emoji": emoji[:12],
+             "description": description[:240],
+             "awarded_at": (awarded_at or datetime.now(MSK)).isoformat()}
+    profile["halloween_raid_badges"] = [*custom, entry]
+    user.profile = profile
+    notify(s, user_id, "badge", code=code, title=entry["title"], emoji=entry["emoji"])
+    return True
+
+
 async def on_care(s: AsyncSession, user_id: int, now: datetime | None = None) -> list[str]:
     """Любой уход за грибом двигает стрик (раз в день по Москве) и может выдать бейджи."""
     now = (now or datetime.now(MSK)).astimezone(MSK)
@@ -129,5 +154,18 @@ async def on_care(s: AsyncSession, user_id: int, now: datetime | None = None) ->
 async def user_badges(s: AsyncSession, user_id: int) -> list[dict]:
     rows = (await s.execute(select(UserBadge).where(UserBadge.user_id == user_id)
                             .order_by(UserBadge.awarded_at))).scalars().all()
-    return [{**BADGES[r.code].__dict__, "awarded_at": r.awarded_at.isoformat()}
-            for r in rows if r.code in BADGES]
+    result = [{**BADGES[row.code].__dict__, "awarded_at": row.awarded_at.isoformat()}
+              for row in rows if row.code in BADGES]
+    user = await s.get(User, user_id)
+    profile = (user.profile or {}) if user else {}
+    for entry in profile.get("halloween_raid_badges") or []:
+        if not isinstance(entry, dict) or not entry.get("code"):
+            continue
+        result.append({
+            "code": str(entry["code"]), "title": str(entry.get("title") or "Рейдовый бейдж"),
+            "emoji": str(entry.get("emoji") or "🏅"),
+            "description": str(entry.get("description") or "Награда за вклад в рейд."),
+            "awarded_at": str(entry.get("awarded_at") or ""),
+        })
+    result.sort(key=lambda badge: badge["awarded_at"])
+    return result

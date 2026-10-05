@@ -159,3 +159,72 @@ def test_shared_leaderboard_and_latest_completed_summary(app, make_user, monkeyp
     assert [entry["username"] for entry in archived["leaderboard"]] == [
         first_user["username"], second_user["username"],
     ]
+
+
+def test_admin_hat_badge_rewards_and_raid_archive(app, make_user, monkeypatch):
+    from app.api import events as event_api
+
+    admin, _ = make_user(role="admin")
+    first, first_user = make_user(username="raidchampion")
+    second, second_user = make_user(username="raidmedalist")
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=1)
+    raid = {
+        "boss_name": "Архивный кошмар", "regen_per_minute": 0,
+        "stages": [{"title": "Последняя ночь", "max_hp": 4, "description": ""}],
+        "gifts": [
+            {"id": "exclusive-hat", "stage": 1, "required_damage": 1, "reward_type": "hat",
+             "emoji": "🎩", "title": "Шляпа тёмного грибника", "description": "Эксклюзив рейда."},
+            {"id": "raid-badge", "stage": 1, "required_damage": 2, "reward_type": "badge",
+             "emoji": "🦇", "title": "Ночной дозор", "description": "Внёс вклад в общий бой."},
+        ],
+    }
+    configured = admin.put("/admin/events/halloween", json={
+        "enabled": True, "start_at": start.isoformat(),
+        "end_at": (now + timedelta(days=1)).isoformat(), "raid": raid,
+    })
+    assert configured.status_code == 200, configured.get_json()
+    assert configured.get_json()["raid"]["gifts"][0]["reward_type"] == "hat"
+    monkeypatch.setattr(event_api, "RAID_TAP_COOLDOWN", timedelta(0))
+
+    first.post("/api/events/halloween/raid/tap", json={})
+    second.post("/api/events/halloween/raid/tap", json={})
+    first.post("/api/events/halloween/raid/tap", json={})
+    final_hit = second.post("/api/events/halloween/raid/tap", json={}).get_json()
+    assert final_hit["defeated"] is True
+    hat_reward = next(item for item in final_hit["gifts_received"] if item["reward_type"] == "hat")
+    badge_reward = next(item for item in final_hit["gifts_received"] if item["reward_type"] == "badge")
+    assert hat_reward["hat_code"].startswith("hrh_")
+    assert badge_reward["badge_code"].startswith("hrb_")
+
+    state = first.get("/api/kombucha").get_json()
+    assert hat_reward["hat_code"] in state["halloween"]["owned_hats"]
+    assert state["halloween"]["hats"][hat_reward["hat_code"]]["title"] == "Шляпа тёмного грибника"
+    kid = state["items"][0]["id"]
+    equipped = first.post(f"/api/events/halloween/hat/{kid}", json={"code": hat_reward["hat_code"]}).get_json()
+    assert equipped["kombucha"]["halloween_hat"] == hat_reward["hat_code"]
+    assert equipped["kombucha"]["halloween_hat_meta"]["emoji"] == "🎩"
+
+    profile = first.get(f"/api/users/{first_user['username']}").get_json()
+    badge = next(item for item in profile["badges"] if item["code"] == badge_reward["badge_code"])
+    assert badge["title"] == "Ночной дозор"
+    assert "raid_contributor" in {item["code"] for item in profile["badges"]}
+    showcase = first.patch("/api/me/profile", json={"showcase_badges": [badge_reward["badge_code"]]})
+    assert showcase.status_code == 200, showcase.get_json()
+
+    ended = now - timedelta(minutes=1)
+    end_response = admin.put("/admin/events/halloween", json={
+        "enabled": True, "start_at": start.isoformat(), "end_at": ended.isoformat(), "raid": raid,
+    })
+    assert end_response.status_code == 200, end_response.get_json()
+    summary = first.get("/api/events/state").get_json()["raid_summary"]
+    assert summary["medals"][0]["medal"] == "🥇"
+    assert summary["medals"][0]["username"] == first_user["username"]
+    assert summary["medals"][1]["medal"] == "🥈"
+    archive = first.get("/api/events/halloween/archive").get_json()
+    assert archive["total"] == 1
+    assert archive["records"]["total_damage"]["value"] == 4
+    assert archive["records"]["participants"]["value"] == 2
+    assert archive["items"][0]["event_key"] == start.isoformat()
+    assert "raid_champion" in {item["code"] for item in first.get(f"/api/users/{first_user['username']}").get_json()["badges"]}
+    assert "raid_medalist" in {item["code"] for item in second.get(f"/api/users/{second_user['username']}").get_json()["badges"]}

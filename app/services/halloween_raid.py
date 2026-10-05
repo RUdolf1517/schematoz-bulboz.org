@@ -4,8 +4,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert
 
-from ..models import HalloweenRaid, HalloweenRaidPlayer, Setting, User
+from ..models import HalloweenRaid, HalloweenRaidArchive, HalloweenRaidPlayer, Setting, User
 from . import halloween
 
 RAID_META_KEY = "halloween_raid_meta"
@@ -38,7 +39,8 @@ def _config_from_meta(value: dict, fallback: dict) -> dict:
 
 
 async def leaderboard(s, user_id: int | None = None,
-                      player: HalloweenRaidPlayer | None = None, limit: int = LEADERBOARD_SIZE) -> dict:
+                      player: HalloweenRaidPlayer | None = None, limit: int = LEADERBOARD_SIZE,
+                      *, include_user_id: bool = False) -> dict:
     """Top contributors across the one shared raid, ordered by damage then account id."""
     participants = int(await s.scalar(
         select(func.count()).select_from(HalloweenRaidPlayer).where(HalloweenRaidPlayer.damage > 0)
@@ -50,12 +52,13 @@ async def leaderboard(s, user_id: int | None = None,
         .order_by(HalloweenRaidPlayer.damage.desc(), HalloweenRaidPlayer.user_id.asc())
         .limit(max(1, min(int(limit), 20)))
     )).all()
-    entries = [{
-        "rank": index,
-        "username": username,
-        "damage": int(damage),
-        "is_me": user_id == participant_id if user_id is not None else False,
-    } for index, (participant_id, username, damage) in enumerate(rows, 1)]
+    entries = []
+    for index, (participant_id, username, damage) in enumerate(rows, 1):
+        entry = {"rank": index, "username": username, "damage": int(damage),
+                 "is_me": user_id == participant_id if user_id is not None else False}
+        if include_user_id:
+            entry["user_id"] = participant_id
+        entries.append(entry)
 
     my_rank = None
     if user_id is not None:
@@ -78,7 +81,13 @@ async def make_summary(s, raid: HalloweenRaid | None, config: dict, key: str | N
     raid_config = halloween.normalize_raid_config(config.get("raid"))
     stage_count = len(raid_config["stages"])
     completed_stages = min(max(int(raid.phase or 1) - 1, 0), stage_count) if raid else 0
-    standings = await leaderboard(s)
+    standings = await leaderboard(s, limit=LEADERBOARD_SIZE, include_user_id=True)
+    medal_icons = {1: "🥇", 2: "🥈", 3: "🥉"}
+    medals = [{"rank": entry["rank"], "medal": medal_icons[entry["rank"]],
+               "username": entry["username"], "damage": entry["damage"]}
+              for entry in standings["leaderboard"] if entry["rank"] in medal_icons]
+    public_board = [{key: value for key, value in entry.items() if key not in {"user_id", "is_me"}}
+                    for entry in standings["leaderboard"]]
     return {
         "event_key": key or event_key(config),
         "start_at": config.get("start_at"),
@@ -87,9 +96,85 @@ async def make_summary(s, raid: HalloweenRaid | None, config: dict, key: str | N
         "total_damage": max(0, int(raid.total_damage or 0)) if raid else 0,
         "completed_stages": completed_stages,
         "stage_count": stage_count,
-        "boss_defeated": completed_stages >= stage_count,
+        "boss_defeated": bool(raid and completed_stages >= stage_count),
         "participants": standings["participants"],
-        "leaderboard": standings["leaderboard"],
+        "leaderboard": public_board,
+        "medals": medals,
+        "contribution_rewards": raid_config["gifts"],
+        "_medal_user_ids": [entry["user_id"] for entry in standings["leaderboard"]
+                            if entry["rank"] in medal_icons],
+    }
+
+
+async def archive_summary(s, summary: dict) -> dict:
+    """Persist one immutable result and award site-wide podium badges exactly once."""
+    event = {key: value for key, value in summary.items() if not key.startswith("_")}
+    result = await s.execute(insert(HalloweenRaidArchive).values(
+        event_key=str(event["event_key"])[:64], summary=event
+    ).on_conflict_do_nothing(index_elements=["event_key"]).returning(HalloweenRaidArchive.event_key))
+    created = result.scalar() is not None
+    if created:
+        from .gamification import award
+        medal_user_ids = summary.get("_medal_user_ids", [])
+        if medal_user_ids:
+            await award(s, medal_user_ids[0], "raid_champion")
+        for user_id in medal_user_ids[:3]:
+            await award(s, user_id, "raid_medalist")
+        return event
+    existing = await s.get(HalloweenRaidArchive, str(event["event_key"])[:64])
+    return dict(existing.summary) if existing else event
+
+
+def _record_candidate(summary: dict, metric: str) -> tuple[int, dict] | None:
+    if metric == "personal_damage":
+        first = (summary.get("leaderboard") or [{}])[0]
+        value = int(first.get("damage") or 0)
+        username = first.get("username")
+    else:
+        value = int(summary.get(metric) or 0)
+        username = None
+    if value <= 0:
+        return None
+    return value, {"event_key": summary.get("event_key"), "boss": summary.get("boss"),
+                   "start_at": summary.get("start_at"), "value": value, "username": username}
+
+
+async def archive_index(s, limit: int = 100) -> dict:
+    """Recent completed raids plus all-time records computed from immutable snapshots."""
+    limit = max(1, min(int(limit), 100))
+    current_config = await halloween.get_config(s)
+    now = datetime.now(timezone.utc)
+    if _event_has_ended(current_config, now):
+        await inactive_summary(s, current_config, now)
+    meta = await s.get(Setting, RAID_META_KEY)
+    legacy = (meta.value or {}).get("last_summary") if meta else None
+    if isinstance(legacy, dict) and legacy.get("event_key"):
+        archived = await s.get(HalloweenRaidArchive, str(legacy["event_key"])[:64])
+        if archived is None:
+            summary = dict(legacy)
+            board = summary.get("leaderboard") or []
+            medal_icons = {1: "🥇", 2: "🥈", 3: "🥉"}
+            summary["medals"] = [{"rank": item.get("rank"), "medal": medal_icons[item.get("rank")],
+                                  "username": item.get("username"), "damage": item.get("damage", 0)}
+                                 for item in board if item.get("rank") in medal_icons]
+            summary.setdefault("contribution_rewards", [])
+            await archive_summary(s, summary)
+    latest = (await s.scalars(select(HalloweenRaidArchive)
+                              .order_by(HalloweenRaidArchive.archived_at.desc())
+                              .limit(limit))).all()
+    all_summaries = (await s.scalars(select(HalloweenRaidArchive.summary))).all()
+    records = {}
+    metrics = ("total_damage", "personal_damage", "participants", "completed_stages")
+    for metric in metrics:
+        candidates = [candidate for summary in all_summaries
+                      if (candidate := _record_candidate(summary, metric)) is not None]
+        if candidates:
+            records[metric] = max(candidates, key=lambda candidate: candidate[0])[1]
+    total = int(await s.scalar(select(func.count()).select_from(HalloweenRaidArchive)) or 0)
+    return {
+        "items": [dict(row.summary) | {"archived_at": row.archived_at.isoformat()} for row in latest],
+        "total": total,
+        "records": records,
     }
 
 
@@ -128,7 +213,8 @@ async def apply_config_change(s, old_config: dict, new_config: dict,
         previous_config = old_config if old_key == current_key else _config_from_meta(saved, old_config)
         has_contributions = raid is not None and await _has_contributions(s, raid)
         if has_contributions or _event_has_ended(previous_config, at):
-            last_summary = await make_summary(s, raid, previous_config, current_key)
+            summary = await make_summary(s, raid, previous_config, current_key)
+            last_summary = await archive_summary(s, summary)
         await _reset_raid(s, raid, new_config, at)
 
     value = _meta_value(new_config, last_summary)
@@ -167,6 +253,9 @@ def _event_has_ended(config: dict, at: datetime) -> bool:
 async def inactive_summary(s, config: dict, at: datetime | None = None) -> dict | None:
     """Return the finished current season, or the most recently archived one."""
     at = at or datetime.now(timezone.utc)
+    if _event_has_ended(config, at):
+        # Wait for in-flight taps (which lock this same setting row) before freezing final scores.
+        config = await halloween.get_config(s, lock=True)
     key = event_key(config)
     meta = await s.get(Setting, RAID_META_KEY)
     saved = dict(meta.value or {}) if meta else {}
@@ -178,9 +267,12 @@ async def inactive_summary(s, config: dict, at: datetime | None = None) -> dict 
     raid = await s.get(HalloweenRaid, 1)
     ended = _event_has_ended(config, at)
     if raid is None:
-        return await make_summary(s, None, config, key) if ended else last_summary
+        if not ended:
+            return last_summary
+        return await archive_summary(s, await make_summary(s, None, config, key))
     has_contributions = await _has_contributions(s, raid)
     if not has_contributions and not ended:
         return last_summary
 
-    return await make_summary(s, raid, config, key)
+    summary = await make_summary(s, raid, config, key)
+    return await archive_summary(s, summary) if ended else summary

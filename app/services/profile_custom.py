@@ -147,6 +147,8 @@ async def apply_update(s, user: User, data: dict) -> None:
             raise ApiError(f"showcase_badges: до {MAX_SHOWCASE} бейджей", 400, "validation_error",
                            field="showcase_badges")
         owned = set((await s.scalars(select(UserBadge.code).where(UserBadge.user_id == user.id))).all())
+        owned.update(item["code"] for item in ((user.profile or {}).get("halloween_raid_badges") or [])
+                     if isinstance(item, dict) and item.get("code"))
         if not set(codes) <= owned:
             raise ApiError("В витрину можно поставить только свои бейджи", 400, "validation_error",
                            field="showcase_badges")

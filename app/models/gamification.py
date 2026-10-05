@@ -67,6 +67,7 @@ class Kombucha(Base):
     owners: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))  # провенанс
     # Хэллоуинская косметика переживает окончание события; эффекты и исчезновение временные.
     halloween_hat: Mapped[str | None] = mapped_column(String(24))
+    halloween_hat_meta: Mapped[dict | None] = mapped_column(JSONB)
     halloween_mutations: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
     halloween_gone_day: Mapped[date | None] = mapped_column(Date)
     halloween_gone: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

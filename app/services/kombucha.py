@@ -577,6 +577,7 @@ def out(k: Kombucha) -> dict:
         "mut_slots": {str(st): n for st, n in sorted(stage_mut_counts(k).items())}, "care_days": k.care_days, "sprouted": k.sprouted, "sprout_pending": k.sprout_pending,
         "sprout_progress": sprout_progress(k, at), "mold": bool(k.mold),
         "halloween_hat": k.halloween_hat,
+        "halloween_hat_meta": k.halloween_hat_meta,
         "halloween_mutations": active_mutations(k, at),
         "halloween_gone": bool(k.halloween_gone and k.halloween_gone_day == at.astimezone(MSK).date()),
         "halloween_web_until": k.halloween_web_until.isoformat() if k.halloween_web_until and k.halloween_web_until > at else None,

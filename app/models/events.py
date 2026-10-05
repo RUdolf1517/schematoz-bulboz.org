@@ -91,3 +91,12 @@ class HalloweenRaidPlayer(Base):
     kombucha_ids: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
     stage_damage: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     gifts_received: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+
+
+class HalloweenRaidArchive(Base):
+    """Immutable season-end result snapshot, including the leaderboard and podium."""
+    __tablename__ = "halloween_raid_archives"
+    __table_args__ = (Index("ix_halloween_raid_archives_archived_at", text("archived_at DESC")),)
+    event_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    summary: Mapped[dict] = mapped_column(JSONB)
+    archived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

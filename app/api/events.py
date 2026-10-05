@@ -61,7 +61,7 @@ def _mushroom_out(k: Kombucha) -> dict:
     view = kb.out(k)
     return {key: view[key] for key in (
         "id", "name", "alive", "frozen", "stats", "mood", "stage", "mutations",
-        "mold", "halloween_hat", "halloween_mutations", "halloween_web_until",
+        "mold", "halloween_hat", "halloween_hat_meta", "halloween_mutations", "halloween_web_until",
     )} | {"halloween_gone": False}
 
 
@@ -109,7 +109,8 @@ async def _raid_state(s, raid: HalloweenRaid, player: HalloweenRaidPlayer | None
     }
 
 
-async def _award_stage_gifts(s, raid_config: dict, stage_number: int, phase: int, at: datetime) -> None:
+async def _award_stage_gifts(s, raid_config: dict, stage_number: int, phase: int,
+                             at: datetime, season_key: str) -> None:
     gifts = [gift for gift in raid_config["gifts"] if gift["stage"] == stage_number]
     if not gifts:
         return
@@ -123,15 +124,36 @@ async def _award_stage_gifts(s, raid_config: dict, stage_number: int, phase: int
         for gift in gifts:
             if damage < gift["required_damage"] or gift["id"] in received_ids:
                 continue
+            reward_type = gift.get("reward_type", "gift")
             entry = {**gift, "received_at": at.isoformat(), "phase": phase, "damage": damage}
+            if reward_type in {"hat", "badge"}:
+                recipient = await s.get(User, participant.user_id, with_for_update=True)
+                if recipient is None:
+                    continue
+                reward_code = halloween.reward_code(reward_type, season_key, gift["id"])
+                if reward_type == "hat":
+                    entry["hat_code"] = halloween.grant_raid_hat(recipient, gift, season_key)
+                else:
+                    from ..services.gamification import award_custom_raid_badge
+                    await award_custom_raid_badge(s, recipient.id, reward_code, gift["title"],
+                                                  gift["emoji"], gift["description"], at)
+                    entry["badge_code"] = reward_code
             received.append(entry)
             received_ids.add(gift["id"])
-            body = f"{gift['emoji']} За участие в стадии «{gift['title']}» ты получил(а) подарок. {gift['description']}".strip()[:300]
-            key = f"halloween_raid_gift:{gift['id']}:{participant.user_id}"
-            await notify_once(s, participant.user_id, "halloween", key, text=body,
-                              gift_id=gift["id"], category="raid_gift")
-            await enqueue_push(s, participant.user_id, "halloween", "Подарок за рейд 🎁", body,
-                               "/events", key)
+            if reward_type == "hat":
+                body = f"{gift['emoji']} Уникальная шапка «{gift['title']}» добавлена в коллекцию! Надень её на гриба в своём саду."
+                title = "Новая рейдовая шапка 🎩"
+            elif reward_type == "badge":
+                body = f"{gift['emoji']} Получен бейдж «{gift['title']}» за вклад в рейд."
+                title = "Новое достижение рейда 🏅"
+            else:
+                body = f"{gift['emoji']} За участие в стадии «{gift['title']}» ты получил(а) подарок. {gift['description']}".strip()[:300]
+                title = "Подарок за рейд 🎁"
+            key = f"halloween_raid_gift:{halloween.reward_code('badge', season_key, gift['id'])}:{participant.user_id}"
+            if reward_type != "badge":
+                await notify_once(s, participant.user_id, "halloween", key, text=body,
+                                  gift_id=gift["id"], category="raid_gift")
+            await enqueue_push(s, participant.user_id, "halloween", title, body, "/events", key)
         participant.gifts_received = received
 
 
@@ -167,6 +189,13 @@ async def halloween_raid_state():
         raid = await _ensure_raid(s, initial_stage["max_hp"], lock=False)
         player = await s.get(HalloweenRaidPlayer, uid) if uid else None
         return await _raid_state(s, raid, player, config, at, uid)
+
+
+@bp.get("/events/halloween/archive")
+async def halloween_raid_archive():
+    """Public immutable history, medals, and all-time records for completed raids."""
+    async with session_scope() as s:
+        return await halloween_raid.archive_index(s)
 
 
 @bp.post("/events/halloween/raid/tap")
@@ -246,17 +275,21 @@ async def halloween_raid_tap():
             elif k.zero_since is None:
                 k.zero_since = at
         player.kombucha_ids = list(raw_ids)
+        first_contribution = player.damage <= 0
         stage_damage = dict(player.stage_damage or {})
         stage_damage[str(phase)] = _stage_damage(player, phase) + damage
         player.stage_damage = stage_damage
         player.damage += damage
+        if first_contribution:
+            from ..services.gamification import award
+            await award(s, user.id, "raid_contributor")
         player.last_tap_at = at
         raid.hp = max(0, raid.hp - damage)
         raid.total_damage += damage
         defeated = raid.hp <= 0
         message = None
         if defeated:
-            await _award_stage_gifts(s, raid_config, stage_number, phase, at)
+            await _award_stage_gifts(s, raid_config, stage_number, phase, at, halloween_raid.event_key(config))
             raid.phase += 1
             next_stage, _ = halloween.stage_for({"raid": raid_config}, raid.phase)
             raid.max_hp = next_stage["max_hp"]
@@ -357,9 +390,14 @@ async def halloween_equip_hat(kid: int):
         k = await s.get(Kombucha, kid, with_for_update=True)
         if k is None or k.user_id != user.id:
             raise ApiError("Гриб не найден", 404, "not_found")
-        if code is not None:
-            if code not in halloween.HATS or code not in await halloween.inventory(user):
-                raise ApiError("Этой шапки пока нет в коллекции", 400, "hat_not_owned")
+        if code is not None and not isinstance(code, str):
+            raise ApiError("Код шапки должен быть строкой", 400, "hat_not_owned")
+        hat = halloween.hat_catalog(user).get(code) if code is not None else None
+        if code is not None and (hat is None or code not in await halloween.inventory(user)):
+            raise ApiError("Этой шапки пока нет в коллекции", 400, "hat_not_owned")
         k.halloween_hat = code
+        k.halloween_hat_meta = ({"code": code, "title": hat["title"], "emoji": hat["emoji"],
+                                 "description": hat.get("description", "")}
+                                if hat else None)
         await s.flush()
         return {"kombucha": kb.out(k), "owned_hats": await halloween.inventory(user)}

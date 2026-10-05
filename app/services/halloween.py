@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import random
 import re
 from datetime import date, datetime, timedelta, timezone
@@ -81,9 +82,13 @@ def normalize_raid_config(value: dict | None) -> dict:
         gift_id = str(gift.get("id") or "")[:48]
         if not gift_id:
             continue
+        reward_type = gift.get("reward_type", "gift")
+        if not isinstance(reward_type, str) or reward_type not in {"gift", "hat", "badge"}:
+            reward_type = "gift"
         normalized_gifts.append({
             "id": gift_id, "stage": max(1, min(stage, len(normalized_stages))),
             "required_damage": max(1, min(damage, 1_000_000)),
+            "reward_type": reward_type,
             "emoji": str(gift.get("emoji") or "🎁")[:12],
             "title": str(gift.get("title") or "Подарок за рейд")[:80],
             "description": str(gift.get("description") or "")[:240],
@@ -148,9 +153,14 @@ def validate_raid_config(value: dict) -> dict:
                            400, "validation_error", field="gifts")
         gift_ids.add(gift_id)
         stage = integer(gift.get("stage"), f"gifts[{index}].stage", 1, len(stages))
+        reward_type = gift.get("reward_type", "gift")
+        if not isinstance(reward_type, str) or reward_type not in {"gift", "hat", "badge"}:
+            raise ApiError("Тип награды должен быть gift, hat или badge", 400,
+                           "validation_error", field=f"gifts[{index}].reward_type")
         gifts.append({
             "id": gift_id, "stage": stage,
             "required_damage": integer(gift.get("required_damage"), f"gifts[{index}].required_damage", 1, 1_000_000),
+            "reward_type": reward_type,
             "emoji": text(gift.get("emoji"), f"gifts[{index}].emoji", 1, 12),
             "title": text(gift.get("title"), f"gifts[{index}].title", 1, 80),
             "description": text(gift.get("description", ""), f"gifts[{index}].description", 0, 240),
@@ -209,15 +219,65 @@ async def get_config(s, *, lock: bool = False) -> dict:
     return config
 
 
-def public_state(config: dict, user: User | None = None, at: datetime | None = None) -> dict:
+def custom_hats(user: User | None = None) -> dict[str, dict]:
     profile = (user.profile or {}) if user else {}
+    result = {}
+    for item in profile.get("halloween_custom_hats") or []:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or "")
+        if re.fullmatch(r"hrh_[a-f0-9]{20}", code):
+            result[code] = {
+                "title": str(item.get("title") or "Рейдовая шапка")[:80],
+                "emoji": str(item.get("emoji") or "🎩")[:12],
+                "description": str(item.get("description") or "Уникальная награда рейда.")[:240],
+                "unique": True,
+            }
+    return result
+
+
+def hat_catalog(user: User | None = None) -> dict[str, dict]:
+    return {**HATS, **custom_hats(user)}
+
+
+def reward_code(kind: str, season_key: str, reward_id: str) -> str:
+    prefix = "hrh_" if kind == "hat" else "hrb_"
+    digest = hashlib.sha256(f"{season_key}:{reward_id}".encode()).hexdigest()[:20]
+    return prefix + digest
+
+
+def grant_raid_hat(user: User, gift: dict, season_key: str) -> str:
+    """Persist a snapshot of an exclusive, admin-defined hat in the player's inventory."""
+    code = reward_code("hat", season_key, gift["id"])
+    profile = dict(user.profile or {})
+    custom = [item for item in (profile.get("halloween_custom_hats") or [])
+              if isinstance(item, dict) and item.get("code") != code]
+    custom.append({"code": code, "title": gift["title"], "emoji": gift["emoji"],
+                   "description": gift.get("description", ""), "event_key": season_key})
+    owned = list(profile.get("halloween_hats") or [])
+    if code not in owned:
+        owned.append(code)
+    profile["halloween_custom_hats"] = custom
+    profile["halloween_hats"] = list(dict.fromkeys(owned))
+    user.profile = profile
+    return code
+
+
+def _owned_hat_codes(user: User | None = None) -> list[str]:
+    profile = (user.profile or {}) if user else {}
+    catalog = hat_catalog(user)
+    return list(dict.fromkeys(code for code in (profile.get("halloween_hats") or [])
+                              if isinstance(code, str) and code in catalog))
+
+
+def public_state(config: dict, user: User | None = None, at: datetime | None = None) -> dict:
     return {
         "active": active(config, at),
         "enabled": bool(config.get("enabled")),
         "start_at": config.get("start_at"),
         "end_at": config.get("end_at"),
-        "hats": HATS,
-        "owned_hats": list(dict.fromkeys(x for x in profile.get("halloween_hats", []) if x in HATS)),
+        "hats": hat_catalog(user),
+        "owned_hats": _owned_hat_codes(user),
     }
 
 
@@ -294,7 +354,7 @@ async def on_action(s, k: Kombucha, config: dict, at: datetime | None = None) ->
 
 
 async def inventory(user: User) -> list[str]:
-    return list(dict.fromkeys(x for x in ((user.profile or {}).get("halloween_hats") or []) if x in HATS))
+    return _owned_hat_codes(user)
 
 
 async def award_survivor(s, user_id: int) -> bool:
