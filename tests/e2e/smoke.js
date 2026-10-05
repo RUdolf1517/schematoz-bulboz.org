@@ -73,6 +73,30 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   // 4. Чайный гриб на главной
   d = await open("/", 1500);
   check("гриб: банка нарисована", !!d.window.document.querySelector(".kb-main .kb-svg"));
+  const tiltScene = d.window.document.querySelector(".kb-main .kb-scene");
+  const liquidSurface = tiltScene?.querySelector(".kb-liquid-surface");
+  check("гриб: управление наклоном привязано к курсору без сообщения о недоступности",
+    !!tiltScene && !tiltScene.querySelector("[data-tilt]") && !/наклон недоступен/i.test(tiltScene.textContent || ""));
+  if (tiltScene && liquidSurface) {
+    const oldMatchMedia = d.window.matchMedia;
+    d.window.matchMedia = (query) => query === "(hover: hover)"
+      ? { matches: true }
+      : oldMatchMedia?.call(d.window, query) || { matches: false };
+    tiltScene.getBoundingClientRect = () => ({ left: 0, top: 0, width: 200, height: 240 });
+    const moveCursor = (clientX) => {
+      const event = new d.window.MouseEvent("pointermove", { bubbles: true, clientX, clientY: 120 });
+      Object.defineProperty(event, "pointerType", { value: "mouse" });
+      tiltScene.dispatchEvent(event);
+    };
+    moveCursor(200);
+    check("гриб: курсор справа наклоняет поверхность жидкости", liquidSurface.getAttribute("transform")?.startsWith("rotate(-12 110 "));
+    moveCursor(0);
+    check("гриб: курсор слева наклоняет поверхность в другую сторону", liquidSurface.getAttribute("transform")?.startsWith("rotate(12 110 "));
+    tiltScene.dispatchEvent(new d.window.Event("pointerleave"));
+    check("гриб: поверхность возвращается в горизонталь после ухода курсора", liquidSurface.getAttribute("transform")?.startsWith("rotate(0 110 "));
+    if (oldMatchMedia) d.window.matchMedia = oldMatchMedia;
+    else delete d.window.matchMedia;
+  }
   check("гриб: пункт «Мой гриб» активен", !!d.window.document.querySelector('.main-nav a[href="/"].active'));
   d.window.document.querySelector('[data-act="tea"]').click(); await sleep(900);
   check("гриб: заварка долита, кнопка на кулдауне", d.window.document.querySelector('[data-act="tea"]')?.disabled === true);

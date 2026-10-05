@@ -1864,80 +1864,62 @@ function kombuchaSVG(k, { small = false } = {}) {
   </svg>`;
 }
 
-let kbTiltScene = null;
-let kbTiltRoll = 0;
-let kbTiltListening = false;
+let kbCursorScene = null;
+let kbCursorTilt = 0;
 function clampN(value, min, max) { return Math.min(max, Math.max(min, value)); }
 
-function applyKbTilt() {
-  if (!kbTiltScene || REDUCED_MOTION) return;
-  const svg = $(".kb-svg", kbTiltScene);
+function applyKbCursorTilt() {
+  if (!kbCursorScene || REDUCED_MOTION) return;
+  const svg = $(".kb-svg", kbCursorScene);
   if (!svg) return;
   const surface = $(".kb-liquid-surface", svg), liquid = $(".kb-liquid", svg);
   const y = surface?.dataset.y || 100;
-  if (surface) surface.setAttribute("transform", `rotate(${-kbTiltRoll} 110 ${y})`);
-  if (liquid) liquid.setAttribute("transform", `rotate(${-kbTiltRoll} 110 ${y})`);
+  const liquidAngle = -kbCursorTilt;
+  if (surface) surface.setAttribute("transform", `rotate(${liquidAngle} 110 ${y})`);
+  if (liquid) liquid.setAttribute("transform", `rotate(${liquidAngle} 110 ${y})`);
   const mush = $(".kb-mush", svg);
   if (mush) {
     const cx = Number(mush.dataset.cx || 110), cy = Number(mush.dataset.cy || 100);
-    const x = cx + kbTiltRoll * 1.25;
-    const y = cy + Math.abs(kbTiltRoll) * 0.08 + Math.sin(performance.now() / 260) * Math.min(Math.abs(kbTiltRoll) * 0.015, 0.3);
-    mush.setAttribute("transform", `translate(${x.toFixed(2)},${y.toFixed(2)}) rotate(${(kbTiltRoll * 0.25).toFixed(2)})`);
+    const x = cx + kbCursorTilt * 1.25;
+    const y = cy + Math.abs(kbCursorTilt) * 0.08 + Math.sin(performance.now() / 260) * Math.min(Math.abs(kbCursorTilt) * 0.015, 0.3);
+    mush.setAttribute("transform", `translate(${x.toFixed(2)},${y.toFixed(2)}) rotate(${(kbCursorTilt * 0.25).toFixed(2)})`);
   }
-  svg.style.setProperty("--sensor-tilt", "0deg");
 }
 
-function initTiltScene(scene) {
+function initCursorTiltScene(scene) {
   if (!scene) return;
-  kbTiltScene = scene;
-  if (REDUCED_MOTION) {
-    const button = $("[data-tilt]", scene);
-    if (button) { button.disabled = true; button.textContent = "♿ Анимация выключена"; }
-    return;
-  }
-  if (!scene.dataset.tiltBound) {
-    scene.dataset.tiltBound = "1";
+  if (scene !== kbCursorScene) kbCursorTilt = 0;
+  kbCursorScene = scene;
+  if (REDUCED_MOTION) return;
+  if (!scene.dataset.cursorTiltBound) {
+    scene.dataset.cursorTiltBound = "1";
     scene.addEventListener("pointermove", (e) => {
-      if (e.pointerType !== "mouse" || !window.matchMedia("(hover: hover)").matches) return;
-      const r = scene.getBoundingClientRect(), px = (e.clientX - r.left) / r.width - 0.5, py = (e.clientY - r.top) / r.height - 0.5;
+      if (e.pointerType === "touch" || !window.matchMedia("(hover: hover)").matches) return;
+      const r = scene.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      const px = clampN((e.clientX - r.left) / r.width - 0.5, -0.5, 0.5);
+      const py = clampN((e.clientY - r.top) / r.height - 0.5, -0.5, 0.5);
+      kbCursorTilt = clampN(px * 24, -12, 12);
       const svg = $(".kb-svg", scene);
       if (svg) {
-        svg.style.setProperty("--cursor-x", `${clampN(px * 6, -3, 3).toFixed(1)}px`);
-        svg.style.setProperty("--cursor-y", `${clampN(py * 6, -3, 3).toFixed(1)}px`);
-        svg.style.setProperty("--sensor-tilt", `${clampN(px * 2, -1, 1).toFixed(1)}deg`);
+        svg.style.setProperty("--cursor-x", `${(px * 6).toFixed(1)}px`);
+        svg.style.setProperty("--cursor-y", `${(py * 6).toFixed(1)}px`);
+        svg.style.setProperty("--cursor-tilt", `${clampN(px * 2, -1, 1).toFixed(1)}deg`);
       }
+      applyKbCursorTilt();
     }, { passive: true });
     scene.addEventListener("pointerleave", () => {
+      kbCursorTilt = 0;
       const svg = $(".kb-svg", scene);
-      if (svg) { svg.style.setProperty("--cursor-x", "0px"); svg.style.setProperty("--cursor-y", "0px"); svg.style.setProperty("--sensor-tilt", "0deg"); }
+      if (svg) {
+        svg.style.setProperty("--cursor-x", "0px");
+        svg.style.setProperty("--cursor-y", "0px");
+        svg.style.setProperty("--cursor-tilt", "0deg");
+      }
+      applyKbCursorTilt();
     });
   }
-  const button = $("[data-tilt]", scene);
-  if (!button) return;
-  const available = "DeviceOrientationEvent" in window;
-  if (!available) { button.disabled = true; button.textContent = "📱 Наклон недоступен"; return; }
-  button.textContent = kbTiltListening ? "📱 Наклон включён" : "📱 Включить наклон";
-  button.onclick = async () => {
-    try {
-      const DOE = window.DeviceOrientationEvent;
-      if (typeof DOE.requestPermission === "function") {
-        const permission = await DOE.requestPermission();
-        if (permission !== "granted") throw new Error("Разрешение на датчики не выдано");
-      }
-      if (!kbTiltListening) {
-        window.addEventListener("deviceorientation", (event) => {
-          if (Number.isFinite(event.gamma)) {
-            kbTiltRoll = clampN(event.gamma, -18, 18);
-            applyKbTilt();
-          }
-        }, { passive: true });
-        kbTiltListening = true;
-      }
-      button.textContent = "📱 Наклон включён";
-      applyKbTilt();
-    } catch (err) { toast(err.message || "Не удалось включить наклон", true); }
-  };
-  applyKbTilt();
+  applyKbCursorTilt();
 }
 
 function fmtLeft(sec) {
@@ -2019,7 +2001,6 @@ async function pageKombucha() {
     return `<div class="panel kb-main ${k.alive ? "" : "is-dead"} ${halloweenGone ? "halloween-gone" : ""}">
       <div class="kb-scene">
         <button class="kb-fs-btn" data-fs title="Смотреть гриб во весь экран">⛶</button>
-        <button class="kb-tilt-btn" data-tilt title="На телефоне включает управление наклоном">📱 Включить наклон</button>
         ${HALLOWEEN_ACTIVE ? `<button class="kb-music-btn" data-spooky-music aria-pressed="${spookyMusicEnabled ? "true" : "false"}">${spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку"}</button>
           ${isHalloweenAdmin() ? `<button class="kb-scare-btn" data-screamer-test title="Проверить скример" aria-label="Проверить скример">👻</button>` : ""}
           <div class="kb-bat-swarm" aria-hidden="true"><span class="kb-bat bat-a">🦇</span><span class="kb-bat bat-b">🦇</span><span class="kb-bat bat-c">🦇</span></div>` : ""}
@@ -2103,7 +2084,7 @@ async function pageKombucha() {
     if (k) { sel = k.id; localStorage.setItem("kb-sel", sel); }
     root.innerHTML = `<div class="kb-bar-top"><span>🫙 Банки: <b>${S.jars.used}/${S.jars.jars}</b></span><span>Баланс: <a href="/wallet"><b>${S.wood} $₽</b></a></span></div>
       ${renderJars()}${emptyJarSelected || !k ? renderEmptyJar() : renderMain(k)}${renderHalloweenTools(k)}`;
-    initTiltScene($(".kb-scene", root));
+    initCursorTiltScene($(".kb-scene", root));
     renderCodex();
     setWood(S.wood);
     $$("[data-sel]", root).forEach((b) => (b.onclick = () => { emptyJarSelected = false; sel = Number(b.dataset.sel); render(); }));
