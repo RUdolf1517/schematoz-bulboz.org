@@ -1,4 +1,4 @@
-"""Shared Halloween raid teams, stage rewards, and seasonal mushroom decay."""
+"""Shared Halloween raid teams, stage rewards, seasonal mushroom decay, and standings."""
 import asyncio
 from datetime import datetime, timedelta, timezone
 
@@ -84,6 +84,9 @@ def test_shared_raid_party_damage_stats_and_stage_gift(app, make_user, monkeypat
     three_response = player.post("/api/events/halloween/raid/tap", json={"kombucha_ids": ids}).get_json()
 
     assert one["damage_dealt"] == 1 and one["hp"] == 5
+    assert one["participants"] == 1 and one["my_rank"] == 1
+    assert one["leaderboard"][0]["username"] == player_json["username"]
+    assert one["leaderboard"][0]["is_me"] is True
     assert two["damage_dealt"] == 2 and two["hp"] == 3
     assert three_response["damage_dealt"] == 3
     assert three_response["defeated"] is True
@@ -96,3 +99,63 @@ def test_shared_raid_party_damage_stats_and_stage_gift(app, make_user, monkeypat
     assert by_id[ids[0]] == {"sweet": 67, "tea": 67, "clean": 93, "happy": 73}
     assert by_id[ids[1]] == {"sweet": 68, "tea": 68, "clean": 92, "happy": 72}
     assert by_id[ids[2]] == {"sweet": 69, "tea": 69, "clean": 91, "happy": 71}
+
+
+def test_shared_leaderboard_and_latest_completed_summary(app, make_user, monkeypatch):
+    from app.api import events as event_api
+
+    admin, _ = make_user(role="admin")
+    first, first_user = make_user(username="raiderfirst")
+    second, second_user = make_user(username="raidersecond")
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=1)
+    end = now + timedelta(days=1)
+    raid = {"boss_name": "Общий кошмар", "regen_per_minute": 0,
+            "stages": [{"title": "Последняя ночь", "max_hp": 100,
+                        "description": "Бейте вместе"}], "gifts": []}
+
+    response = admin.put("/admin/events/halloween", json={
+        "enabled": True, "start_at": start.isoformat(), "end_at": end.isoformat(), "raid": raid,
+    })
+    assert response.status_code == 200, response.get_json()
+    monkeypatch.setattr(event_api, "RAID_TAP_COOLDOWN", timedelta(0))
+
+    first_tap = first.post("/api/events/halloween/raid/tap", json={}).get_json()
+    stronger_tap = first.post("/api/events/halloween/raid/tap", json={}).get_json()
+    second_tap = second.post("/api/events/halloween/raid/tap", json={}).get_json()
+    assert first_tap["active"] is True
+    assert first_tap["participants"] == 1 and first_tap["my_rank"] == 1
+    assert stronger_tap["my_damage"] == 2 and stronger_tap["my_rank"] == 1
+    assert second_tap["participants"] == 2 and second_tap["my_rank"] == 2
+    assert [entry["username"] for entry in second_tap["leaderboard"]] == [
+        first_user["username"], second_user["username"],
+    ]
+    assert second_tap["leaderboard"][0]["damage"] == 2
+    assert second_tap["leaderboard"][1]["damage"] == 1
+
+    # End this season without changing its identity: the current summary must be visible.
+    ended = now - timedelta(minutes=1)
+    end_response = admin.put("/admin/events/halloween", json={
+        "enabled": True, "start_at": start.isoformat(), "end_at": ended.isoformat(), "raid": raid,
+    })
+    assert end_response.status_code == 200, end_response.get_json()
+    finished = first.get("/api/events/state").get_json()["raid_summary"]
+    assert finished["boss"] == "Общий кошмар"
+    assert finished["total_damage"] == 3
+    assert finished["participants"] == 2
+    assert finished["leaderboard"][0]["username"] == first_user["username"]
+    assert finished["leaderboard"][0]["damage"] == 2
+
+    # Scheduling the next raid archives the previous result and resets its contribution.
+    next_start = now + timedelta(days=3)
+    next_end = now + timedelta(days=4)
+    next_response = admin.put("/admin/events/halloween", json={
+        "enabled": True, "start_at": next_start.isoformat(), "end_at": next_end.isoformat(), "raid": raid,
+    })
+    assert next_response.status_code == 200, next_response.get_json()
+    archived = second.get("/api/events/state").get_json()["raid_summary"]
+    assert archived["event_key"] == start.isoformat()
+    assert archived["total_damage"] == 3
+    assert [entry["username"] for entry in archived["leaderboard"]] == [
+        first_user["username"], second_user["username"],
+    ]

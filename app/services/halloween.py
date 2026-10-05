@@ -7,6 +7,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 
 from ..errors import ApiError
 from ..models import Kombucha, Setting, User
@@ -188,18 +189,30 @@ def active(config: dict, at: datetime | None = None) -> bool:
     return bool(window and window[0] <= at < window[1])
 
 
-async def get_config(s) -> dict:
-    setting = await s.get(Setting, EVENT_KEY)
+async def get_config(s, *, lock: bool = False) -> dict:
+    if lock:
+        setting = await s.scalar(
+            select(Setting).where(Setting.key == EVENT_KEY).with_for_update()
+        )
+        if setting is None:
+            await s.execute(insert(Setting).values(
+                key=EVENT_KEY, value=DEFAULT_CONFIG
+            ).on_conflict_do_nothing(index_elements=["key"]))
+            setting = await s.scalar(
+                select(Setting).where(Setting.key == EVENT_KEY).with_for_update()
+            )
+    else:
+        setting = await s.get(Setting, EVENT_KEY)
     saved = (setting.value or {}) if setting else {}
     config = {**DEFAULT_CONFIG, **saved}
     config["raid"] = normalize_raid_config(saved.get("raid"))
     return config
 
 
-def public_state(config: dict, user: User | None = None) -> dict:
+def public_state(config: dict, user: User | None = None, at: datetime | None = None) -> dict:
     profile = (user.profile or {}) if user else {}
     return {
-        "active": active(config),
+        "active": active(config, at),
         "enabled": bool(config.get("enabled")),
         "start_at": config.get("start_at"),
         "end_at": config.get("end_at"),

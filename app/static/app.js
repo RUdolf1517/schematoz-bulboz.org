@@ -2305,6 +2305,17 @@ function pageFaq() {
 }
 
 // ---------------------------------------------------------------- сезонные события
+function raidLeaderboardMarkup(entries, participants, myRank = null, myDamage = 0, title = "🏆 Общий рейтинг") {
+  const rows = (entries || []).map((item) => `<li class="${item.is_me ? "is-me" : ""}">
+    <span class="raid-rank-number">${item.rank}</span><b>@${esc(item.username || "игрок")}</b>
+    <span class="raid-rank-damage">${Number(item.damage || 0).toLocaleString("ru-RU")} урона</span></li>`).join("");
+  const count = Number(participants || 0);
+  const personal = myRank && !(entries || []).some((item) => item.is_me)
+    ? `<p class="raid-my-rank">Твоё место: <b>#${myRank}</b> · урон ${Number(myDamage || 0).toLocaleString("ru-RU")}</p>` : "";
+  return `<section class="raid-leaderboard"><h3>${esc(title)} <small>${count} ${plural(count, "участник", "участника", "участников")}</small></h3>
+    ${rows ? `<ol>${rows}</ol>` : `<p class="muted">Пока нет участников — нанеси первый удар!</p>`}${personal}</section>`;
+}
+
 async function pageEvents() {
   const root = $("#events-root"), status = $("#events-status"), panel = $("#halloween-panel");
   if (!root || !panel) return;
@@ -2312,12 +2323,28 @@ async function pageEvents() {
   try { event = await api("GET", "/api/events/state", undefined, { quiet: true }); }
   catch (_) { status.textContent = "Не удалось загрузить расписание события."; return; }
   const renderInactive = () => {
-    status.textContent = event.enabled
+    const upcoming = event.enabled && new Date(event.start_at).getTime() > Date.now();
+    status.textContent = upcoming
       ? `Хэллоуин запланирован: ${fmtDate(event.start_at)} — ${fmtDate(event.end_at)}.`
-      : "Сейчас нет активных событий.";
+      : event.raid_summary ? "Последний хэллоуинский рейд завершился — вот его итоги." : "Сейчас нет активных событий.";
+    const inactiveMessage = event.raid_summary
+      ? "Событие завершилось. Вклад каждого участника вошёл в общий итог."
+      : upcoming ? "Рейд начнётся в указанное время. Следи за банками!"
+        : "Загляни во время активного ивента — тогда здесь появится общий босс.";
     const gifts = (event.raid_gifts || []).slice().reverse().map((gift) =>
       `<li><span>${esc(gift.emoji || "🎁")}</span><div><b>${esc(gift.title)}</b>${gift.description ? `<small>${esc(gift.description)}</small>` : ""}</div></li>`).join("");
-    panel.innerHTML = `<h2>🌘 Сейчас тихо</h2><p class="muted">Загляни во время активного ивента — тогда здесь появится общий босс.</p>
+    const summary = event.raid_summary;
+    const resultDates = summary?.start_at && summary?.end_at
+      ? `<p class="muted">${fmtDate(summary.start_at)} — ${fmtDate(summary.end_at)}</p>` : "";
+    const results = summary ? `<section class="raid-results"><p class="eyebrow">ИТОГИ ПОСЛЕДНЕГО СОБЫТИЯ</p>
+      <h2>${esc(summary.boss || "Общий хэллоуинский рейд")}</h2>${resultDates}
+      <div class="raid-result-stats"><div><b>${Number(summary.total_damage || 0).toLocaleString("ru-RU")}</b><small>общий урон</small></div>
+        <div><b>${summary.participants || 0}</b><small>участников</small></div>
+        <div><b>${summary.completed_stages || 0}/${summary.stage_count || 0}</b><small>стадий пройдено</small></div></div>
+      <p class="raid-result-outcome">${summary.boss_defeated ? "🎃 Общими усилиями босса одолели!" : "🌘 Босс продержался до конца события."}</p>
+      ${raidLeaderboardMarkup(summary.leaderboard, summary.participants, null, 0, "🏆 Рейтинг участников")}</section>` : "";
+    panel.innerHTML = `<h2>🌘 Сейчас тихо</h2><p class="muted">${inactiveMessage}</p>
+      ${results}
       ${gifts ? `<section class="raid-rewards raid-gift-box"><h3>🎁 Твои подарки за рейды</h3><ul>${gifts}</ul></section>` : ""}
       ${isHalloweenAdmin() ? `<button class="btn btn-ghost scare-test" data-screamer-test>👻 Проверить скример</button>` : ""}`;
   };
@@ -2381,6 +2408,14 @@ async function pageEvents() {
   };
   const paint = () => {
     const pct = Math.max(0, Math.min(100, raid.hp / raid.max_hp * 100));
+    // Health looks: >70% intact, 40–70% cracked, 10–40% corrupted, ≤10% critical.
+    const bossState = pct > 70
+      ? { className: "boss-healthy", tier: "healthy", caption: "ОН ЕЩЁ СИЛЁН" }
+      : pct > 40
+        ? { className: "boss-wounded", tier: "wounded", caption: "ПО КОЖЕ ИДУТ ТРЕЩИНЫ" }
+        : pct > 10
+          ? { className: "boss-corrupted", tier: "corrupted", caption: "ПЛЕСЕНЬ ПРОРЫВАЕТСЯ" }
+          : { className: "boss-critical", tier: "critical", caption: "ЕЩЁ ОДИН УДАР!" };
     const ready = canTap();
     const available = raid.available_mushrooms || [];
     const selected = new Set(partyIds);
@@ -2408,13 +2443,14 @@ async function pageEvents() {
         <div class="raid-projectiles" aria-hidden="true"><span class="raid-projectile raid-projectile-one">⚡</span><span class="raid-projectile raid-projectile-two">💫</span><span class="raid-projectile raid-projectile-three">🔥</span></div>
         <span class="raid-impact" aria-hidden="true">💥</span><b class="raid-damage-pop" aria-hidden="true"></b>
         <div class="raid-fighter-line" aria-hidden="true">${battleFighters}</div>
-        <button id="halloween-boss" class="halloween-boss" aria-label="Атаковать босса" ${ready ? "" : "disabled"}>🎃<span>🦠</span></button><span class="haunt-caption">ОН УЖЕ ЗАМЕТИЛ ТЕБЯ</span></div>
+        <button id="halloween-boss" class="halloween-boss ${bossState.className}" data-health-tier="${bossState.tier}" aria-label="Атаковать босса. ${bossState.caption}" ${ready ? "" : "disabled"}>🎃<span class="boss-mold">🦠</span></button><span class="haunt-caption">${bossState.caption}</span></div>
       <div class="haunt-info"><p class="eyebrow">ОБЩИЙ РЕЙД · ФАЗА ${raid.phase} · СТАДИЯ ${raid.stage_number}/${raid.stage_count}</p>
         <h2>${esc(raid.boss)}</h2><h3 class="raid-stage-title">${esc(raid.stage_title)}</h3>
         <p>${esc(raid.stage_description || "Один босс для всех игроков сайта.")} Регенерация — <b>${raid.regen_per_minute} HP в минуту</b>.</p>
         <p>Выставь до трёх своих живых грибов: каждый наносит 1 урон. При ударе каждый участник получает +1 чистоты и счастья, но теряет по 1 сахару и заварки.</p>
         <div class="raid-hp"><div class="raid-hp-label"><b>${raid.hp.toLocaleString("ru-RU")} HP</b><span>${raid.max_hp.toLocaleString("ru-RU")} максимум</span></div><div class="raid-hp-bar"><i style="width:${pct}%"></i></div></div>
         <div class="raid-meta"><span>Твой урон: <b>${raid.my_damage}</b></span><span>Урон на стадии: <b>${raid.stage_damage || 0}</b></span><span>Всего урона: <b>${raid.total_damage.toLocaleString("ru-RU")}</b></span></div>
+        ${raidLeaderboardMarkup(raid.leaderboard, raid.participants, raid.my_rank, raid.my_damage)}
         ${ME ? `<section class="raid-party"><h3>🍄 Твоя боевая группа</h3>${available.length ? `<div class="raid-team-slots">${teamSlots}</div>
           <p class="raid-team-status muted">${partyIds.length ? `Выставлено: ${selectedNames.join(", ")} · урон за удар: ${partyIds.length}` : "Выбери хотя бы одного гриба"}</p>`
           : `<p class="muted">У тебя пока нет живых незамороженных грибов для рейда. Заведи гриб на <a href="/">подоконнике</a>.</p>`}</section>` : ""}
@@ -2469,6 +2505,7 @@ async function pageEvents() {
       const fresh = await api("GET", "/api/events/halloween/raid", undefined, { quiet: true });
       if (!fresh.active) {
         event.active = false;
+        event.raid_summary = fresh.summary || event.raid_summary;
         await applyEventTheme();
         renderInactive();
         clearInterval(raidPoll);
@@ -2476,7 +2513,9 @@ async function pageEvents() {
       }
       const changed = fresh.hp !== raid.hp || fresh.max_hp !== raid.max_hp || fresh.phase !== raid.phase
         || fresh.stage_number !== raid.stage_number || fresh.total_damage !== raid.total_damage
-        || fresh.my_damage !== raid.my_damage || fresh.stage_damage !== raid.stage_damage
+        || fresh.my_damage !== raid.my_damage || fresh.my_rank !== raid.my_rank || fresh.participants !== raid.participants
+        || JSON.stringify(fresh.leaderboard) !== JSON.stringify(raid.leaderboard)
+        || fresh.stage_damage !== raid.stage_damage
         || JSON.stringify(fresh.available_mushrooms) !== JSON.stringify(raid.available_mushrooms)
         || JSON.stringify(fresh.gifts_received) !== JSON.stringify(raid.gifts_received);
       if (changed) {

@@ -32,7 +32,7 @@ async def halloween_settings():
 @bp.put("/events/halloween")
 @require_perm("role.assign")
 async def update_halloween_settings():
-    from ..services import halloween, quotes
+    from ..services import halloween, halloween_raid, quotes
     data = json_body()
     enabled = data.get("enabled")
     start_at, end_at = data.get("start_at"), data.get("end_at")
@@ -50,12 +50,13 @@ async def update_halloween_settings():
                        "validation_error")
 
     async with session_scope() as s:
-        current = await halloween.get_config(s)
+        current = await halloween.get_config(s, lock=True)
         raid_config = halloween.validate_raid_config(data.get("raid", current["raid"]))
         value = {"enabled": enabled, "start_at": start.astimezone(timezone.utc).isoformat(),
                  "end_at": end.astimezone(timezone.utc).isoformat(), "raid": raid_config}
         row = await s.get(Setting, "halloween", with_for_update=True)
         old = row.value if row else None
+        await halloween_raid.apply_config_change(s, current, value, datetime.now(timezone.utc))
         if row is None:
             s.add(Setting(key="halloween", value=value, updated_by=g.user.id))
         else:

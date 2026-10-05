@@ -13,7 +13,7 @@ from ..auth.sessions import current_user_id
 from ..db import session_scope
 from ..errors import ApiError
 from ..models import HalloweenRaid, HalloweenRaidPlayer, HalloweenTreat, Kombucha, User
-from ..services import halloween, kombucha as kb
+from ..services import halloween, halloween_raid, kombucha as kb
 from ..services.notifications import notify, notify_once
 from ..services.push import enqueue_push
 from . import bp
@@ -84,6 +84,7 @@ async def _raid_state(s, raid: HalloweenRaid, player: HalloweenRaidPlayer | None
         saved = [kid for kid in (player.kombucha_ids or [])
                  if isinstance(kid, int) and not isinstance(kid, bool) and kid in available_ids] if player else []
         party_ids = saved or ([available[0].id] if available else [])
+    standings = await halloween_raid.leaderboard(s, user_id, player)
     return {
         "active": True,
         "boss": raid_config["boss_name"],
@@ -96,6 +97,9 @@ async def _raid_state(s, raid: HalloweenRaid, player: HalloweenRaidPlayer | None
         "phase": raid.phase,
         "total_damage": raid.total_damage,
         "my_damage": player.damage if player else 0,
+        "my_rank": standings["my_rank"],
+        "participants": standings["participants"],
+        "leaderboard": standings["leaderboard"],
         "stage_damage": _stage_damage(player, raid.phase),
         "regen_per_minute": raid_config["regen_per_minute"],
         "stage_gifts": [gift for gift in raid_config["gifts"] if gift["stage"] == stage_number],
@@ -133,15 +137,19 @@ async def _award_stage_gifts(s, raid_config: dict, stage_number: int, phase: int
 
 @bp.get("/events/state")
 async def event_state():
+    at = datetime.now(UTC)
     uid = current_user_id()
     async with session_scope() as s:
         config = await halloween.get_config(s)
         user = await s.get(User, uid) if uid else None
-        state = halloween.public_state(config, user)
+        state = halloween.public_state(config, user, at)
         player = await s.get(HalloweenRaidPlayer, uid) if uid else None
         state["raid_gifts"] = (player.gifts_received or []) if player else []
-        if state["active"] and user:
-            await halloween.award_survivor(s, user.id)
+        if state["active"]:
+            if user:
+                await halloween.award_survivor(s, user.id)
+        else:
+            state["raid_summary"] = await halloween_raid.inactive_summary(s, config, at)
     return state
 
 
@@ -153,7 +161,7 @@ async def halloween_raid_state():
     async with session_scope() as s:
         config = await halloween.get_config(s)
         if not halloween.active(config, at):
-            return {"active": False}
+            return {"active": False, "summary": await halloween_raid.inactive_summary(s, config, at)}
         raid_config = halloween.normalize_raid_config(config.get("raid"))
         initial_stage, _ = halloween.stage_for({"raid": raid_config}, 1)
         raid = await _ensure_raid(s, initial_stage["max_hp"], lock=False)
@@ -167,9 +175,10 @@ async def halloween_raid_tap():
     at = datetime.now(UTC)
     data = json_body()
     async with session_scope() as s:
-        config = await halloween.get_config(s)
+        config = await halloween.get_config(s, lock=True)
         if not halloween.active(config, at):
             raise ApiError("Хэллоуинский рейд сейчас закрыт", 409, "event_inactive")
+        await halloween_raid.ensure_event_meta(s, config, lock=True)
         user = await s.get(User, g.user.id, with_for_update=True)
         await s.execute(insert(HalloweenRaidPlayer).values(
             user_id=user.id, damage=0, kombucha_ids=[], stage_damage={}, gifts_received=[]
