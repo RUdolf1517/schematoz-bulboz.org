@@ -24,7 +24,7 @@ def test_admin_users_search(make_user):
 
 
 @pytest.mark.parametrize("path", ["/", "/market", "/faq", "/u/someone", "/login", "/register",
-                                  "/banned", "/admin", "/rules"])
+                                  "/admin", "/rules"])
 def test_pages_render_with_header_and_footer(app, path):
     r = app.test_client().get(path)
     assert r.status_code == 200
@@ -37,6 +37,13 @@ def test_header_shows_user_menu_when_logged_in(make_user):
     c, _ = make_user()
     html = c.get("/").get_data(as_text=True)
     assert 'id="user-menu"' in html and 'id="login-btn"' not in html
+
+
+def test_banned_page_has_no_site_navigation_or_other_actions(app):
+    html = app.test_client().get("/banned").get_data(as_text=True)
+    assert 'data-page="banned"' in html and 'id="banned"' in html
+    assert 'class="main-nav"' not in html and 'class="site-footer"' not in html
+    assert 'id="toast"' not in html and 'id="modal"' not in html
 
 
 @pytest.mark.parametrize("path", ["/q/1", "/ask", "/rooms", "/tasks", "/search"])

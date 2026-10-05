@@ -74,12 +74,35 @@ async def _load_user() -> User:
     return user
 
 
-def login_required(view):
-    @wraps(view)
-    async def wrapper(*args, **kwargs):
-        await _load_user()
-        return await view(*args, **kwargs)
-    return wrapper
+def _ban_error(ban: Ban) -> ApiError:
+    return ApiError(
+        "Аккаунт заблокирован", 403, "banned",
+        ban_id=ban.id, until=ban.ends_at.isoformat() if ban.ends_at else None,
+        reason=ban.reason,
+    )
+
+
+async def _ensure_not_banned(user_id: int) -> None:
+    ban = await active_global_ban(user_id)
+    if ban is not None:
+        raise _ban_error(ban)
+
+
+def login_required(view=None, *, allow_banned: bool = False):
+    """Требует входа и по умолчанию запрещает любые действия при активном глобальном бане.
+
+    ``allow_banned`` предназначен только для страницы статуса, /me и подачи апелляции.
+    """
+    def decorate(fn):
+        @wraps(fn)
+        async def wrapper(*args, **kwargs):
+            user = await _load_user()
+            if not allow_banned:
+                await _ensure_not_banned(user.id)
+            return await fn(*args, **kwargs)
+        return wrapper
+
+    return decorate(view) if view is not None else decorate
 
 
 def _require_permissions(perms: set[str], *, any_of: bool):
@@ -87,13 +110,7 @@ def _require_permissions(perms: set[str], *, any_of: bool):
         @wraps(view)
         async def wrapper(*args, **kwargs):
             user = await _load_user()
-            ban = await active_global_ban(user.id)
-            if ban is not None:
-                raise ApiError(
-                    "Аккаунт заблокирован", 403, "banned",
-                    ban_id=ban.id, until=ban.ends_at.isoformat() if ban.ends_at else None,
-                    reason=ban.reason,
-                )
+            await _ensure_not_banned(user.id)
             granted = await get_user_perms(user.id)
             allowed = bool(perms & granted) if any_of else perms <= granted
             if not allowed:

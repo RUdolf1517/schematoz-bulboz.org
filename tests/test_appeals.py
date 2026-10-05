@@ -9,7 +9,15 @@ def test_appeal_flow(make_user):
     r = victim_c.post("/api/auth/login", json={"login": "victim", "password": "correct-horse"})
     assert r.status_code == 200 and r.json["banned"] is True
     assert victim_c.post("/api/market/999/buy", json={}).json["error"] == "banned"
+    assert victim_c.get("/api/kombucha").json["error"] == "banned"
     assert victim_c.get("/api/auth/me").json["ban"]["id"] == ban_id
+    assert victim_c.get("/api/me/ban").json["ban"]["reason"] == "спам"
+    for path in ("/market", "/rules"):
+        blocked_page = victim_c.get(path, follow_redirects=False)
+        assert blocked_page.status_code == 302 and blocked_page.headers["Location"].endswith("/banned")
+    ban_page = victim_c.get("/banned").get_data(as_text=True)
+    assert 'class="main-nav"' not in ban_page and 'class="site-footer"' not in ban_page
+    assert 'id="toast"' not in ban_page and 'id="banned"' in ban_page
 
     assert victim_c.post(f"/api/bans/{ban_id}/appeal", json={"text": "коротко"}).status_code == 400
     assert victim_c.post(f"/api/bans/{ban_id}/appeal", json={"text": "Это был не спам, а ссылка на учебник"}).status_code == 200

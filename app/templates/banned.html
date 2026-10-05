@@ -1,4 +1,10 @@
 {% extends "base.html" %}
+{% block title %}Аккаунт заблокирован — schematoz·bulboz{% endblock %}
+{% block main_class %}ban-main{% endblock %}
 {% block content %}
-<div class="panel" id="banned"><p class="muted">Загружаем…</p></div>
+<section class="ban-panel" id="banned" aria-live="polite" aria-labelledby="ban-title">
+  <div class="ban-mark" aria-hidden="true">⛔</div>
+  <h1 id="ban-title">Проверяем статус аккаунта…</h1>
+  <p class="muted">Загружаем причину блокировки.</p>
+</section>
 {% endblock %}

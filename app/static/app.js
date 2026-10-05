@@ -787,22 +787,51 @@ async function loginKeysPanel(root) {
 // ---------------------------------------------------------------- banned / appeal
 async function pageBanned() {
   const root = $("#banned");
-  if (!ME) { root.innerHTML = `<p>Войди в аккаунт, чтобы посмотреть статус.</p><a class="btn btn-accent" href="/login">Войти</a>`; return; }
-  const { ban } = await api("GET", "/api/me/ban");
-  if (!ban) { root.innerHTML = `<h1>Всё чисто ✅</h1><p>Активных блокировок нет.</p><a class="btn" href="/">В ленту</a>`; return; }
-  const STATUS = { none: "", pending: "⏳ Апелляция на рассмотрении — её разбирает администратор.", accepted: "✅ Апелляция принята.", rejected: "❌ Апелляция отклонена." };
-  root.innerHTML = `<h1>Аккаунт заблокирован</h1>
-    <p><b>Причина:</b> ${esc(ban.reason)}</p>
-    <p><b>Срок:</b> ${ban.ends_at ? "до " + esc(fmtDate(ban.ends_at)) : "навсегда"}</p>
-    <p class="muted">Подробнее — в <a href="/rules">правилах сообщества</a>.</p>
-    ${ban.appeal_status !== "none" ? `<p>${STATUS[ban.appeal_status]}</p>${ban.appeal_comment ? `<p class="muted">Комментарий администратора: ${esc(ban.appeal_comment)}</p>` : ""}` : `
-    <form class="form" id="appeal-form"><label>Не согласен? Напиши апелляцию (от 10 символов)
-      <textarea name="text" rows="5" minlength="10" maxlength="2000" required></textarea></label>
-      <button class="btn btn-accent">Отправить апелляцию</button></form>`}`;
+  if (!root) return;
+  let ban;
+  try {
+    ({ ban } = await api("GET", "/api/me/ban", undefined, { quiet: true }));
+  } catch (error) {
+    if (error.status === 401) {
+      root.innerHTML = `<div class="ban-mark" aria-hidden="true">⛔</div><h1 id="ban-title">Войди в аккаунт</h1><p class="muted">После входа здесь появятся причина блокировки и апелляция.</p><a class="btn btn-accent" href="/login?next=%2Fbanned">Войти</a>`;
+    } else {
+      root.innerHTML = `<div class="ban-mark" aria-hidden="true">⚠️</div><h1 id="ban-title">Не удалось проверить блокировку</h1><p class="muted">Обнови страницу чуть позже.</p>`;
+    }
+    return;
+  }
+  if (!ban) {
+    root.innerHTML = `<div class="ban-mark" aria-hidden="true">✅</div><h1 id="ban-title">Активного бана нет</h1><p class="muted">Доступ к аккаунту восстановлен.</p><a class="btn btn-accent" href="/">Продолжить</a>`;
+    return;
+  }
+  const STATUS = {
+    pending: "Апелляция на рассмотрении.",
+    accepted: "Апелляция принята.",
+    rejected: "Апелляция отклонена.",
+  };
+  root.innerHTML = `<div class="ban-mark" aria-hidden="true">⛔</div><h1 id="ban-title">Аккаунт заблокирован</h1>
+    <p class="ban-reason"><b>Причина блокировки</b>${esc(ban.reason || "Не указана")}</p>
+    ${ban.appeal_status !== "none" ? `<p class="ban-status">${esc(STATUS[ban.appeal_status] || "Статус апелляции обновлён.")}</p>${ban.appeal_comment ? `<p class="ban-status">Ответ: ${esc(ban.appeal_comment)}</p>` : ""}` : `
+    <form class="form ban-appeal-form" id="appeal-form"><label for="appeal-text">Текст апелляции</label>
+      <textarea id="appeal-text" name="text" rows="5" minlength="10" maxlength="2000" placeholder="Опиши, почему решение стоит пересмотреть…" required></textarea>
+      <button type="submit" class="btn btn-accent">Подать апелляцию</button></form>`}`;
   const form = $("#appeal-form");
-  if (form) form.onsubmit = async (e) => {
-    e.preventDefault();
-    try { await api("POST", `/api/bans/${ban.id}/appeal`, { text: form.elements.text.value }); toast("Апелляция отправлена"); pageBanned(); } catch (_) {}
+  if (form) form.onsubmit = async (event) => {
+    event.preventDefault();
+    const button = $("button[type=submit], button:not([type])", form);
+    if (button) button.disabled = true;
+    try {
+      await api("POST", `/api/bans/${ban.id}/appeal`, { text: form.elements.text.value }, { quiet: true });
+      await pageBanned();
+    } catch (error) {
+      let feedback = $(".ban-feedback", form);
+      if (!feedback) {
+        feedback = document.createElement("p");
+        feedback.className = "ban-feedback";
+        form.appendChild(feedback);
+      }
+      feedback.textContent = error.data?.message || "Не удалось отправить апелляцию. Попробуй ещё раз.";
+      if (button) button.disabled = false;
+    }
   };
 }
 
@@ -2534,11 +2563,14 @@ const PAGES = {
 };
 
 (async function boot() {
-  initHeader();
-  await loadMe();
-  await applyEventTheme();
+  const banPage = document.body.dataset.page === "banned";
+  if (!banPage) {
+    initHeader();
+    await loadMe();
+    await applyEventTheme();
+  }
   const fn = PAGES[document.body.dataset.page];
-  if (fn) fn();
+  if (fn) await fn();
 })();
 
 // ---------------------------------------------------------------- PWA
@@ -2547,7 +2579,9 @@ if ("serviceWorker" in navigator && (location.protocol === "https:" || location.
 }
 let kbInstallPrompt = null;
 window.addEventListener("beforeinstallprompt", (e) => {
-  e.preventDefault(); kbInstallPrompt = e;
+  e.preventDefault();
+  if (document.body.dataset.page === "banned") return;
+  kbInstallPrompt = e;
   if (localStorage.getItem("pwa-dismissed")) return;
   const b = document.createElement("div");
   b.className = "pwa-banner";
