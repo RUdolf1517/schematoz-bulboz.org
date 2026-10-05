@@ -1098,7 +1098,7 @@ async function adminHalloween(panel) {
     <hr><button class="btn btn-accent">Сохранить настройки</button>
   </form>
   <div class="panel"><h3>Эффекты события</h3><p class="muted">Скример срабатывает примерно на каждом третьем действии, не чаще одного раза за 15 секунд. Музыка включена по умолчанию. Чистота и счастье грибов во время ивента убывают вдвое быстрее; в рейде каждый выставленный гриб наносит 1 урон, получает +1 чистоты и счастья, но теряет по 1 сахару и заварки.</p>
-  <p class="muted">Также доступны хэллоуинские цитаты, временные мутации, «Сладость или гадость» и исчезновения грибов.</p></div>
+  <p class="muted">Также доступны хэллоуинские цитаты, постоянные мутации, «Сладость или гадость» и исчезновения грибов.</p></div>
   ${raidArchiveMarkup(archive)}`;
   const stagesBox = $("#raid-admin-stages", panel), giftsBox = $("#raid-admin-gifts", panel);
   $("#raid-add-stage", panel).onclick = () => {
@@ -1267,9 +1267,9 @@ function shade(hex, f = 0.6) {
   const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(v * f));
   return `rgb(${c.join(",")})`;
 }
-const RAR = { legendary: "Легендарная", epic: "Эпическая", rare: "Редкая", common: "Обычная", event: "Временная хэллоуинская" };
+const RAR = { legendary: "Легендарная", epic: "Эпическая", rare: "Редкая", common: "Обычная", event: "Постоянная хэллоуинская" };
 function mutChip(m) {
-  return `<span class="kb-mut r-${m.rarity}" title="${esc(RAR[m.rarity] || "")}: ${esc(m.title)}${m.expires_at ? ` · временно до ${esc(fmtDate(m.expires_at))}` : ""}${m.inherited ? " (унаследована)" : ""}">${esc(m.emoji)} ${esc(m.title)}${m.serial ? ` <b class="kb-serial">#${m.serial}</b>` : ""}${m.inherited ? " 🧬" : ""}</span>`;
+  return `<span class="kb-mut r-${m.rarity}" title="${esc(RAR[m.rarity] || "")}: ${esc(m.title)}${m.inherited ? " (унаследована)" : ""}">${esc(m.emoji)} ${esc(m.title)}${m.serial ? ` <b class="kb-serial">#${m.serial}</b>` : ""}${m.inherited ? " 🧬" : ""}</span>`;
 }
 async function kombuchaCardModal(id) {
   let d;
@@ -1278,7 +1278,7 @@ async function kombuchaCardModal(id) {
   modal(`<div class="kb-cardm"><div class="kb-cardm-svg">${kombuchaSVG(d)}</div>
     <h2>${esc(d.name)} ${d.frozen ? "🧊" : ""}</h2>
     <div class="muted">${esc(d.stage.title)} · ${d.xp} XP · поколение ${d.generation} · владелец <a href="/u/${encodeURIComponent(d.owner)}">@${esc(d.owner)}</a>${d.price != null ? ` · 🏷 ${d.price} $₽` : ""}</div>
-    <h3>Мутации</h3>${d.mutations.length ? `<table class="kb-cardm-t">${d.mutations.map((m) => `<tr><td>${esc(m.emoji)} ${esc(m.title)}</td><td>${esc(RAR[m.rarity] || "")}</td><td>${m.serial != null ? `<b>#${m.serial}</b> из ${m.issued}` : "временно"}</td></tr>`).join("")}</table>` : `<p class="muted">Без мутаций</p>`}
+    <h3>Мутации</h3>${d.mutations.length ? `<table class="kb-cardm-t">${d.mutations.map((m) => `<tr><td>${esc(m.emoji)} ${esc(m.title)}</td><td>${esc(RAR[m.rarity] || "")}</td><td>${m.serial != null ? `<b>#${m.serial}</b> из ${m.issued}` : m.rarity === "event" ? "навсегда" : "—"}</td></tr>`).join("")}</table>` : `<p class="muted">Без мутаций</p>`}
     <h3>История владельцев</h3>${d.owners.length ? `<ol class="kb-owners">${d.owners.map((o) => `<li>@${esc(o.username || "?")} — ${HOW[o.how] || esc(o.how)}${o.price ? ` за ${o.price} $₽` : ""} <small class="muted">${esc(fmtDate(o.at))}</small></li>`).join("")}</ol>` : `<p class="muted">Всю жизнь у одного хозяина — @${esc(d.owner)}</p>`}
     <div class="modal-actions"><button class="btn btn-ghost" data-close>Закрыть</button></div></div>`);
 }
@@ -2152,7 +2152,7 @@ async function pageKombucha() {
       S.items = S.items.map((x) => (x.id === r.kombucha.id ? r.kombucha : x));
       S.wood = r.wood_balance; render();
       if (r.result.mutation) toast(`🧬 Игра открыла мутацию: ${r.result.mutation.emoji} «${r.result.mutation.title}» #${r.result.mutation.serial}!`);
-      if (r.halloween_mutation) toast(`👁️ Хэллоуинская мутация: ${r.halloween_mutation.emoji} «${r.halloween_mutation.title}» на три дня`);
+      if (r.halloween_mutation) toast(`👁️ Постоянная хэллоуинская мутация: ${r.halloween_mutation.emoji} «${r.halloween_mutation.title}»`);
     };
     if (btn("[data-games]")) btn("[data-games]").onclick = () => kbGamesMenu(cur(), afterGame);
     const fsOpen = $(".kb-fs-art");
@@ -2212,7 +2212,7 @@ async function pageKombucha() {
     else { say(kk.phrase); if (r.message && action !== "talk") toast(r.message); }
     if (r.quote && kk.mood !== "sticky") { const b = $("#kb-say"); if (b) b.title = r.quote.lines.map((l) => l.who).join(", ") + (r.quote.book ? ` — ${r.quote.book}` : ""); }
     if (r.mutation) toast(`🧬 ${r.mutation.rarity_title} мутация: ${r.mutation.emoji} «${r.mutation.title}» #${r.mutation.serial}!${r.mutation.first_time ? " +15 $₽ за новую находку" : ""}`);
-    if (r.halloween_mutation) toast(`👁️ Хэллоуинская мутация: ${r.halloween_mutation.emoji} «${r.halloween_mutation.title}» на три дня`);
+    if (r.halloween_mutation) toast(`👁️ Постоянная хэллоуинская мутация: ${r.halloween_mutation.emoji} «${r.halloween_mutation.title}»`);
     if (r.new_badges?.length) newBadgesToast(r.new_badges);
     if (r.stage_up) toast(`🎉 Гриб вырос: теперь это «${r.kombucha.stage.title}»!`);
     if (r.sprout) toast(r.sprout.planted ? `🌱 Гриб дал отросток «${r.sprout.name}»! +50 $₽` : "🌱 Гриб дал отросток, но банки нет — купи её в магазине. +50 $₽");

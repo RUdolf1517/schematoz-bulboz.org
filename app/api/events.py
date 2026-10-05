@@ -344,11 +344,11 @@ async def halloween_treat(kid: int):
             own_mushroom = await s.scalar(select(Kombucha).where(
                 Kombucha.user_id == actor.id, Kombucha.alive.is_(True), Kombucha.frozen.is_(False)
             ).order_by(Kombucha.id).with_for_update())
-            if own_mushroom:
-                mut = halloween.add_temp_mutation(s, own_mushroom, at=at, force=True)
+            mut = halloween.add_temp_mutation(s, own_mushroom, at=at, force=True) if own_mushroom else None
+            if mut:
                 await halloween.alert_temp_mutation(s, own_mushroom, mut)
                 reward, code = "mutation", mut["code"]
-                message = f"Сладость! {mut['emoji']} Временная мутация «{mut['title']}» — на три дня"
+                message = f"Сладость! {mut['emoji']} Мутация «{mut['title']}» останется с грибом навсегда"
             elif missing_hats:
                 code = random.choice(missing_hats)
                 actor.profile = {**(actor.profile or {}), "halloween_hats": [*owned, code]}

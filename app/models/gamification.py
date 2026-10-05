@@ -65,7 +65,7 @@ class Kombucha(Base):
     sprout_count: Mapped[int] = mapped_column(default=0, server_default="0")
     talk_count: Mapped[int] = mapped_column(default=0, server_default="0")
     owners: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))  # провенанс
-    # Хэллоуинская косметика переживает окончание события; эффекты и исчезновение временные.
+    # Шапки и хэллоуинские мутации переживают событие; паутина и исчезновение временные.
     halloween_hat: Mapped[str | None] = mapped_column(String(24))
     halloween_hat_meta: Mapped[dict | None] = mapped_column(JSONB)
     halloween_mutations: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))

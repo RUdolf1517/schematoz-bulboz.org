@@ -252,46 +252,54 @@ def day_for(at: datetime | None = None) -> date:
 
 
 def active_mutations(k: Kombucha, at: datetime | None = None) -> list[dict]:
-    at = at or datetime.now(timezone.utc)
-    out = []
+    """Return every known Halloween mutation, including legacy entries past expires_at.
+
+    `at` is retained for compatibility with callers; Halloween mutations no longer expire.
+    """
+    out, seen = [], set()
     for entry in (k.halloween_mutations or []):
-        spec = TEMP_MUTATIONS.get(entry.get("code"))
-        expires = _parse_dt(entry.get("expires_at"))
-        if spec and expires and expires > at:
-            out.append({
-                "code": entry["code"], "title": spec["title"], "emoji": spec["emoji"],
-                "color": spec["color"], "rarity": "event", "rarity_title": "Временная хэллоуинская",
-                "stage": 0, "serial": None, "inherited": False,
-                "at": entry.get("at"), "expires_at": entry.get("expires_at"),
-            })
+        code = entry.get("code")
+        spec = TEMP_MUTATIONS.get(code)
+        if not spec or code in seen:
+            continue
+        seen.add(code)
+        out.append({
+            "code": code, "title": spec["title"], "emoji": spec["emoji"],
+            "color": spec["color"], "rarity": "event", "rarity_title": "Постоянная хэллоуинская",
+            "stage": 0, "serial": None, "inherited": False,
+            "at": entry.get("at"),
+        })
     return out
 
 
 def add_temp_mutation(s, k: Kombucha, at: datetime | None = None, force: bool = False) -> dict | None:
+    """Award one permanent Halloween mutation, preserving legacy function compatibility."""
     at = at or datetime.now(timezone.utc)
     if not force and random.random() >= 0.1:
         return None
     current_codes = {x["code"] for x in active_mutations(k, at)}
-    pool = [code for code in TEMP_MUTATIONS if code not in current_codes] or list(TEMP_MUTATIONS)
+    pool = [code for code in TEMP_MUTATIONS if code not in current_codes]
+    if not pool:
+        return None
     code = random.choice(pool)
-    entry = {"code": code, "at": at.isoformat(), "expires_at": (at + timedelta(days=3)).isoformat()}
-    k.halloween_mutations = [*(k.halloween_mutations or []), entry][-20:]
+    entry = {"code": code, "at": at.isoformat()}
+    k.halloween_mutations = [*(k.halloween_mutations or []), entry]
     spec = TEMP_MUTATIONS[code]
     diary.log(s, k, "halloween_mutation", at=at, title=spec["title"])
-    return {"code": code, **spec, "expires_at": entry["expires_at"]}
+    return {"code": code, **spec}
 
 
 async def alert_temp_mutation(s, k: Kombucha, mutation: dict) -> None:
     from .notifications import notify_once
     from .push import enqueue_push
-    key = f"halloween_mutation:{k.id}:{mutation['expires_at']}"
-    body = f"Я обзавёлся временной мутацией: {mutation['emoji']} «{mutation['title']}». До трёх дней."
+    key = f"halloween_mutation:{k.id}:{mutation['code']}"
+    body = f"Я обзавёлся хэллоуинской мутацией: {mutation['emoji']} «{mutation['title']}». Она останется со мной навсегда."
     await notify_once(s, k.user_id, "kombucha", key, text=body, kombucha_id=k.id, category="mutation")
-    await enqueue_push(s, k.user_id, "mutation", "Хэллоуинская мутация 👁️", body, f"/g/{k.id}", key)
+    await enqueue_push(s, k.user_id, "mutation", "Постоянная хэллоуинская мутация 👁️", body, f"/g/{k.id}", key)
 
 
 async def prepare_k(s, k: Kombucha, config: dict, at: datetime | None = None) -> None:
-    """Persist the daily disappearance roll and guarantee a first temporary mutation."""
+    """Persist the daily disappearance roll and guarantee a first permanent mutation."""
     at = at or datetime.now(timezone.utc)
     if not active(config, at) or not k.alive or k.frozen:
         return
@@ -301,7 +309,7 @@ async def prepare_k(s, k: Kombucha, config: dict, at: datetime | None = None) ->
         k.halloween_gone = random.random() < 0.5
         if k.halloween_gone:
             diary.log(s, k, "haunted", at=at)
-    # Keep at least one temporary mutation visible throughout the event; each lasts three days.
+    # Give each eligible mushroom a first permanent mutation during the event.
     if not active_mutations(k, at):
         mutation = add_temp_mutation(s, k, at=at, force=True)
         if mutation:
