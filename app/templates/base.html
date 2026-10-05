@@ -15,11 +15,13 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='site.css', v=asset_v) }}">
 </head>
 <body data-page="{{ page_name|default('static') }}" data-logged-in="{{ 1 if logged_in else 0 }}">
+  {% if page_name != 'banned' %}
   <header class="top">
-    <a class="logo" href="/">🍄 schematoz<span>·</span>bulboz</a>
+    <a class="logo" href="/"><span class="logo-mark">🍄</span> schematoz<span>·</span>bulboz</a>
     <nav class="main-nav">
       <a href="/" class="{{ 'active' if page_name in ('kombucha', 'home') }}">🍄 Мой гриб</a>
       <a href="/market" class="{{ 'active' if page_name == 'market' }}">🛒 Рынок</a>
+      <a href="/events" id="events-nav" class="{{ 'active' if page_name == 'events' }}" hidden>🎃 Ивенты</a>
       <a href="/faq" class="{{ 'active' if page_name == 'faq' }}">❓ FAQ</a>
     </nav>
     <div class="top-actions">
@@ -47,10 +49,13 @@
     </div>
   </header>
   <div id="ban-banner" class="ban-banner" hidden></div>
+  {% endif %}
   <main class="{% block main_class %}{% endblock %}">{% block content %}{% endblock %}</main>
+  {% if page_name != 'banned' %}
   <div id="toast" class="toast" hidden></div>
   <div id="modal" class="modal" hidden></div>
   {% include "_footer.html" %}
+  {% endif %}
   <script src="{{ url_for('static', filename='app.js', v=asset_v) }}"></script>
 </body>
 </html>

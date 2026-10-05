@@ -210,19 +210,26 @@ def test_mutation_conditions():
 
 
 # ---------------------------------------------------------------- банки и отростки
-def test_buy_jar_and_plant(app, make_user, no_mutations):
+def test_buy_jar_and_paid_plant(app, make_user, no_mutations):
     c, u = make_user()
     _state(c)
     assert c.post("/api/kombucha/plant", json={}).get_json()["error"] == "no_free_jar"
     assert c.post("/api/shop/jar", json={}).status_code == 402
-    _give_wood(app, u["id"], 1000)
+    _give_wood(app, u["id"], 300)
     r = c.post("/api/shop/jar", json={}).get_json()
     assert r["jars"]["jars"] == 2 and r["jars"]["free"] == 1
-    k2 = c.post("/api/kombucha/plant", json={"name": "Второй Бульк"}).get_json()["kombucha"]
-    assert k2["name"] == "Второй Бульк"
+    assert r["sprouts"] == []
+    assert c.post("/api/kombucha/plant", json={"name": "Второй Бульк"}).status_code == 402
+    _give_wood(app, u["id"], 1000)
+    before = _state(c)["wood"]
+    purchased = c.post("/api/kombucha/plant", json={"name": "Второй Бульк"})
+    assert purchased.status_code == 201, purchased.get_json()
+    assert purchased.get_json()["wood"] == before - 1000
+    assert purchased.get_json()["kombucha"]["name"] == "Второй Бульк"
     assert len(_state(c)["items"]) == 2
     hist = c.get("/api/wallet").get_json()
     assert any(t["reason"] == "buy_jar" and t["delta"] == -300 for t in hist["items"])
+    assert any(t["reason"] == "buy_new_kombucha" and t["delta"] == -1000 for t in hist["items"])
 
 
 def test_sprout_after_week_of_care_on_last_stage(app, make_user, no_mutations):
@@ -234,11 +241,13 @@ def test_sprout_after_week_of_care_on_last_stage(app, make_user, no_mutations):
     assert r["kombucha"]["sprout_pending"]
     _give_wood(app, u["id"], 1000)
     res = c.post("/api/shop/jar", json={}).get_json()
-    assert len(res["sprouts"]) == 1                   # купил банку — отросток сел сам
-    items = _state(c)["items"]
-    child = next(k for k in items if k["id"] != kid)
+    assert res["sprouts"] == []                       # банка оставлена пустой для выбора
+    assert _first(c)["sprout_pending"]
+    planted = c.post(f"/api/kombucha/sprout/{kid}/plant", json={})
+    assert planted.status_code == 201, planted.get_json()
+    child = planted.get_json()["kombucha"]
     assert child["is_sprout"] and child["mutations"][0]["code"] == "golden" and child["mutations"][0]["inherited"]
-    assert not next(k for k in items if k["id"] == kid)["sprout_pending"]
+    assert not planted.get_json()["parent"]["sprout_pending"]
 
 
 def test_sprout_every_week(app, make_user, no_mutations):

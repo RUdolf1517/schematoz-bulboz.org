@@ -47,10 +47,17 @@ def _name(data: dict, required: bool = False) -> str | None:
 
 async def _state(s, user: User) -> dict:
     items = await kb.list_for(s, user.id)
+    from ..services import halloween
+    event = await halloween.get_config(s)
+    for k in items:
+        await halloween.prepare_k(s, k, event)
+    event_state = halloween.public_state(event, user)
+    if event_state["active"]:
+        await halloween.award_survivor(s, user.id)
     codex = (await s.execute(select(KombuchaCodex).where(KombuchaCodex.user_id == user.id)
                              .order_by(KombuchaCodex.found_at))).scalars().all()
     return {"items": [kb.out(k) for k in items], "jars": await kb.jars_info(s, user),
-            "wood": await wood.balance(s, user.id), "prices": wood.PRICES,
+            "wood": await wood.balance(s, user.id), "prices": wood.PRICES, "halloween": event_state,
             "codex": [{"code": c.code, "found_at": c.found_at.isoformat(), "kombucha_name": c.kombucha_name}
                       for c in codex],
             "catalog": await _catalog(s)}
@@ -79,6 +86,9 @@ async def kombucha_act(kid: int, action: str):
         k = await kb.get_own(s, user.id, kid)
         before = kb.stage_for(k.xp)["title"]
         res = await kb.act(s, user, k, action)
+        from ..services import halloween
+        event = await halloween.get_config(s)
+        res["halloween_mutation"] = await halloween.on_action(s, k, event)
         await s.flush()
         state = await _state(s, user)
         state.update(res, kombucha=kb.out(k), stage_up=kb.stage_for(k.xp)["title"] != before)
@@ -104,15 +114,29 @@ async def kombucha_meditate_finish(kid: int):
         user = await s.get(User, g.user.id, with_for_update=True)
         k = await kb.get_own(s, user.id, kid)
         res = await meditation.finish(s, user, k, str(data.get("token") or ""), data.get("taps"), data.get("meta"))
+        from ..services import halloween
+        event = await halloween.get_config(s)
+        hmut = None if res.get("practice") else await halloween.on_action(s, k, event)
         await s.flush()
-        return {"result": res, "kombucha": kb.out(k), "wood_balance": await wood.balance(s, user.id)}
+        return {"result": res, "kombucha": kb.out(k), "wood_balance": await wood.balance(s, user.id),
+                "halloween_mutation": hmut}
 
 
 @bp.get("/kombucha/games")
 @login_required
 async def kombucha_games():
-    from ..services import minigames
-    return {"items": minigames.catalog()}
+    from ..services import halloween, minigames
+    from ..db import session_scope
+    async with session_scope() as s:
+        is_halloween = halloween.active(await halloween.get_config(s))
+    items = minigames.catalog()
+    if is_halloween:
+        for item in items:
+            if item["code"] == "flies":
+                item["title"] = "Хэллоуинские мушки"
+                item["emoji"] = "🦇"
+                item["about"] = "Гоняй летучих мышей и ночных мушек от банки!"
+    return {"items": items, "halloween": is_halloween}
 
 
 @bp.post("/kombucha/<int:kid>/game/<any(pour, memory, sugar, flies):game>/start")
@@ -144,8 +168,12 @@ async def kombucha_game_finish(kid: int, game: str):
         user = await s.get(User, g.user.id, with_for_update=True)
         k = await kb.get_own(s, user.id, kid)
         res = await minigames.finish(s, user, k, game, str(data.get("token") or ""), data)
+        from ..services import halloween
+        event = await halloween.get_config(s)
+        hmut = None if res.get("practice") else await halloween.on_action(s, k, event)
         await s.flush()
-        return {"result": res, "kombucha": kb.out(k), "wood_balance": await wood.balance(s, user.id)}
+        return {"result": res, "kombucha": kb.out(k), "wood_balance": await wood.balance(s, user.id),
+                "halloween_mutation": hmut}
 
 
 @bp.patch("/kombucha/<int:kid>")
@@ -204,7 +232,19 @@ async def kombucha_plant():
     async with session_scope() as s:
         user = await s.get(User, g.user.id, with_for_update=True)
         k = await kb.plant(s, user, name)
-        return {"kombucha": kb.out(k)}, 201
+        balance = await wood.spend(s, user.id, wood.PRICES["mushroom"], "buy_new_kombucha", f"kombucha:{k.id}")
+        return {"kombucha": kb.out(k), "wood": balance}, 201
+
+
+@bp.post("/kombucha/sprout/<int:kid>/plant")
+@login_required
+async def kombucha_plant_sprout(kid: int):
+    async with session_scope() as s:
+        user = await s.get(User, g.user.id, with_for_update=True)
+        parent = await kb.get_own(s, user.id, kid)
+        child = await kb.plant_pending_sprout(s, user, parent)
+        return {"kombucha": kb.out(child), "parent": kb.out(parent),
+                "jars": await kb.jars_info(s, user), "wood": await wood.balance(s, user.id)}, 201
 
 
 @bp.post("/shop/jar")
@@ -223,8 +263,9 @@ async def kombucha_top():
         rows = (await s.execute(
             select(Kombucha, User.username).join(User, User.id == Kombucha.user_id)
             .where(Kombucha.alive.is_(True)).order_by(Kombucha.xp.desc(), Kombucha.id).limit(10))).all()
+        event_window = await kb.halloween_decay_window(s)
         for k, _ in rows:
-            kb.tick(k)
+            kb.tick(k, halloween_window=event_window)
     return {"items": [{"id": k.id, "username": u, "name": k.name, "xp": k.xp, "generation": k.generation,
                        "stage": kb.stage_for(k.xp)["title"], "mutations": len(k.mutations or []),
                        "kombucha": kb.public_out(k, u)}
@@ -255,7 +296,7 @@ async def kombucha_diary(kid: int):
         k = await s.get(Kombucha, kid)
         if k is None:
             raise ApiError("Гриб не найден", 404, "not_found")
-        kb.tick(k)
+        kb.tick(k, halloween_window=await kb.halloween_decay_window(s))
         owner = (await s.execute(select(User.username).where(User.id == k.user_id))).scalar()
         d = await kb.diary.read(s, k, before)
         return {"kombucha": kb.public_out(k, owner), "mine": current_user_id() == k.user_id, **d}

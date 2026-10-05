@@ -93,6 +93,7 @@ E2E smoke в jsdom (настоящий `app.js` против живого сер
 | `/g/<id>` | Дневник гриба: 🌳 родословная (предки, братья, дети, внуки) и лента событий, можно поделиться |
 | `/market` | Грибной рынок и обмены/подарки |
 | `/wallet` | «Деревянные» ($₽): баланс, как заработать, история |
+| `/events` | сезонные события; во время Хэллоуина — Тыквенная плесень, рейд и сладости/пакости |
 | `/u/<username>` | Профиль грибовода: статистика, любимый гриб, подоконник, полка, бейджи |
 | `/settings` | Настройка профиля с живым превью |
 | `/notifications` | Бейджи, продажи, обмены, баны, апелляции |
@@ -138,9 +139,17 @@ $₽ начисляются **только** за уход за грибом, м
 
 Подозрительная партия ничего не приносит (точность 0, без $₽ и мутаций). 3 такие партии за сутки — следующая игра только после капчи kremle-detect. Админ видит 🤖 счётчик в поиске игроков. В e2e на jsdom клики синтетические — сервер для e2e запускай с `ANTIBOT_DISABLED=1` (на проде не включать!).
 
-## PWA
+## PWA и уведомления
 
 `/manifest.webmanifest`, `/sw.js` (из `app/static/pwa/`), `/offline`. Статика и картинки — cache-first (версия кэша = хеш ассетов), страницы — из сети с офлайн-заглушкой, `/api` не кэшируется. Service worker работает только по HTTPS (или на localhost). Баннер «Установить» показывается один раз.
+
+Web Push настраивается отдельно: `flask --app app generate-vapid` создаёт VAPID-пару; скопируй однострочные `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (значение `base64:…`) и `VAPID_SUBJECT` в `.env`, затем перезапусти приложение. Пользователь включает push и категории в `/settings` → «🔔 Уведомления». Планировщик создаёт уведомления на сайте и outbox push; отправщик учитывает тихие часы, согласие по категориям и максимум 8 push в локальный день. Запускай одним cron/systemd timer каждые пять минут (не нужно запускать отдельный процесс на каждый worker):
+
+```cron
+*/5 * * * * cd /srv/schematoz-bulboz.org && /srv/schematoz-bulboz.org/.venv/bin/flask --app app run-notification-jobs >> /var/log/schematoz-notifications.log 2>&1
+```
+
+`/events` показывает активные сезонные события и рейд; расписание и цитаты Хэллоуина настраиваются из админки.
 
 ## API
 
@@ -162,6 +171,11 @@ $₽ начисляются **только** за уход за грибом, м
 | GET / PATCH | `/api/me/profile` | вход / `kombucha.play` |
 | POST | `/api/uploads` | `kombucha.play` |
 | GET | `/api/notifications` · POST `/api/notifications/read` | вход |
+| GET / PUT | `/api/push/settings` · POST / DELETE `/api/push/subscriptions` | вход |
+| GET | `/api/events/state` · `/api/events/halloween/raid` (общий босс только во время ивента) | публично |
+| POST | `/api/events/halloween/raid/tap` | `kombucha.play` or admin `role.assign` |
+| POST | `/api/events/halloween/treat/<id>` · `/api/events/halloween/hat/<id>` | `kombucha.play` |
+| GET / PUT | `/admin/events/halloween` | `role.assign` |
 | GET | `/api/me/ban` · POST `/api/bans/<id>/appeal` | вход (бан не мешает) |
 | GET | `/mod/users?q=` · POST `/mod/bans`, `/mod/bans/<id>/lift` | `ban.temporary` |
 | GET | `/mod/appeals` · POST `/mod/appeals/<id>/decide` · GET `/mod/log` | `ban.temporary` · `modlog.read_own` |

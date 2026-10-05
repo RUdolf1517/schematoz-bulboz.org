@@ -53,7 +53,8 @@ def test_freeze_stops_decay_and_frees_jar(app, make_user):
     shelf = c.get(f"/api/users/{u['username']}/shelf").get_json()["items"]
     assert [x["id"] for x in shelf] == [kid]
     assert "kb_freeze" in _badges(c, u["username"])
-    # можно посадить новый гриб, тогда разморозить нельзя — нет банки
+    # купить нового гриба, тогда разморозить нельзя — нет банки
+    _give_wood(app, u["id"], 1000)
     assert c.post("/api/kombucha/plant", json={}).status_code == 201
     assert c.post(f"/api/kombucha/{kid}/unfreeze", json={}).get_json()["error"] == "no_free_jar"
     _give_wood(app, u["id"], 300)

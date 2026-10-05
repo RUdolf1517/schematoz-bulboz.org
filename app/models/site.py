@@ -56,7 +56,7 @@ class Quote(Base):
     """Цитаты гриба, добавленные админом (дополняют встроенный корпус в services/quotes.py)."""
     __tablename__ = "kombucha_quotes"
     id: Mapped[int] = mapped_column(primary_key=True)
-    kind: Mapped[str] = mapped_column(String(16), index=True)        # dubious — «Погладить»/облачко, philo — «Поговорить»
+    kind: Mapped[str] = mapped_column(String(16), index=True)        # dubious / philo / halloween
     body: Mapped[str] = mapped_column(Text)                         # не `text` — затеняет sqlalchemy.text
     author: Mapped[str] = mapped_column(String(80), default="")
     source: Mapped[str] = mapped_column(String(120), default="")

@@ -2,7 +2,7 @@
 загружаются в той же корутине (и том же event loop), что и сама вьюха."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 from flask import g
@@ -64,39 +64,70 @@ async def _load_user() -> User:
         raise ApiError("Нужно войти", 401, "unauthorized")
     async with session_scope() as s:
         user = await s.get(User, uid)
+        now = datetime.now(timezone.utc)
+        # Track real account activity without writing on every tiny API call.
+        if user and (user.last_seen_at is None or user.last_seen_at < now - timedelta(minutes=5)):
+            user.last_seen_at = now
     if user is None:
         raise ApiError("Нужно войти", 401, "unauthorized")
     g.user = user
     return user
 
 
-def login_required(view):
-    @wraps(view)
-    async def wrapper(*args, **kwargs):
-        await _load_user()
-        return await view(*args, **kwargs)
-    return wrapper
+def _ban_error(ban: Ban) -> ApiError:
+    return ApiError(
+        "Аккаунт заблокирован", 403, "banned",
+        ban_id=ban.id, until=ban.ends_at.isoformat() if ban.ends_at else None,
+        reason=ban.reason,
+    )
 
 
-def require_perm(*perms: str):
-    """Пропускает, только если у пользователя есть ВСЕ перечисленные права и нет активного бана."""
-    needed = set(perms)
+async def _ensure_not_banned(user_id: int) -> None:
+    ban = await active_global_ban(user_id)
+    if ban is not None:
+        raise _ban_error(ban)
 
+
+def login_required(view=None, *, allow_banned: bool = False):
+    """Требует входа и по умолчанию запрещает любые действия при активном глобальном бане.
+
+    ``allow_banned`` предназначен только для страницы статуса, /me и подачи апелляции.
+    """
+    def decorate(fn):
+        @wraps(fn)
+        async def wrapper(*args, **kwargs):
+            user = await _load_user()
+            if not allow_banned:
+                await _ensure_not_banned(user.id)
+            return await fn(*args, **kwargs)
+        return wrapper
+
+    return decorate(view) if view is not None else decorate
+
+
+def _require_permissions(perms: set[str], *, any_of: bool):
     def deco(view):
         @wraps(view)
         async def wrapper(*args, **kwargs):
             user = await _load_user()
-            ban = await active_global_ban(user.id)
-            if ban is not None:
-                raise ApiError(
-                    "Аккаунт заблокирован", 403, "banned",
-                    ban_id=ban.id, until=ban.ends_at.isoformat() if ban.ends_at else None,
-                    reason=ban.reason,
-                )
+            await _ensure_not_banned(user.id)
             granted = await get_user_perms(user.id)
-            if not needed <= granted:
+            allowed = bool(perms & granted) if any_of else perms <= granted
+            if not allowed:
                 raise ApiError("Недостаточно прав", 403, "forbidden")
             g.perms = granted
             return await view(*args, **kwargs)
         return wrapper
     return deco
+
+
+def require_perm(*perms: str):
+    """Пропускает, только если у пользователя есть ВСЕ перечисленные права и нет активного бана."""
+    return _require_permissions(set(perms), any_of=False)
+
+
+def require_any_perm(*perms: str):
+    """Пропускает, если есть хотя бы одно из прав (и нет активного бана)."""
+    if not perms:
+        raise ValueError("require_any_perm requires at least one permission")
+    return _require_permissions(set(perms), any_of=True)

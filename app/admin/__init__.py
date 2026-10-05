@@ -9,7 +9,7 @@ from sqlalchemy import delete, func, select
 from ..auth.rbac import invalidate_perms, require_perm
 from ..db import session_scope
 from ..errors import ApiError
-from ..models import Kombucha, LegalPage, LegalPageVersion, ModAction, Role, Setting, User, UserRole, WoodTx
+from ..models import HalloweenRaid, Kombucha, LegalPage, LegalPageVersion, ModAction, Role, Setting, User, UserRole, WoodTx
 from ..moderation import modlog_out
 from ..services.captcha import invalidate_captcha_settings, validate_captcha_settings
 from ..services.modlog import log_action
@@ -18,6 +18,63 @@ from ..api.utils import json_body, req_str
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
 SETTING_PERMS = {"captcha": "settings.captcha", "antispam": "settings.antispam"}
+
+
+@bp.get("/events/halloween")
+@require_perm("role.assign")
+async def halloween_settings():
+    from ..services import halloween
+    async with session_scope() as s:
+        value = await halloween.get_config(s)
+    return {**value, "active": halloween.active(value)}
+
+
+@bp.put("/events/halloween")
+@require_perm("role.assign")
+async def update_halloween_settings():
+    from ..services import halloween, halloween_raid, quotes
+    data = json_body()
+    enabled = data.get("enabled")
+    start_at, end_at = data.get("start_at"), data.get("end_at")
+    if not isinstance(enabled, bool):
+        raise ApiError("enabled должен быть true или false", 400, "validation_error")
+    if not isinstance(start_at, str) or not isinstance(end_at, str):
+        raise ApiError("Нужны даты начала и конца события", 400, "validation_error")
+    try:
+        start = datetime.fromisoformat(start_at.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(end_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ApiError("Даты должны быть ISO 8601 с часовым поясом", 400, "validation_error") from exc
+    if start.tzinfo is None or end.tzinfo is None or end <= start:
+        raise ApiError("Конец события должен быть позже начала; даты должны содержать часовой пояс", 400,
+                       "validation_error")
+
+    async with session_scope() as s:
+        current = await halloween.get_config(s, lock=True)
+        raid_config = halloween.validate_raid_config(data.get("raid", current["raid"]))
+        value = {"enabled": enabled, "start_at": start.astimezone(timezone.utc).isoformat(),
+                 "end_at": end.astimezone(timezone.utc).isoformat(), "raid": raid_config}
+        row = await s.get(Setting, "halloween", with_for_update=True)
+        old = row.value if row else None
+        await halloween_raid.apply_config_change(s, current, value, datetime.now(timezone.utc))
+        if row is None:
+            s.add(Setting(key="halloween", value=value, updated_by=g.user.id))
+        else:
+            row.value, row.updated_by = value, g.user.id
+
+        raid = await s.scalar(select(HalloweenRaid).where(HalloweenRaid.id == 1).with_for_update())
+        if raid:
+            stage, _ = halloween.stage_for(value, raid.phase)
+            target_hp = stage["max_hp"]
+            if raid.max_hp != target_hp:
+                previous_max = max(raid.max_hp, 1)
+                raid.hp = max(1, min(target_hp, round(raid.hp * target_hp / previous_max)))
+                raid.max_hp = target_hp
+                raid.updated_at = datetime.now(timezone.utc)
+        log_action(s, g.user.id, "settings.update", "setting", None, key="halloween", old=old, new=value)
+        await s.flush()
+        await quotes.refresh_custom(s)
+    return {**value, "active": halloween.active(value)}
 
 
 @bp.put("/users/<int:uid>/roles")
@@ -204,7 +261,7 @@ async def kb_debug_edit(kid: int):
         if k is None:
             raise ApiError("Гриб не найден", 404, "not_found")
         if k.alive and not k.frozen:
-            kb.tick(k)          # досчитать убывание до «сейчас», дальше правим уже актуальные значения
+            kb.tick(k, halloween_window=await kb.halloween_decay_window(s))  # досчитать убывание до сейчас
         changed = {}
         if "stage" in data:
             sizes = {sz: xp for xp, _, sz in kb.STAGES}
@@ -257,7 +314,7 @@ def _quote_fields(data: dict, partial: bool) -> dict:
     out = {}
     if "kind" in data or not partial:
         if data.get("kind") not in quotes.KINDS:
-            raise ApiError("kind: dubious | philo", 400, "validation_error", field="kind")
+            raise ApiError("kind: dubious | philo | halloween", 400, "validation_error", field="kind")
         out["kind"] = data["kind"]
     if "text" in data or not partial:
         body = data.get("text")

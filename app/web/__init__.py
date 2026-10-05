@@ -13,6 +13,22 @@ from ..auth.sessions import current_user_id
 bp = Blueprint("web", __name__)
 
 
+@bp.before_app_request
+async def keep_banned_users_on_appeal_page():
+    """Активный глобальный бан оставляет доступной только страницу причины и апелляции."""
+    if request.blueprint not in {"web", "legal"}:
+        return None
+    if request.path == "/banned" or request.path.startswith("/api/"):
+        return None
+    user_id = current_user_id()
+    if user_id is None:
+        return None
+    from ..auth.rbac import active_global_ban
+    if await active_global_ban(user_id):
+        return redirect(url_for("web.banned"))
+    return None
+
+
 def _safe_next(url: str | None, default: str = "/") -> str:
     """Только относительные пути на этом же сайте — защита от open redirect."""
     if not url:
@@ -103,6 +119,11 @@ def notifications():
     if not current_user_id():
         return redirect(url_for("web.login", next="/notifications"))
     return page("notifications.html", "notifications")
+
+
+@bp.get("/events")
+def events():
+    return page("events.html", "events")
 
 
 @bp.get("/u/<username>")

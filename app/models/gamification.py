@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, UniqueConstraint, func, text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, String, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,6 +28,7 @@ class Notification(Base):
     kind: Mapped[str] = mapped_column(String(32))
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    dedupe_key: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -64,6 +65,13 @@ class Kombucha(Base):
     sprout_count: Mapped[int] = mapped_column(default=0, server_default="0")
     talk_count: Mapped[int] = mapped_column(default=0, server_default="0")
     owners: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))  # провенанс
+    # Шапки и хэллоуинские мутации переживают событие; паутина и исчезновение временные.
+    halloween_hat: Mapped[str | None] = mapped_column(String(24))
+    halloween_hat_meta: Mapped[dict | None] = mapped_column(JSONB)
+    halloween_mutations: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+    halloween_gone_day: Mapped[date | None] = mapped_column(Date)
+    halloween_gone: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    halloween_web_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     frozen: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     frozen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     price: Mapped[int | None]                     # выставлен на рынок за столько $₽

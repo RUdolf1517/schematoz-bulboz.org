@@ -197,6 +197,22 @@ table.list td, table.list th { padding: 8px 6px; border-bottom: 1px solid var(--
 .toggle input { width: 20px; height: 20px; accent-color: var(--accent); }
 .ban-banner { background: #ff4d6d22; color: #ffc2cd; border-bottom: 1px solid #ff4d6d55; padding: 10px 16px; text-align: center; font-size: 14px; }
 .ban-banner a { color: #fff; font-weight: 700; }
+body[data-page="banned"] { min-height:100vh; min-height:100dvh; background:radial-gradient(ellipse at 50% 0%,#54203255,transparent 48%),var(--bg); }
+body[data-page="banned"] .ban-main { display:grid; place-items:center; width:min(100%,620px); max-width:none; min-height:100vh; min-height:100dvh; margin:0 auto; padding:24px; }
+.ban-panel { width:100%; margin:0; padding:clamp(22px,5vw,38px); border:1px solid #783044; border-radius:20px; background:linear-gradient(145deg,#21131b,#17151e); box-shadow:0 20px 70px #0008,0 0 45px #b41b3c1c; }
+.ban-mark { margin-bottom:8px; font-size:30px; }
+.ban-panel h1 { margin:0 0 18px; font-size:clamp(23px,6vw,30px); line-height:1.2; }
+.ban-reason { margin:0 0 20px; padding:14px; border-left:3px solid #ff5368; border-radius:0 12px 12px 0; background:#ff4d6d12; color:#ffdfe4; white-space:pre-wrap; overflow-wrap:anywhere; }
+.ban-reason b { display:block; margin-bottom:5px; color:#ff9cab; font-size:13px; }
+.ban-panel .form label { margin-bottom:12px; }
+.ban-panel .form textarea { min-height:130px; resize:vertical; }
+.ban-panel .form .btn { width:100%; min-height:48px; font-size:16px; }
+.ban-status,.ban-feedback { padding:12px 14px; border-radius:12px; background:#ffffff0a; }
+.ban-feedback { margin:12px 0 0; color:#ffc0ca; }
+@media (max-width:480px) {
+  body[data-page="banned"] .ban-main { padding:16px; }
+  .ban-panel { border-radius:16px; }
+}
 
 /* ---------- toast / modal ---------- */
 .toast {
@@ -606,6 +622,10 @@ main.main-wide { max-width: 1180px; }
 .kb-sprout .ok { color: var(--good); }
 .kb-dead-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .kb-empty { text-align: center; }
+.kb-empty-jar { max-width: 720px; margin: 0 auto; }
+.kb-empty-jar h2 { margin: 0 0 8px; }
+.kb-empty-choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 16px 0; }
+.kb-empty-choices .btn { min-height: 44px; }
 .kb-codex-lead { margin-top: -6px; font-size: 13px; }
 #kb-codex h2 { margin-top: 0; }
 .kb-codex { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
@@ -758,7 +778,9 @@ body.kb-fs-on > *:not(.kb-fs) { display: none !important; }
   display: grid; place-items: center; cursor: zoom-out; }
 .kb-fs-art { width: min(96vw, calc(96vh * 220 / 230)); height: min(96vh, calc(96vw * 230 / 220)); }
 .kb-fs-art .kb-svg { width: 100%; height: 100%; }
+.kb-fs-art > .kb-svg { transform: translate3d(var(--cursor-x, 0px), var(--cursor-y, 0px), 0) rotate(var(--cursor-tilt, 0deg)); transition: transform .2s ease-out; touch-action: pan-y; }
 .kb-fs-art .kb-mood-badge { display: none; }
+.kb-fs-tilt-btn { position: fixed; left: 14px; bottom: 54px; z-index: 5; width: 42px; height: 42px; font-size: 20px; }
 .kb-fs-hint { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); color: #fff9; font-size: 13px; transition: opacity .6s; }
 .kb-fs.hint-off .kb-fs-hint { opacity: 0; }
 /* «Медитация гриба» — ритм-тапалка */
@@ -897,3 +919,291 @@ body.kb-med-on { overflow: hidden; }
 .kb-tree-t small{color:var(--muted);font-size:12px}
 .q-off{opacity:.5}
 .kb-practice{background:rgba(120,200,255,.12);border-radius:10px;padding:6px 10px}
+
+/* ---------- tilt, Halloween event, push settings ---------- */
+.kb-scene > .kb-svg { transform: translate3d(var(--cursor-x, 0px), var(--cursor-y, 0px), 0) rotate(var(--cursor-tilt, 0deg)); transition: transform .2s ease-out; touch-action: pan-y; }
+.kb-liquid, .kb-liquid-surface { transition: fill .6s ease, transform .18s ease-out; }
+.kb-tilt-btn { position:absolute; left:6px; bottom:48px; z-index:4; width:34px; height:34px; padding:0; border-radius:10px; border:1px solid #ffffff33; background:#0008; color:#fff; font:inherit; font-size:16px; cursor:pointer; }
+.kb-tilt-btn:hover { background:#000b; border-color:var(--accent); }
+.kb-gone-note { position:absolute; left:50%; bottom:8px; transform:translateX(-50%); width:max-content; max-width:100%; padding:6px 10px; border-radius:10px; background:#0d0b12d9; color:#f6d49b; font-size:12px; text-align:center; }
+.halloween-gone .kb-svg { filter:saturate(.75); }
+.kb-halloween-tools { margin-top:12px; }
+.kb-halloween-tools h3 { margin:0 0 6px; }
+.kb-halloween-tools > p { margin:8px 0; }
+.kb-hat-equip { display:flex; align-items:end; gap:8px; margin-top:12px; flex-wrap:wrap; }
+.kb-hat-equip label { display:grid; gap:4px; min-width:min(260px, 100%); }
+.kb-hat-equip .input { min-width:220px; }
+.kb-jar-web { pointer-events:none; }
+.kb-jar-web path { fill:none; stroke:#dfc7e8b0; stroke-width:1.6; stroke-dasharray:3 2; filter:drop-shadow(0 0 3px #fff3); }
+.mut-halloween_ghost .kb-mush { opacity:.52; filter:drop-shadow(0 0 8px #c8efff); }
+.mut-halloween_zombie .kb-mush { filter:sepia(.2) hue-rotate(45deg); }
+.mut-halloween_zombie .kb-disc { fill:#67a64e !important; stroke:#315832 !important; }
+.mut-halloween_eyes .kb-face { filter:drop-shadow(0 0 5px #ff2a14) drop-shadow(0 0 10px #ff7a1a); }
+.kb-svg.small .kb-halloween-hat,.kb-svg.small .kb-burning-eyes { display:inline; }
+.kb-burning-eyes { filter:drop-shadow(0 0 4px #ff2600); }
+.kb-halloween-hat { filter:drop-shadow(0 1px 2px #000); }
+.kb-screamer { animation:kb-scream .56s steps(2,end); filter:drop-shadow(0 0 18px #ff2500) drop-shadow(0 0 28px #f30); }
+.kb-screamer .kb-face { filter:drop-shadow(0 0 7px #ff1a00); }
+@keyframes kb-scream { 0%{transform:rotate(0) scale(1)} 22%{transform:rotate(-34deg) scale(1.08)} 48%{transform:rotate(178deg) scale(1.13)} 72%{transform:rotate(194deg) scale(1.06)} 100%{transform:rotate(360deg) scale(1)} }
+.halloween-scream-flash { animation:halloween-flash .68s steps(2,end); }
+@keyframes halloween-flash { 50%{box-shadow:inset 0 0 0 999px #ff203f55} }
+.halloween-screamer-overlay { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; overflow:hidden; isolation:isolate; opacity:0; visibility:hidden; pointer-events:none; background:radial-gradient(circle at 50% 45%,#48101ddc,#08030df2 72%); color:#fff2f4; }
+.halloween-screamer-overlay.active { visibility:visible; opacity:1; animation:screamer-screen-flash .88s steps(3,end); }
+.halloween-screamer-overlay::before { content:""; position:absolute; inset:0; z-index:0; opacity:.27; background:repeating-linear-gradient(0deg,transparent 0 5px,#ff334317 6px 7px); }
+.halloween-screamer-overlay::after { content:""; position:absolute; width:min(78vw,720px); aspect-ratio:1; z-index:0; border:3px solid #ff274744; border-radius:50%; box-shadow:0 0 45px #fc183f55,inset 0 0 45px #fc183f33; animation:screamer-ring .88s ease-out both; }
+.screamer-face { position:relative; z-index:1; display:block; font-size:clamp(120px,34vw,360px); line-height:1; text-align:center; filter:drop-shadow(0 0 24px #f21c4b); transform-origin:center; }
+.screamer-caption { position:fixed; z-index:1; bottom:12vh; max-width:90vw; color:#fff; font-size:clamp(18px,4vw,38px); font-weight:1000; letter-spacing:.22em; text-align:center; text-shadow:0 0 12px #ff2747,0 0 32px #fa124e; animation:screamer-caption .9s steps(2,end); }
+.halloween-screamer-overlay[data-variant="ghost"] { background:radial-gradient(circle at 50% 48%,#8bdff3c9,#07101bf5 68%); }
+.halloween-screamer-overlay[data-variant="ghost"] .screamer-face { filter:drop-shadow(0 0 32px #adf6ff); animation:screamer-ghost .92s cubic-bezier(.1,.8,.18,1) both; }
+.halloween-screamer-overlay[data-variant="demon"] { background:radial-gradient(ellipse at 52% 52%,#b71928e8,#18030bf7 70%); }
+.halloween-screamer-overlay[data-variant="demon"] .screamer-face { filter:drop-shadow(0 0 35px #ff2c12); animation:screamer-demon .72s steps(2,end) both; }
+.halloween-screamer-overlay[data-variant="skull"] { background:radial-gradient(circle at 50% 45%,#b9c2cbcc,#07080df7 70%); }
+.halloween-screamer-overlay[data-variant="skull"] .screamer-face { filter:grayscale(1) drop-shadow(0 0 30px #fff); animation:screamer-skull .82s steps(5,end) both; }
+.halloween-screamer-overlay[data-variant="eyes"] { background:radial-gradient(ellipse at 50% 50%,#6e061beb,#090109f7 66%); }
+.halloween-screamer-overlay[data-variant="eyes"] .screamer-face { font-size:clamp(80px,24vw,250px); letter-spacing:.08em; filter:drop-shadow(0 0 35px #ff1200); animation:screamer-eyes .8s ease-out both; }
+.halloween-screamer-overlay[data-variant="spider"] { background:radial-gradient(circle at 50% 40%,#2f113bdf,#05030bf7 72%); }
+.halloween-screamer-overlay[data-variant="spider"] .screamer-face { filter:drop-shadow(0 0 28px #c26aff); animation:screamer-spider .9s cubic-bezier(.2,.7,.1,1) both; }
+.halloween-screamer-overlay[data-variant="mold"] { background:radial-gradient(circle at 50% 48%,#254517e8,#060b05f7 68%); }
+.halloween-screamer-overlay[data-variant="mold"] .screamer-face { filter:drop-shadow(0 0 34px #8cff38); animation:screamer-mold .92s cubic-bezier(.15,.9,.3,1) both; }
+@keyframes screamer-screen-flash { 0%,100%{filter:brightness(1)} 15%{filter:brightness(2.2)} 32%{filter:brightness(.35)} 56%{filter:brightness(1.8)} }
+@keyframes screamer-ring { 0%{transform:scale(.2);opacity:.85} 100%{transform:scale(1.35);opacity:0} }
+@keyframes screamer-caption { 0%,35%{opacity:0;transform:translateY(16px)} 45%,100%{opacity:1;transform:translateY(0)} }
+@keyframes screamer-ghost { 0%{opacity:0;transform:translateY(38vh) scale(.18) rotate(-15deg)} 60%{opacity:1;transform:translateY(-3vh) scale(1.2) rotate(7deg)} 100%{opacity:1;transform:translateY(0) scale(1) rotate(0)} }
+@keyframes screamer-demon { 0%{opacity:0;transform:translateX(-90vw) rotate(-30deg) scale(.25)} 38%{opacity:1;transform:translateX(8vw) rotate(12deg) scale(1.3)} 52%{transform:translateX(-4vw) rotate(-8deg) scale(.92)} 100%{opacity:1;transform:translateX(0) rotate(0) scale(1)} }
+@keyframes screamer-skull { 0%,100%{opacity:1;transform:translate(0,0) scale(1)} 15%{opacity:.08;transform:translate(-16px,4px) scale(1.15)} 33%{opacity:1;transform:translate(12px,-3px) scale(.9)} 55%{opacity:.2;transform:translate(-5px,0) scale(1.22)} 76%{opacity:1;transform:translate(0,0) scale(1)} }
+@keyframes screamer-eyes { 0%{opacity:0;transform:scaleX(.05) scaleY(.4)} 45%{opacity:1;transform:scaleX(1.35) scaleY(1.3)} 68%{transform:scaleX(.86) scaleY(.9)} 100%{opacity:1;transform:scale(1)} }
+@keyframes screamer-spider { 0%{opacity:0;transform:translateY(-75vh) scale(.08) rotate(-25deg)} 56%{opacity:1;transform:translateY(6vh) scale(1.2) rotate(14deg)} 72%{transform:translateY(-3vh) scale(.9) rotate(-8deg)} 100%{opacity:1;transform:translateY(0) scale(1) rotate(0)} }
+@keyframes screamer-mold { 0%{opacity:0;transform:scale(4) rotate(160deg);filter:blur(20px)} 58%{opacity:1;transform:scale(.82) rotate(-20deg);filter:blur(0)} 76%{transform:scale(1.14) rotate(9deg)} 100%{opacity:1;transform:scale(1) rotate(0);filter:blur(0)} }
+
+body.halloween { --bg:#08050d; --bg2:#120b18; --card:#1a101f; --line:#69203c; --accent:#ff394b; --accent2:#8f25d2; background-color:#08050d; background-image:radial-gradient(ellipse at 78% 2%,#73163c50,transparent 34%),radial-gradient(ellipse at 8% 70%,#25103f55,transparent 45%),repeating-linear-gradient(0deg,#08050d00 0 3px,#fb285506 4px 5px); }
+body.halloween .top { background:#09050eef; border-bottom-color:#8a2443; box-shadow:0 4px 30px #c21b3c22; }
+body.halloween .logo-mark { filter:drop-shadow(0 0 12px #ff3e29); }
+body.halloween .main-nav a.active { color:#ff626c; text-shadow:0 0 12px #ed123d; }
+body.halloween .panel { border-color:#5a1b36; background-image:linear-gradient(135deg,#ff263508,transparent 60%); }
+body.halloween .kb-main { border-color:#a32949; box-shadow:0 0 0 1px #ce1a3833,0 16px 55px #050207cc,inset 0 0 45px #a3132510; }
+body.halloween .kb-say { background:#260d1e; color:#ffe5eb; border:1px solid #7e2649; box-shadow:0 0 20px #ba183733; }
+body.halloween .kb-say::after { border-top-color:#260d1e; }
+body.halloween .btn-accent { background:linear-gradient(120deg,#84142f,#f33a50,#9c1c70); border-color:#ff5569; box-shadow:0 0 18px #f5294b44; }
+body.halloween .input { border-color:#6d2846; }
+body.halloween::before { content:"🕸️"; position:fixed; left:-14px; top:var(--header-h); z-index:19; opacity:.17; font-size:86px; pointer-events:none; transform:rotate(-20deg); }
+body.halloween::after { content:"🦇　🦇　🦇"; position:fixed; top:calc(var(--header-h) + 8px); right:6vw; z-index:19; opacity:.45; font-size:18px; pointer-events:none; letter-spacing:8px; }
+body.halloween .panel { box-shadow:0 10px 32px #17091955; }
+body.halloween .site-footer { border-color:#43243f; }
+.halloween-event-card { display:grid; grid-template-columns:minmax(210px,.8fr) minmax(0,1.2fr); gap:24px; align-items:center; background:radial-gradient(ellipse at 20% 45%,#4d1d4945,transparent 65%),linear-gradient(145deg,#160f1e,#211526); border:1px solid #713647; border-radius:22px; padding:24px; overflow:hidden; }
+.haunt-stage { min-height:300px; position:relative; display:grid; place-items:center; isolation:isolate; background:radial-gradient(ellipse,#5a194342,transparent 66%); border-radius:20px; }
+.halloween-boss { width:174px; height:174px; border:2px solid #a7472e; border-radius:46% 54% 48% 52%; background:radial-gradient(circle at 45% 36%,#ffac44,#9b321e 70%); box-shadow:0 0 45px #fc582466,inset 0 0 28px #30151f; cursor:pointer; font-size:83px; position:relative; transition:transform .12s,filter .12s; animation:boss-pulse 2.4s ease-in-out infinite; }
+.halloween-boss:hover { transform:scale(1.05) rotate(-2deg); filter:brightness(1.14); }
+.halloween-boss span { position:absolute; right:14px; bottom:16px; font-size:42px; }
+@keyframes boss-pulse { 50%{box-shadow:0 0 65px #fc582488,inset 0 0 32px #30151f; transform:scale(1.025)} }
+.haunt-web { position:absolute; left:3%; top:0; font-size:56px; opacity:.55; }
+.haunt-bats { position:absolute; top:15px; right:7px; font-size:26px; animation:bat-drift 3s ease-in-out infinite alternate; }
+@keyframes bat-drift { to{transform:translate(-14px,8px) rotate(-7deg)} }
+.haunt-fly { position:absolute; font-size:23px; animation:haunt-fly 2s ease-in-out infinite alternate; }
+.haunt-fly.fly-a { left:12%; top:44%; }
+.haunt-fly.fly-b { right:13%; bottom:27%; animation-delay:.6s; }
+@keyframes haunt-fly { to{transform:translate(13px,-11px) rotate(30deg)} }
+.haunt-caption { position:absolute; bottom:12px; color:#dbb8da; font-size:10px; letter-spacing:.15em; }
+.haunt-info h2 { font-size:clamp(25px,4vw,36px); margin:4px 0 8px; }
+.eyebrow { color:#ff9b59; font-size:11px; font-weight:800; letter-spacing:.16em; margin:0; }
+.raid-hp { margin:18px 0 10px; }
+.raid-hp-label,.raid-meta { display:flex; justify-content:space-between; gap:12px; font-size:13px; margin-bottom:7px; }
+.raid-hp-label span,.raid-meta span { color:var(--muted); }
+.raid-hp-bar { height:15px; border-radius:999px; background:#100b13; border:1px solid #592738; overflow:hidden; }
+.raid-hp-bar i { display:block; height:100%; background:linear-gradient(90deg,#b62f47,#ff7136); border-radius:inherit; transition:width .3s; }
+.raid-meta { margin:10px 0 14px; }
+.raid-tap { width:100%; font-size:17px; }
+.halloween-treat { margin-top:8px; width:100%; }
+.event-admin-status { background:#ffffff08; border-radius:10px; padding:10px; }
+.push-controls { margin:12px 0 18px; flex-wrap:wrap; }
+.push-pref-form { border-top:1px solid var(--line); padding-top:12px; }
+.push-types { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:4px 14px; }
+.push-type { display:flex; align-items:flex-start; gap:9px; padding:8px 0; color:var(--fg); }
+.push-type input { width:18px; height:18px; accent-color:var(--accent); flex:none; margin-top:2px; }
+.push-hours { display:flex; gap:18px; flex-wrap:wrap; margin:10px 0 6px; }
+.push-hours label { display:flex; gap:8px; align-items:center; }
+.push-hours input { max-width:150px; }
+.push-pref-form > div:last-child { margin-top:16px; }
+
+/* Bats cross the visible jar instead of spending most of their animation off-screen. */
+.kb-bat-swarm { position:absolute; inset:52px -10px 18px; z-index:3; overflow:hidden; pointer-events:none; }
+.kb-bat { position:absolute; left:0; top:20%; font-size:26px; filter:drop-shadow(0 0 8px #d22a56); animation:kb-bat-flight 3.5s ease-in-out infinite alternate; }
+.kb-bat.bat-b { top:49%; font-size:19px; animation-duration:3.9s; animation-delay:-1.4s; }
+.kb-bat.bat-c { top:75%; font-size:22px; animation-duration:3.2s; animation-delay:-2.1s; }
+@keyframes kb-bat-flight { 0%{transform:translate(0,12px) rotate(-14deg) scale(.8)} 30%{transform:translate(54px,-17px) rotate(12deg) scale(1.12)} 62%{transform:translate(122px,19px) rotate(-9deg) scale(.9)} 100%{transform:translate(190px,-10px) rotate(17deg) scale(1.1)} }
+.kb-music-btn { position:absolute; top:6px; right:0; z-index:3; border:1px solid #812d4b; border-radius:999px; background:#160a16ed; color:#ffd9e1; padding:5px 9px; font:inherit; font-size:11px; cursor:pointer; box-shadow:0 0 15px #c51d4733; }
+.kb-music-btn[aria-pressed="true"] { color:#ff8792; border-color:#ff435f; animation:music-pulse 1.5s ease-in-out infinite; }
+.kb-scare-btn { position:absolute; right:6px; bottom:6px; z-index:4; width:36px; height:36px; border:1px solid #fa4168; border-radius:10px; background:#220918eF; color:#ffe0e9; font-size:21px; cursor:pointer; box-shadow:0 0 17px #f22a5f77; }
+.kb-scare-btn:hover { background:#801432; transform:scale(1.08); }
+@keyframes music-pulse { 50%{box-shadow:0 0 22px #fb214e99} }
+.haunt-controls { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
+.haunt-controls button { flex:1; min-width:170px; }
+.haunt-controls .scare-test { border-color:#a62546; color:#ff9bab; }
+.haunt-controls .scare-test:hover { background:#7d1431; color:#fff; }
+.haunt-run { transform:translate(var(--haunt-x),var(--haunt-y)) rotate(var(--haunt-r)) !important; transition:transform .16s ease-out !important; }
+.haunt-hide { animation:haunt-hide .95s ease-in-out; }
+@keyframes haunt-hide { 0%,100%{opacity:1;filter:none} 35%{opacity:.02;filter:blur(7px)} 68%{opacity:.12;filter:blur(3px)} }
+.haunt-blink { animation:haunt-blink .32s steps(2,end) 3; }
+@keyframes haunt-blink { 50%{opacity:.08;filter:brightness(2.5)} }
+.haunt-color { animation:haunt-color .9s steps(5,end); }
+@keyframes haunt-color { 0%{filter:hue-rotate(0) brightness(1)} 25%{filter:hue-rotate(90deg) brightness(1.7)} 50%{filter:hue-rotate(190deg) brightness(.65)} 75%{filter:hue-rotate(270deg) brightness(1.8)} 100%{filter:hue-rotate(360deg) brightness(1)} }
+.halloween-event-card { position:relative; border-color:#a51d43; box-shadow:0 0 0 1px #ed245544,0 20px 70px #000c,inset 0 0 60px #8c10301c; }
+.halloween-event-card::before { content:""; position:absolute; inset:0; z-index:0; pointer-events:none; background:repeating-linear-gradient(135deg,transparent 0 26px,#fd274106 27px 28px); }
+.halloween-event-card > * { position:relative; z-index:1; }
+.halloween-boss { border-color:#f03b56; background:radial-gradient(circle at 46% 31%,#ffd369 0 12%,#ef5b28 38%,#79162d 76%); box-shadow:0 0 22px #ff3c58aa,0 0 65px #9a123b66,inset 0 0 35px #280314; text-shadow:0 2px 12px #24000a; }
+.halloween-boss:disabled { cursor:not-allowed; }
+.halloween-boss.kb-screamer { animation:kb-scream .82s steps(2,end) !important; filter:drop-shadow(0 0 18px #ff2500) drop-shadow(0 0 28px #f30); }
+.haunt-caption { color:#ff8294; text-shadow:0 0 9px #ff234e; }
+.raid-hp-bar i { background:linear-gradient(90deg,#5e1025,#e41e4e,#ff723c); box-shadow:0 0 15px #f31b55; }
+.haunt-web { filter:drop-shadow(0 0 10px #c9164c); opacity:.8; }
+body.halloween::before { opacity:.3; filter:drop-shadow(0 0 10px #bb1c50); }
+body.halloween::after { opacity:.72; text-shadow:0 0 14px #ff2952; animation:bat-drift 3.5s ease-in-out infinite alternate; }
+body.halloween .site-footer { border-color:#69203c; }
+
+/* Halloween raid combat team, stage rewards, and visible boss reactions. */
+.halloween-boss { transform-origin:50% 70%; }
+.halloween-boss::before { content:""; position:absolute; inset:-15px; z-index:-1; border:2px solid #ff496455; border-radius:50%; box-shadow:0 0 24px #fa245977; animation:boss-aura 2.2s ease-out infinite; pointer-events:none; }
+.halloween-boss span { animation:boss-mold-float 1.7s ease-in-out infinite alternate; }
+.halloween-boss::after { content:""; position:absolute; inset:9%; z-index:0; border-radius:inherit; pointer-events:none; mix-blend-mode:screen; opacity:0; }
+.halloween-boss.boss-healthy { border-color:#ff684e; }
+.halloween-boss.boss-wounded { border-color:#ffc65d; background:radial-gradient(circle at 42% 28%,#ffe28a 0 9%,#c23b2e 39%,#421523 78%); box-shadow:0 0 24px #ffb12eaa,0 0 60px #ff3f3f66,inset 0 0 40px #220611; }
+.halloween-boss.boss-wounded::after { opacity:.8; background:linear-gradient(128deg,transparent 42%,#350914 43%,#ffe2a2 44%,transparent 45%),linear-gradient(54deg,transparent 62%,#350914 63%,#ffe2a2 64%,transparent 65%),linear-gradient(163deg,transparent 27%,#350914 28%,#ffe2a2 29%,transparent 30%); }
+.halloween-boss.boss-corrupted { border-color:#d946ff; background:radial-gradient(circle at 42% 28%,#d7ff70 0 9%,#792b63 39%,#1b102d 78%); box-shadow:0 0 30px #a52bffaa,0 0 72px #6320bd77,inset 0 0 40px #1b0827; animation:boss-corrupted 1.25s ease-in-out infinite; }
+.halloween-boss.boss-corrupted::after { inset:5%; opacity:.9; border:2px dashed #d8ff7a; box-shadow:inset 0 0 25px #a8ff3f99,0 0 22px #c42cffaa; animation:boss-rot 2.2s linear infinite; }
+.halloween-boss.boss-critical { border-color:#fff2a1; background:radial-gradient(circle at 44% 26%,#fffac4 0 8%,#fa385b 29%,#53144f 73%); box-shadow:0 0 38px #fff095,0 0 90px #ff1677aa,inset 0 0 42px #25051b; animation:boss-critical 0.55s steps(2,end) infinite; }
+.halloween-boss.boss-critical::after { inset:-7%; opacity:.95; border:3px solid #ffeb91; box-shadow:0 0 28px #ff4f88, inset 0 0 24px #fff2a177; animation:boss-critical-aura .65s steps(2,end) infinite; }
+@keyframes boss-corrupted { 0%,100%{filter:hue-rotate(-8deg) saturate(1.15);transform:translateY(0) scale(1)} 50%{filter:hue-rotate(22deg) saturate(1.8) brightness(1.18);transform:translateY(-5px) rotate(2deg) scale(1.045)} }
+@keyframes boss-rot { to{transform:rotate(360deg) scale(1.08)} }
+@keyframes boss-critical { 0%,100%{filter:brightness(1.05);transform:translateY(0) scale(1)} 50%{filter:brightness(1.65) drop-shadow(0 0 22px #fff);transform:translateY(-5px) rotate(-2deg) scale(1.09)} }
+@keyframes boss-critical-aura { 0%,100%{transform:scale(.92);opacity:.45} 50%{transform:scale(1.12);opacity:1} }
+@keyframes boss-pulse { 0%,100%{box-shadow:0 0 24px #ff3c58aa,0 0 65px #9a123b66,inset 0 0 35px #280314;transform:translateY(0) rotate(-1deg) scale(1)} 50%{box-shadow:0 0 42px #ff3c58dd,0 0 78px #9a123baa,inset 0 0 42px #280314;transform:translateY(-7px) rotate(2deg) scale(1.04)} }
+@keyframes boss-aura { 0%{transform:scale(.84);opacity:.78} 100%{transform:scale(1.24);opacity:0} }
+@keyframes boss-mold-float { to{transform:translateY(-8px) rotate(10deg) scale(1.08)} }
+.halloween-boss.boss-hit { animation:boss-hit .48s steps(2,end) !important; }
+@keyframes boss-hit { 0%,100%{transform:translateX(0) rotate(0) scale(1)} 25%{transform:translateX(-12px) rotate(-8deg) scale(1.08);filter:brightness(1.8)} 65%{transform:translateX(11px) rotate(7deg) scale(.94);filter:drop-shadow(0 0 28px #ff103f)} }
+.halloween-boss.boss-defeat { animation:boss-defeat .8s ease-out !important; }
+@keyframes boss-defeat { 0%{transform:scale(1) rotate(0);filter:brightness(1)} 35%{transform:scale(1.35) rotate(-12deg);filter:brightness(2) drop-shadow(0 0 36px #fff)} 100%{transform:scale(.72) rotate(18deg);filter:brightness(.65);opacity:.65} }
+.raid-stage-title { margin:0 0 8px; color:#ffb65c; }
+.halloween-event-card .haunt-stage { overflow:hidden; }
+.halloween-event-card .halloween-boss { width:132px; height:132px; z-index:3; font-size:68px; }
+.halloween-event-card .halloween-boss span { right:10px; bottom:11px; font-size:34px; }
+.haunt-web { transform-origin:top left; animation:raid-web-sway 3.2s ease-in-out infinite alternate; }
+.haunt-bats { z-index:1; animation:raid-bat-flight 2.7s ease-in-out infinite alternate; }
+.haunt-fly { z-index:2; }
+@keyframes raid-web-sway { to{transform:rotate(8deg) scale(1.08);opacity:.48} }
+@keyframes raid-bat-flight { 0%{transform:translate(22px,5px) rotate(-8deg)} 50%{transform:translate(-28px,27px) rotate(12deg) scale(1.18)} 100%{transform:translate(-72px,4px) rotate(-15deg) scale(.9)} }
+.raid-fighter-line { position:absolute; z-index:4; left:50%; bottom:36px; display:flex; align-items:center; justify-content:center; gap:8px; transform:translateX(-50%); pointer-events:none; }
+.raid-fighter { display:block; width:48px; height:52px; filter:drop-shadow(0 0 8px #69ffbe); animation:raid-fighter-hover 1.25s ease-in-out infinite alternate; }
+.raid-fighter .kb-svg { display:block; width:100%; height:100%; }
+.raid-fighter-2 { animation-delay:-.35s; }
+.raid-fighter-3 { animation-delay:-.7s; }
+@keyframes raid-fighter-hover { to{transform:translateY(-7px) rotate(8deg) scale(1.12);filter:drop-shadow(0 0 14px #9bffb8)} }
+.raid-projectiles { position:absolute; inset:0; z-index:5; pointer-events:none; }
+.raid-projectile { position:absolute; display:block; opacity:0; font-size:29px; filter:drop-shadow(0 0 12px #fff275); }
+.raid-projectile-one { left:calc(50% - 45px); bottom:58px; }
+.raid-projectile-two { left:calc(50% - 12px); bottom:50px; }
+.raid-projectile-three { left:calc(50% + 18px); bottom:58px; }
+.raid-clash { animation:raid-arena-shake .48s steps(2,end); }
+.raid-hits-1 .raid-projectile-one { animation:raid-projectile-one .66s cubic-bezier(.2,.7,.3,1) both; }
+.raid-hits-2 .raid-projectile-one { animation:raid-projectile-one .66s cubic-bezier(.2,.7,.3,1) both; }
+.raid-hits-2 .raid-projectile-two { animation:raid-projectile-two .68s .06s cubic-bezier(.2,.7,.3,1) both; }
+.raid-hits-3 .raid-projectile-one { animation:raid-projectile-one .66s cubic-bezier(.2,.7,.3,1) both; }
+.raid-hits-3 .raid-projectile-two { animation:raid-projectile-two .68s .06s cubic-bezier(.2,.7,.3,1) both; }
+.raid-hits-3 .raid-projectile-three { animation:raid-projectile-three .7s .12s cubic-bezier(.2,.7,.3,1) both; }
+@keyframes raid-arena-shake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-5px)} 45%{transform:translateX(4px)} 70%{transform:translateX(-3px)} }
+@keyframes raid-projectile-one { 0%{opacity:0;transform:translate(0,55px) rotate(-80deg) scale(.2)} 25%{opacity:1;transform:translate(10px,5px) rotate(80deg) scale(1.1)} 100%{opacity:0;transform:translate(55px,-128px) rotate(420deg) scale(1.3)} }
+@keyframes raid-projectile-two { 0%{opacity:0;transform:translate(0,48px) rotate(0) scale(.2)} 28%{opacity:1;transform:translate(-4px,5px) rotate(130deg) scale(1.2)} 100%{opacity:0;transform:translate(-9px,-132px) rotate(510deg) scale(.9)} }
+@keyframes raid-projectile-three { 0%{opacity:0;transform:translate(0,55px) rotate(90deg) scale(.15)} 30%{opacity:1;transform:translate(-8px,0) rotate(-80deg) scale(1.15)} 100%{opacity:0;transform:translate(-55px,-128px) rotate(-400deg) scale(1.4)} }
+.raid-clash .raid-fighter { animation:raid-fighter-strike .62s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes raid-fighter-strike { 0%{transform:translateY(0) scale(1)} 38%{transform:translateY(-24px) scale(1.3) rotate(-12deg);filter:drop-shadow(0 0 18px #fff275)} 72%{transform:translateY(-4px) scale(.92) rotate(9deg)} 100%{transform:translateY(0) scale(1)} }
+.raid-impact { position:absolute; z-index:6; top:40%; left:50%; opacity:0; font-size:44px; transform:translate(-50%,-50%) scale(.2); pointer-events:none; }
+.raid-clash .raid-impact { animation:raid-impact-pop .58s .31s cubic-bezier(.1,.8,.2,1) both; }
+@keyframes raid-impact-pop { 0%{opacity:0;transform:translate(-50%,-50%) scale(.15) rotate(-30deg)} 35%{opacity:1;transform:translate(-50%,-50%) scale(1.4) rotate(12deg)} 70%{opacity:1;transform:translate(-50%,-50%) scale(.92) rotate(-8deg)} 100%{opacity:0;transform:translate(-50%,-50%) scale(1.6) rotate(20deg)} }
+.raid-damage-pop { position:absolute; z-index:7; top:26%; left:50%; opacity:0; color:#fff07a; font-size:30px; font-weight:1000; text-shadow:0 0 10px #ff7d21,0 0 22px #ff1c48; transform:translate(-50%,10px) scale(.45); pointer-events:none; }
+.raid-clash .raid-damage-pop { animation:raid-damage-rise .8s .2s ease-out both; }
+@keyframes raid-damage-rise { 0%{opacity:0;transform:translate(-50%,16px) scale(.4)} 22%{opacity:1;transform:translate(-50%,-5px) scale(1.35)} 100%{opacity:0;transform:translate(-50%,-58px) scale(1)} }
+.raid-phase-break::after { content:"✦"; position:absolute; z-index:5; left:50%; top:50%; color:#fff4ab; font-size:100px; line-height:1; text-shadow:0 0 25px #ff5b2e,0 0 55px #ff174c; pointer-events:none; animation:raid-phase-burst .82s ease-out both; }
+@keyframes raid-phase-burst { 0%{opacity:0;transform:translate(-50%,-50%) scale(.05) rotate(-90deg)} 35%{opacity:1;transform:translate(-50%,-50%) scale(1.6) rotate(25deg)} 100%{opacity:0;transform:translate(-50%,-50%) scale(2.7) rotate(100deg)} }
+.raid-hp-hit { animation:raid-hp-hit .5s ease-out; }
+@keyframes raid-hp-hit { 25%{transform:translateX(-5px);filter:brightness(1.8)} 55%{transform:translateX(5px);filter:brightness(1.3)} }
+.raid-meta { flex-wrap:wrap; }
+.raid-leaderboard,.raid-results { margin:16px 0; padding:14px; border:1px solid #77314a; border-radius:14px; background:linear-gradient(145deg,#200c1d,#100811ee); }
+.raid-leaderboard h3 { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0 0 10px; font-size:16px; }
+.raid-leaderboard h3 small { color:var(--muted); font-size:11px; font-weight:500; white-space:nowrap; }
+.raid-leaderboard ol { display:grid; gap:5px; margin:0; padding:0; list-style:none; counter-reset:raid-rank; }
+.raid-leaderboard li { display:grid; grid-template-columns:28px minmax(0,1fr) auto; align-items:center; gap:8px; min-width:0; padding:7px 8px; border-radius:9px; background:#ffffff07; font-size:13px; }
+.raid-leaderboard li.is-me { border:1px solid #d93868; background:linear-gradient(90deg,#86213e44,#ffffff08); box-shadow:inset 3px 0 #ff5376; }
+.raid-rank-number { color:#ffbd61; font-size:12px; font-weight:900; text-align:center; }
+.raid-leaderboard li b { min-width:0; overflow-wrap:anywhere; }
+.raid-rank-damage { color:#ffc4ce; font-size:12px; white-space:nowrap; }
+.raid-my-rank { margin:9px 0 0; color:var(--muted); font-size:12px; }
+.raid-archive { margin:18px 0; padding:16px; border:1px solid #75405b; border-radius:16px; background:radial-gradient(ellipse at 100% 0%,#77305633,transparent 42%),#110c17; }
+.raid-archive-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
+.raid-archive-heading h3 { margin:0; font-size:19px; }
+.raid-archive-heading small { color:var(--muted); }
+.raid-record-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(155px,1fr)); gap:8px; margin:10px 0 14px; }
+.raid-record { display:flex; flex-direction:column; gap:4px; min-width:0; padding:10px; border:1px solid #62405f; border-radius:10px; background:#ffffff07; }
+.raid-record > small { color:var(--muted); font-size:11px; }
+.raid-record > b { color:#ffcf75; font-size:20px; }
+.raid-record > span { color:#ffd7e0; font-size:12px; }
+.raid-record > span small { color:var(--muted); }
+.raid-archive-entry { margin:8px 0; border:1px solid #422d48; border-radius:12px; background:#08070daa; overflow:hidden; }
+.raid-archive-entry > summary { display:grid; grid-template-columns:minmax(150px,1fr) minmax(160px,auto); gap:5px 12px; padding:12px; cursor:pointer; list-style:none; }
+.raid-archive-entry > summary::-webkit-details-marker { display:none; }
+.raid-archive-entry > summary:hover { background:#ffffff08; }
+.raid-archive-boss { color:#ffe3a4; font-weight:850; }
+.raid-archive-meta { color:var(--muted); font-size:12px; text-align:right; }
+.raid-archive-podium { display:flex; flex-wrap:wrap; gap:7px 14px; grid-column:1/-1; color:#ffd577; font-size:12px; }
+.raid-archive-body { padding:0 12px 12px; }
+.raid-archive-body .raid-leaderboard { margin:10px 0 0; }
+.raid-archive-rewards { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; font-size:12px; }
+.raid-archive-rewards b { width:100%; }
+.raid-archive-rewards span { padding:4px 8px; border:1px solid #734056; border-radius:999px; color:#ffe3a4; }
+.raid-results { border-color:#b4325b; background:radial-gradient(ellipse at 85% 0%,#7b1a3f55,transparent 45%),linear-gradient(145deg,#1e1024,#0e0a13); }
+.raid-results > h2 { margin:3px 0; color:#ffe3a4; font-size:clamp(21px,3vw,29px); }
+.raid-results > .muted { margin:4px 0 12px; font-size:12px; }
+.raid-result-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(100px,1fr)); gap:8px; margin:14px 0; }
+.raid-result-stats > div { display:flex; flex-direction:column; min-width:0; gap:4px; padding:10px; border:1px solid #9a3855; border-radius:10px; background:#0b071088; }
+.raid-result-stats b { color:#ffcf75; font-size:20px; overflow-wrap:anywhere; }
+.raid-result-stats small { color:var(--muted); font-size:11px; }
+.raid-result-outcome { margin:10px 0; color:#ffe3a4; font-weight:750; }
+.raid-party,.raid-rewards { margin:16px 0; padding:14px; border:1px solid #77314a; border-radius:14px; background:#10081199; }
+.raid-party h3,.raid-rewards h3 { margin:0 0 10px; font-size:16px; }
+.raid-team-slots { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; }
+.raid-team-slots label { min-width:0; font-size:12px; color:var(--muted); }
+.raid-team-select { width:100%; margin-top:5px; color:var(--fg); }
+.raid-team-status { margin:9px 0 0; font-size:12px; }
+.raid-rewards ul { margin:0; padding-left:20px; }
+.raid-rewards li { margin:8px 0; }
+.raid-rewards li small { display:block; margin-top:3px; color:var(--muted); }
+.raid-gift-box li { display:flex; gap:9px; align-items:flex-start; list-style:none; margin-left:-20px; }
+.raid-gift-box li > span { font-size:22px; }
+.raid-admin-rows { display:grid; gap:10px; margin:10px 0; }
+.raid-admin-row { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding:12px; border:1px solid var(--line); border-radius:12px; background:#ffffff05; }
+.raid-admin-row-head { grid-column:1/-1; display:flex; align-items:center; justify-content:space-between; }
+.raid-admin-row label { min-width:0; }
+.raid-admin-row label:last-child { grid-column:1/-1; }
+#halloween-admin-form hr { width:100%; border:0; border-top:1px solid var(--line); margin:8px 0; }
+
+@media (max-width:700px) {
+  .halloween-event-card { grid-template-columns:1fr; gap:8px; padding:15px; }
+  .haunt-stage { min-height:320px; }
+  .halloween-event-card .halloween-boss { width:116px; height:116px; font-size:60px; }
+  .halloween-event-card .halloween-boss span { right:8px; bottom:9px; font-size:29px; }
+  .raid-fighter-line { bottom:35px; gap:4px; }
+  .raid-fighter { width:60px; height:66px; }
+  .raid-team-slots { grid-template-columns:1fr; }
+  .raid-archive-entry > summary { grid-template-columns:1fr; }
+  .raid-archive-meta { text-align:left; }
+  .raid-admin-row { grid-template-columns:1fr; }
+  .raid-admin-row label:last-child { grid-column:auto; }
+  body.halloween::before { font-size:60px; }
+  body.halloween::after { right:4px; font-size:14px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  *,*::before,*::after { scroll-behavior:auto !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
+  .kb-scene > .kb-svg { transform:none !important; }
+  .kb-bat { left:0 !important; animation:kb-bat-flight-reduced 8s ease-in-out infinite alternate !important; }
+  .kb-bat.bat-b { animation-duration:9s !important; }
+  .kb-bat.bat-c { animation-duration:8.5s !important; }
+  @keyframes kb-bat-flight-reduced { 0%{transform:translate(0,2px)} 100%{transform:translate(62px,-4px)} }
+}

@@ -73,8 +73,8 @@ async def login():
         if antispam.hit_rate("login_fail", antispam.client_key(), 5, 900):
             antispam.mark_suspicious(antispam.client_key(), "login_bruteforce")
         raise ApiError("Неверный логин или пароль", 401, "invalid_credentials")
-    # Забаненный может войти — чтобы увидеть причину и подать апелляцию.
-    # Любые действия всё равно режет @require_perm.
+    # Забаненный может войти — только чтобы увидеть причину и подать апелляцию.
+    # Остальные защищённые API режут @login_required / @require_perm.
     ban = await active_global_ban(user.id)
     login_user(user.id)
     return {"user": user_public(user), "banned": ban is not None}
@@ -119,7 +119,7 @@ async def logout():
 
 
 @bp.get("/auth/me")
-@login_required
+@login_required(allow_banned=True)
 async def me():
     from ..auth.rbac import get_user_perms
     from ..services.notifications import unread_count

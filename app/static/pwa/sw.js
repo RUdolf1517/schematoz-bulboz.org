@@ -14,6 +14,39 @@ self.addEventListener("activate", (e) => {
     .then(() => self.clients.claim()));
 });
 
+self.addEventListener("push", (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (_) { data = { body: event.data?.text() || "Я скучал в банке." }; }
+  const title = data.title || "Гриб скучает 🍄";
+  const options = {
+    body: data.body || "Я не обижаюсь. Я просто закисаю.",
+    icon: "/static/pwa/icon-192.png",
+    badge: "/static/pwa/icon-192.png",
+    tag: data.tag || "bulboz-reminder",
+    data: { url: typeof data.url === "string" && data.url.startsWith("/") && !data.url.startsWith("//") ? data.url : "/" },
+    vibrate: [80, 40, 80],
+    renotify: false,
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const requested = event.notification.data?.url || "/";
+  const parsed = new URL(requested, self.location.origin);
+  const target = parsed.origin === self.location.origin ? parsed.href : new URL("/", self.location.origin).href;
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of windows) {
+      if (client.url.startsWith(self.location.origin) && "focus" in client) {
+        await client.navigate(target);
+        return client.focus();
+      }
+    }
+    return self.clients.openWindow(target);
+  })());
+});
+
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   const url = new URL(req.url);

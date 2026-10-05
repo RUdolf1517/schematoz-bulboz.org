@@ -62,6 +62,238 @@ async function api(method, url, body, { quiet = false } = {}) {
 
 // ---------------------------------------------------------------- header / session
 let ME = null;
+let HALLOWEEN_ACTIVE = false;
+const isHalloweenAdmin = () => !!ME?.permissions?.includes("role.assign");
+const REDUCED_MOTION = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches || false;
+
+async function applyEventTheme() {
+  let d;
+  try { d = await api("GET", "/api/events/state", undefined, { quiet: true }); } catch (_) { d = { active: false }; }
+  HALLOWEEN_ACTIVE = !!d.active;
+  document.body.classList.toggle("halloween", HALLOWEEN_ACTIVE);
+  document.body.dataset.halloween = HALLOWEEN_ACTIVE ? "1" : "0";
+  startHauntedButtons();
+  if (HALLOWEEN_ACTIVE) startSpookyMusic();
+  else stopSpookyMusic();
+  const mark = $(".logo-mark");
+  if (mark) mark.textContent = HALLOWEEN_ACTIVE ? "🎃" : "🍄";
+  const nav = $("#events-nav");
+  if (nav) nav.hidden = false;
+  const theme = $("meta[name=theme-color]");
+  if (theme) theme.content = HALLOWEEN_ACTIVE ? "#100b12" : "#0e0e12";
+  return d;
+}
+
+const HALLOWEEN_SCREAMER_CHANCE = 0.35;
+const HALLOWEEN_SCREAMER_COOLDOWN_MS = 15000;
+const HALLOWEEN_SCREAMERS = [
+  { id: "ghost", face: "👻", caption: "Я УЖЕ ЗДЕСЬ", sound: { type: "sawtooth", from: 280, to: 72, duration: 0.28, gain: 0.07, filter: 900 } },
+  { id: "demon", face: "👹", caption: "НЕ ОБОРАЧИВАЙСЯ", sound: { type: "square", from: 110, to: 42, duration: 0.44, gain: 0.055, filter: 380 } },
+  { id: "skull", face: "💀", caption: "ТЫ СЛЕДУЮЩИЙ", sound: { type: "sawtooth", from: 690, to: 86, duration: 0.32, gain: 0.065, filter: 1500 } },
+  { id: "eyes", face: "👁️　👁️", caption: "МЫ СМОТРИМ", sound: { type: "triangle", from: 145, to: 390, duration: 0.38, gain: 0.06, filter: 760 } },
+  { id: "spider", face: "🕷️", caption: "ПАУТИНА УЖЕ РЯДОМ", sound: { type: "square", from: 980, to: 180, duration: 0.24, gain: 0.045, filter: 2200 } },
+  { id: "mold", face: "🦠", caption: "ПЛЕСЕНЬ ПРОСНУЛАСЬ", sound: { type: "sawtooth", from: 210, to: 48, duration: 0.5, gain: 0.05, filter: 520 } },
+];
+let halloweenScreamerTimer = null, halloweenScreamerScene = null, lastScreamerVariant = "";
+
+function halloweenScreamerOverlay() {
+  let overlay = $("#halloween-screamer-overlay");
+  if (overlay) return overlay;
+  overlay = document.createElement("div");
+  overlay.id = "halloween-screamer-overlay";
+  overlay.className = "halloween-screamer-overlay";
+  overlay.setAttribute("aria-hidden", "true");
+  const face = document.createElement("span");
+  face.className = "screamer-face";
+  const caption = document.createElement("strong");
+  caption.className = "screamer-caption";
+  overlay.append(face, caption);
+  document.body.append(overlay);
+  return overlay;
+}
+
+function playHalloweenScreamerSound(profile) {
+  try {
+    const Audio = window.AudioContext || window.webkitAudioContext;
+    if (!Audio) return;
+    const ctx = new Audio();
+    const osc = ctx.createOscillator(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
+    const duration = profile.duration;
+    filter.type = profile.type === "triangle" ? "bandpass" : "lowpass";
+    filter.frequency.value = profile.filter;
+    osc.type = profile.type;
+    osc.frequency.setValueAtTime(profile.from, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(profile.to, ctx.currentTime + duration * 0.72);
+    gain.gain.setValueAtTime(profile.gain, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    osc.connect(filter).connect(gain).connect(ctx.destination);
+    ctx.resume().catch(() => {});
+    osc.start();
+    osc.stop(ctx.currentTime + duration + 0.02);
+    osc.onended = () => ctx.close().catch(() => {});
+  } catch (_) {}
+}
+
+function maybeHalloweenScreamer(force = false, ignoreCooldown = false) {
+  if ((!HALLOWEEN_ACTIVE && !force) || REDUCED_MOTION) return false;
+  const now = Date.now(), last = Number(localStorage.getItem("halloween-scream-at") || 0);
+  if (!ignoreCooldown && now - last < HALLOWEEN_SCREAMER_COOLDOWN_MS) {
+    if (force) toast("Скример уже был. Дай нервам передышку ещё немного 👻");
+    return false;
+  }
+  if (!force && Math.random() >= HALLOWEEN_SCREAMER_CHANCE) return false;
+  localStorage.setItem("halloween-scream-at", String(now));
+  const choices = HALLOWEEN_SCREAMERS.filter((variant) => variant.id !== lastScreamerVariant);
+  const variant = choices[Math.floor(Math.random() * choices.length)] || HALLOWEEN_SCREAMERS[0];
+  lastScreamerVariant = variant.id;
+  const scene = $(".kb-scene .kb-svg") || $(".halloween-boss") || $(".profile-skin .kb-svg") || $(".kb-svg");
+  const overlay = halloweenScreamerOverlay();
+  clearTimeout(halloweenScreamerTimer);
+  halloweenScreamerScene?.classList.remove("kb-screamer");
+  document.body.classList.remove("halloween-scream-flash");
+  overlay.classList.remove("active");
+  void overlay.offsetWidth;
+  overlay.dataset.variant = variant.id;
+  $(".screamer-face", overlay).textContent = variant.face;
+  $(".screamer-caption", overlay).textContent = variant.caption;
+  scene?.classList.remove("kb-screamer");
+  void document.body.offsetWidth;
+  scene?.classList.add("kb-screamer");
+  halloweenScreamerScene = scene;
+  overlay.classList.add("active");
+  document.body.classList.add("halloween-scream-flash");
+  playHalloweenScreamerSound(variant.sound);
+  halloweenScreamerTimer = setTimeout(() => {
+    overlay.classList.remove("active");
+    document.body.classList.remove("halloween-scream-flash");
+    halloweenScreamerScene?.classList.remove("kb-screamer");
+    halloweenScreamerScene = null;
+  }, 1050);
+  return true;
+}
+
+let spookyMusic = null;
+let spookyMusicEnabled = localStorage.getItem("halloween-music-enabled") !== "0";
+function refreshSpookyMusicButtons() {
+  $$('[data-spooky-music]').forEach((button) => {
+    button.textContent = spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку";
+    button.setAttribute("aria-pressed", spookyMusicEnabled ? "true" : "false");
+  });
+}
+function stopSpookyMusic() {
+  if (!spookyMusic) return;
+  const sound = spookyMusic; spookyMusic = null;
+  clearInterval(sound.bellTimer);
+  if (sound.resumeHandler) {
+    document.removeEventListener("pointerdown", sound.resumeHandler);
+    document.removeEventListener("keydown", sound.resumeHandler);
+  }
+  try { sound.master.gain.setTargetAtTime(0.0001, sound.ctx.currentTime, 0.18); } catch (_) {}
+  setTimeout(() => sound.ctx.close().catch(() => {}), 700);
+  refreshSpookyMusicButtons();
+}
+function startSpookyMusic() {
+  if (!HALLOWEEN_ACTIVE || !spookyMusicEnabled || spookyMusic) return;
+  const Audio = window.AudioContext || window.webkitAudioContext;
+  if (!Audio) return;
+  let ctx = null;
+  try {
+    ctx = new Audio();
+    const master = ctx.createGain(), filter = ctx.createBiquadFilter();
+    filter.type = "lowpass"; filter.frequency.value = 380; filter.Q.value = 1.3;
+    master.gain.value = 0.055; filter.connect(master).connect(ctx.destination);
+    [[55, "sine", 0.38], [82.41, "triangle", 0.16], [110, "sine", 0.08], [41.2, "sine", 0.12]].forEach(([hz, type, vol]) => {
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = type; osc.frequency.value = hz; gain.gain.value = vol;
+      osc.connect(gain).connect(filter); osc.start();
+    });
+    const lfo = ctx.createOscillator(), lfoGain = ctx.createGain();
+    lfo.frequency.value = 0.075; lfoGain.gain.value = 115; lfo.connect(lfoGain).connect(filter.frequency); lfo.start();
+    const state = { ctx, master, filter, bellTimer: null, resumeHandler: null };
+    const resume = () => {
+      if (spookyMusic !== state || ctx.state === "closed") return;
+      ctx.resume().then(() => {
+        if (ctx.state === "running") {
+          document.removeEventListener("pointerdown", resume);
+          document.removeEventListener("keydown", resume);
+          state.resumeHandler = null;
+        }
+      }).catch(() => {});
+    };
+    state.resumeHandler = resume;
+    spookyMusic = state;
+    const bell = () => {
+      if (spookyMusic !== state || ctx.state !== "running") return;
+      const osc = ctx.createOscillator(), gain = ctx.createGain(), t = ctx.currentTime;
+      osc.type = "sine"; osc.frequency.value = [164.81, 196, 246.94, 293.66][Math.floor(Math.random() * 4)];
+      gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.11, t + 0.06);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 2.6); osc.connect(gain).connect(filter);
+      osc.start(t); osc.stop(t + 2.7);
+    };
+    state.bellTimer = setInterval(bell, 6500 + Math.random() * 5000);
+    document.addEventListener("pointerdown", resume, { passive: true });
+    document.addEventListener("keydown", resume);
+    resume();
+    refreshSpookyMusicButtons();
+  } catch (_) {
+    ctx?.close().catch(() => {});
+    spookyMusic = null;
+    refreshSpookyMusicButtons();
+  }
+}
+function toggleSpookyMusic() {
+  if (!HALLOWEEN_ACTIVE) return;
+  spookyMusicEnabled = !spookyMusicEnabled;
+  localStorage.setItem("halloween-music-enabled", spookyMusicEnabled ? "1" : "0");
+  if (spookyMusicEnabled) startSpookyMusic();
+  else stopSpookyMusic();
+  refreshSpookyMusicButtons();
+}
+
+let hauntedButtonTimer = null, hauntedPointerBound = false;
+function hauntButton(button) {
+  if (!HALLOWEEN_ACTIVE || REDUCED_MOTION || !button?.isConnected) return;
+  const effects = ["haunt-run", "haunt-hide", "haunt-blink", "haunt-color"];
+  effects.forEach((name) => button.classList.remove(name));
+  const effect = effects[Math.floor(Math.random() * effects.length)];
+  button.style.setProperty("--haunt-x", `${Math.round(Math.random() * 76 - 38)}px`);
+  button.style.setProperty("--haunt-y", `${Math.round(Math.random() * 42 - 21)}px`);
+  button.style.setProperty("--haunt-r", `${Math.round(Math.random() * 18 - 9)}deg`);
+  void button.offsetWidth;
+  button.classList.add(effect);
+  setTimeout(() => {
+    button.classList.remove(effect);
+    button.style.removeProperty("--haunt-x"); button.style.removeProperty("--haunt-y"); button.style.removeProperty("--haunt-r");
+  }, 1100);
+}
+function startHauntedButtons() {
+  clearInterval(hauntedButtonTimer); hauntedButtonTimer = null;
+  if (!HALLOWEEN_ACTIVE || REDUCED_MOTION) return;
+  if (!hauntedPointerBound) {
+    document.addEventListener("pointerover", (event) => {
+      const button = event.target.closest(".kb-actions button, .kb-talk, .kb-daily, .halloween-event-card button");
+      if (button && Math.random() < 0.22) hauntButton(button);
+    }, { passive: true });
+    hauntedPointerBound = true;
+  }
+  hauntedButtonTimer = setInterval(() => {
+    const buttons = $$(".kb-actions button:not(:disabled), .kb-talk:not(:disabled), .kb-daily:not(:disabled), .halloween-event-card button:not(:disabled)");
+    if (buttons.length) hauntButton(buttons[Math.floor(Math.random() * buttons.length)]);
+  }, 2800);
+}
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest("[data-spooky-music]")) toggleSpookyMusic();
+  if (event.target.closest("[data-screamer-test]") && isHalloweenAdmin()) {
+    if (REDUCED_MOTION) toast("Скример отключён системной настройкой reduced motion");
+    else maybeHalloweenScreamer(true, true);
+  }
+});
+document.addEventListener("pointerdown", (e) => {
+  if (e.target.closest("[data-screamer-test]")) return;
+  if (e.target.closest("button, a, [role=button]")) maybeHalloweenScreamer();
+}, { passive: true });
+
 // «Деревянные» ($₽) в шапке
 function setWood(n) {
   const chip = $("#wood-chip");
@@ -240,8 +472,8 @@ async function pageSettings() {
   const field = (label, control, hint = "") => `<div class="st-field"><span class="st-label">${label}</span>${control}${hint ? `<small class="st-hint">${hint}</small>` : ""}</div>`;
   const text = (name, val, max, ph = "") => `<input class="input" name="${name}" maxlength="${max}" placeholder="${esc(ph)}" value="${esc(val)}">`;
   const lvl = d.user.level, unlimited = d.user.role !== "user";
-  const SECTIONS_UI = [["basic", "👤", "Основное"], ["media", "🖼", "Аватар"], ["look", "🎨", "Оформление"], ["links", "🏷", "Интересы"], ["show", "🏆", "Витрина"], ["privacy", "🙈", "Приватность"], ["password", "🔐", "Пароль"]];
-  $("#st-nav").innerHTML = SECTIONS_UI.map(([id, e, t]) => `<a href="#st-${id}">${e} ${t}</a>`).join("");
+  const SECTIONS_UI = [["basic", "👤", "Основное"], ["media", "🖼", "Аватар"], ["look", "🎨", "Оформление"], ["links", "🏷", "Интересы"], ["show", "🏆", "Витрина"], ["privacy", "🙈", "Приватность"], ["push", "🔔", "Уведомления"], ["password", "🔐", "Пароль"]];
+  $("#st-nav").innerHTML = SECTIONS_UI.map(([id, e, t]) => `<a href="#${id === "push" ? "push-settings" : "st-" + id}">${e} ${t}</a>`).join("");
   form.innerHTML = `
     <section class="st-card" id="st-basic"><h2>👤 Основное</h2>
       <div class="st-grid">
@@ -373,6 +605,78 @@ async function pageSettings() {
   preview();
   passwordForm($("#pwd-form"), d.user.username);
   loginKeysPanel($("#login-keys"));
+  pushSettingsPanel($("#push-settings"));
+}
+
+function base64UrlBytes(value) {
+  const pad = "=".repeat((4 - value.length % 4) % 4);
+  const raw = atob((value + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+async function pushSettingsPanel(root) {
+  if (!root) return;
+  let d;
+  try { d = await api("GET", "/api/push/settings"); }
+  catch (_) { root.innerHTML = `<p class="muted">Не удалось загрузить настройки push.</p>`; return; }
+  const status = () => {
+    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return "Этот браузер не поддерживает PWA push. Уведомления на сайте останутся включены.";
+    if (!d.configured) return "На сервере ещё не настроены VAPID-ключи. Администратору нужно добавить VAPID_PUBLIC_KEY и VAPID_PRIVATE_KEY.";
+    if (Notification.permission === "denied") return "Разрешение запрещено в настройках браузера. Сначала разреши уведомления для сайта.";
+    return d.subscribed ? "Устройство подключено к push." : "Устройство ещё не подключено.";
+  };
+  const render = () => {
+    root.innerHTML = `<h2>🔔 Push-уведомления</h2>
+      <p class="muted">${esc(status())} Сайт продолжит показывать уведомления без push. В тихие часы push откладываются, лимит — не больше ${d.daily_cap} в сутки.</p>
+      <div class="row push-controls"><button class="btn ${d.enabled ? "btn-ghost" : "btn-accent"}" id="push-toggle" ${!d.configured ? "disabled" : ""}>${d.enabled ? "⏸ Выключить push" : d.subscribed ? "▶ Включить push" : "🔔 Подключить это устройство"}</button>
+        ${d.subscribed ? `<button class="btn btn-ghost" id="push-unsubscribe">Удалить устройство</button>` : ""}</div>
+      <form id="push-pref-form" class="push-pref-form">
+        <h3>Что присылать</h3><div class="push-types">${Object.entries(d.types).map(([key, label]) => `<label class="push-type"><input type="checkbox" name="type" value="${esc(key)}" ${d.categories[key] ? "checked" : ""}> <span>${esc(label)}</span></label>`).join("")}</div>
+        <h3>Тихие часы</h3><div class="push-hours"><label>С <input class="input" type="time" name="quiet_start" value="${esc(d.quiet_start)}"></label><label>До <input class="input" type="time" name="quiet_end" value="${esc(d.quiet_end)}"></label></div>
+        <small class="muted">По умолчанию 23:00–09:00 по Москве; при сохранении используется часовой пояс браузера. Если одинаковые границы — тихие часы отключены.</small>
+        <div><button class="btn btn-accent" type="submit">Сохранить настройки</button></div>
+      </form>`;
+    const f = $("#push-pref-form", root);
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(f), categories = {};
+      Object.keys(d.types).forEach((key) => { categories[key] = fd.getAll("type").includes(key); });
+      try {
+        d = await api("PUT", "/api/push/settings", {
+          categories, quiet_start: fd.get("quiet_start"), quiet_end: fd.get("quiet_end"),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || d.timezone,
+        });
+        render(); toast("Настройки push сохранены");
+      } catch (_) {}
+    };
+    $("#push-toggle", root).onclick = async () => {
+      if (d.enabled) {
+        try { d = await api("PUT", "/api/push/settings", { enabled: false }); render(); toast("Push временно выключены"); } catch (_) {}
+        return;
+      }
+      try {
+        if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) throw new Error("Браузер не поддерживает Web Push");
+        const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+        if (permission !== "granted") throw new Error("Разреши уведомления в браузере");
+        if (!d.configured) throw new Error("Сервер не настроил Web Push (VAPID)");
+        const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+        let subscription = await registration.pushManager.getSubscription();
+        if (!subscription) subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlBytes(d.vapid_public_key) });
+        await api("POST", "/api/push/subscriptions", subscription.toJSON());
+        d = await api("GET", "/api/push/settings"); render(); toast("Устройство подключено 🔔");
+      } catch (err) { toast(err.message || "Не удалось подключить push", true); }
+    };
+    $("#push-unsubscribe", root)?.addEventListener("click", async () => {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        await api("DELETE", "/api/push/subscriptions", { endpoint: subscription?.endpoint });
+        await subscription?.unsubscribe();
+        d = await api("GET", "/api/push/settings"); render(); toast("Устройство отключено");
+      } catch (_) {}
+    });
+  };
+  render();
 }
 
 function passwordForm(f, username) {
@@ -483,22 +787,51 @@ async function loginKeysPanel(root) {
 // ---------------------------------------------------------------- banned / appeal
 async function pageBanned() {
   const root = $("#banned");
-  if (!ME) { root.innerHTML = `<p>Войди в аккаунт, чтобы посмотреть статус.</p><a class="btn btn-accent" href="/login">Войти</a>`; return; }
-  const { ban } = await api("GET", "/api/me/ban");
-  if (!ban) { root.innerHTML = `<h1>Всё чисто ✅</h1><p>Активных блокировок нет.</p><a class="btn" href="/">В ленту</a>`; return; }
-  const STATUS = { none: "", pending: "⏳ Апелляция на рассмотрении — её разбирает администратор.", accepted: "✅ Апелляция принята.", rejected: "❌ Апелляция отклонена." };
-  root.innerHTML = `<h1>Аккаунт заблокирован</h1>
-    <p><b>Причина:</b> ${esc(ban.reason)}</p>
-    <p><b>Срок:</b> ${ban.ends_at ? "до " + esc(fmtDate(ban.ends_at)) : "навсегда"}</p>
-    <p class="muted">Подробнее — в <a href="/rules">правилах сообщества</a>.</p>
-    ${ban.appeal_status !== "none" ? `<p>${STATUS[ban.appeal_status]}</p>${ban.appeal_comment ? `<p class="muted">Комментарий администратора: ${esc(ban.appeal_comment)}</p>` : ""}` : `
-    <form class="form" id="appeal-form"><label>Не согласен? Напиши апелляцию (от 10 символов)
-      <textarea name="text" rows="5" minlength="10" maxlength="2000" required></textarea></label>
-      <button class="btn btn-accent">Отправить апелляцию</button></form>`}`;
+  if (!root) return;
+  let ban;
+  try {
+    ({ ban } = await api("GET", "/api/me/ban", undefined, { quiet: true }));
+  } catch (error) {
+    if (error.status === 401) {
+      root.innerHTML = `<div class="ban-mark" aria-hidden="true">⛔</div><h1 id="ban-title">Войди в аккаунт</h1><p class="muted">После входа здесь появятся причина блокировки и апелляция.</p><a class="btn btn-accent" href="/login?next=%2Fbanned">Войти</a>`;
+    } else {
+      root.innerHTML = `<div class="ban-mark" aria-hidden="true">⚠️</div><h1 id="ban-title">Не удалось проверить блокировку</h1><p class="muted">Обнови страницу чуть позже.</p>`;
+    }
+    return;
+  }
+  if (!ban) {
+    root.innerHTML = `<div class="ban-mark" aria-hidden="true">✅</div><h1 id="ban-title">Активного бана нет</h1><p class="muted">Доступ к аккаунту восстановлен.</p><a class="btn btn-accent" href="/">Продолжить</a>`;
+    return;
+  }
+  const STATUS = {
+    pending: "Апелляция на рассмотрении.",
+    accepted: "Апелляция принята.",
+    rejected: "Апелляция отклонена.",
+  };
+  root.innerHTML = `<div class="ban-mark" aria-hidden="true">⛔</div><h1 id="ban-title">Аккаунт заблокирован</h1>
+    <p class="ban-reason"><b>Причина блокировки</b>${esc(ban.reason || "Не указана")}</p>
+    ${ban.appeal_status !== "none" ? `<p class="ban-status">${esc(STATUS[ban.appeal_status] || "Статус апелляции обновлён.")}</p>${ban.appeal_comment ? `<p class="ban-status">Ответ: ${esc(ban.appeal_comment)}</p>` : ""}` : `
+    <form class="form ban-appeal-form" id="appeal-form"><label for="appeal-text">Текст апелляции</label>
+      <textarea id="appeal-text" name="text" rows="5" minlength="10" maxlength="2000" placeholder="Опиши, почему решение стоит пересмотреть…" required></textarea>
+      <button type="submit" class="btn btn-accent">Подать апелляцию</button></form>`}`;
   const form = $("#appeal-form");
-  if (form) form.onsubmit = async (e) => {
-    e.preventDefault();
-    try { await api("POST", `/api/bans/${ban.id}/appeal`, { text: form.elements.text.value }); toast("Апелляция отправлена"); pageBanned(); } catch (_) {}
+  if (form) form.onsubmit = async (event) => {
+    event.preventDefault();
+    const button = $("button[type=submit], button:not([type])", form);
+    if (button) button.disabled = true;
+    try {
+      await api("POST", `/api/bans/${ban.id}/appeal`, { text: form.elements.text.value }, { quiet: true });
+      await pageBanned();
+    } catch (error) {
+      let feedback = $(".ban-feedback", form);
+      if (!feedback) {
+        feedback = document.createElement("p");
+        feedback.className = "ban-feedback";
+        form.appendChild(feedback);
+      }
+      feedback.textContent = error.data?.message || "Не удалось отправить апелляцию. Попробуй ещё раз.";
+      if (button) button.disabled = false;
+    }
   };
 }
 
@@ -511,7 +844,9 @@ function initPanel(tabs) {
     try { await tabs[name](panel); } catch (e) { panel.innerHTML = `<p class="muted">Не удалось загрузить: ${esc(e.message)}</p>`; }
   };
   $$("#panel-tabs button").forEach((b) => (b.onclick = () => show(b.dataset.tab)));
-  show($("#panel-tabs button.active").dataset.tab);
+  const requested = new URLSearchParams(location.search).get("tab") || location.hash.slice(1);
+  const initial = tabs[requested] ? requested : $("#panel-tabs button.active")?.dataset.tab;
+  if (initial) show(initial);
   return show;
 }
 
@@ -715,12 +1050,110 @@ async function kbDebugPanel(panel, login = "", selId = null) {
   draw();
 }
 
+async function adminHalloween(panel) {
+  const [data, archive] = await Promise.all([
+    api("GET", "/admin/events/halloween"),
+    api("GET", "/api/events/halloween/archive").catch(() => ({ items: [], records: {}, total: 0 })),
+  ]);
+  const localInput = (value) => {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? "" : new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  };
+  const raid = data.raid || { boss_name: "Тыквенная плесень", regen_per_minute: 6,
+    stages: [{ title: "Первая волна", max_hp: 10000, description: "" }], gifts: [] };
+  const makeGiftId = () => `badge-${Math.random().toString(36).slice(2, 10)}`;
+  const stageRow = (stage = {}) => `<div class="raid-admin-row" data-stage-row>
+    <div class="raid-admin-row-head"><b>Стадия</b><button type="button" class="btn btn-ghost btn-sm" data-remove-stage>Удалить</button></div>
+    <label>Название<input class="input" data-stage-title maxlength="80" required value="${esc(stage.title || "")}"></label>
+    <label>Здоровье босса (HP)<input class="input" data-stage-hp type="number" min="1" max="1000000" required value="${Number(stage.max_hp) || 10000}"></label>
+    <label>Описание<input class="input" data-stage-description maxlength="280" value="${esc(stage.description || "")}"></label>
+  </div>`;
+  const giftRow = (gift = {}) => `<div class="raid-admin-row" data-gift-row>
+    <div class="raid-admin-row-head"><b>Бейдж за вклад</b><button type="button" class="btn btn-ghost btn-sm" data-remove-gift>Удалить</button></div>
+    <input type="hidden" data-gift-id value="${esc(gift.id || makeGiftId())}">
+    <input type="hidden" data-gift-type value="badge">
+    <label>Стадия №<input class="input" data-gift-stage type="number" min="1" max="20" required value="${Number(gift.stage) || 1}"></label>
+    <label>Личный урон на этой стадии<input class="input" data-gift-damage type="number" min="1" max="1000000" required value="${Number(gift.required_damage) || 1}"></label>
+    <label>Эмодзи / значок<input class="input" data-gift-emoji maxlength="12" required value="${esc(gift.emoji || "🏅")}"></label>
+    <label>Название<input class="input" data-gift-title maxlength="80" required value="${esc(gift.title || "")}" placeholder="Например, Страж тыквенной грядки"></label>
+    <label>Описание<input class="input" data-gift-description maxlength="240" value="${esc(gift.description || "")}" placeholder="За что выдан бейдж"></label>
+  </div>`;
+  panel.innerHTML = `<form class="panel form" id="halloween-admin-form">
+    <h2 style="margin-top:0">🎃 Хэллоуинский ивент</h2>
+    <p class="muted">Ивент активен только между датами. Даты вводятся в часовом поясе браузера. Рейд общий для всех игроков сайта.</p>
+    <label class="check"><input type="checkbox" name="enabled" ${data.enabled ? "checked" : ""}> Разрешить событие</label>
+    <label>Начало<input class="input" type="datetime-local" name="start_at" required value="${esc(localInput(data.start_at))}"></label>
+    <label>Конец<input class="input" type="datetime-local" name="end_at" required value="${esc(localInput(data.end_at))}"></label>
+    <p class="event-admin-status">Сейчас: <b>${data.active ? "🟢 активно" : data.enabled ? "🕒 включено, но вне дат" : "⚫ выключено"}</b></p>
+    <hr>
+    <h3>Общий босс</h3>
+    <label>Имя босса<input class="input" name="boss_name" maxlength="80" required value="${esc(raid.boss_name)}"></label>
+    <label>Регенерация HP в минуту<input class="input" name="regen_per_minute" type="number" min="0" max="60" required value="${Number(raid.regen_per_minute) || 0}"></label>
+    <h3>Стадии</h3><p class="muted">Здоровье задаётся отдельно для каждой стадии. Когда текущая стадия побеждена, рейд переходит к следующей; после последней босс продолжает появляться с её параметрами.</p>
+    <div class="raid-admin-rows" id="raid-admin-stages">${(raid.stages || []).map(stageRow).join("")}</div>
+    <button class="btn btn-ghost btn-sm" id="raid-add-stage" type="button">＋ Добавить стадию</button>
+    <h3>Личные бейджи за вклад</h3><p class="muted">Бейдж выдаётся сразу, как игрок наберёт заданный личный урон на указанной стадии. Он появится в профиле; один бейдж выдаётся игроку один раз за рейд.</p>
+    <div class="raid-admin-rows" id="raid-admin-gifts">${(raid.gifts || []).map(giftRow).join("")}</div>
+    <button class="btn btn-ghost btn-sm" id="raid-add-gift" type="button">＋ Создать бейдж</button>
+    <hr><button class="btn btn-accent">Сохранить настройки</button>
+  </form>
+  <div class="panel"><h3>Эффекты события</h3><p class="muted">Скример срабатывает примерно на каждом третьем действии, не чаще одного раза за 15 секунд. Музыка включена по умолчанию. Чистота и счастье грибов во время ивента убывают вдвое быстрее; в рейде каждый выставленный гриб наносит 1 урон, получает +1 чистоты и счастья, но теряет по 1 сахару и заварки.</p>
+  <p class="muted">Также доступны хэллоуинские цитаты, постоянные мутации, «Сладость или гадость» и исчезновения грибов.</p></div>
+  ${raidArchiveMarkup(archive)}`;
+  const stagesBox = $("#raid-admin-stages", panel), giftsBox = $("#raid-admin-gifts", panel);
+  $("#raid-add-stage", panel).onclick = () => {
+    if (stagesBox.querySelectorAll("[data-stage-row]").length >= 20) return toast("Максимум 20 стадий", true);
+    stagesBox.insertAdjacentHTML("beforeend", stageRow({ title: `Стадия ${stagesBox.querySelectorAll("[data-stage-row]").length + 1}`, max_hp: 10000 }));
+  };
+  $("#raid-add-gift", panel).onclick = () => {
+    if (giftsBox.querySelectorAll("[data-gift-row]").length >= 100) return toast("Максимум 100 бейджей", true);
+    giftsBox.insertAdjacentHTML("beforeend", giftRow());
+  };
+  stagesBox.addEventListener("click", (event) => {
+    if (!event.target.closest("[data-remove-stage]")) return;
+    if (stagesBox.querySelectorAll("[data-stage-row]").length <= 1) return toast("У рейда должна остаться хотя бы одна стадия", true);
+    event.target.closest("[data-stage-row]").remove();
+  });
+  giftsBox.addEventListener("click", (event) => {
+    if (event.target.closest("[data-remove-gift]")) event.target.closest("[data-gift-row]").remove();
+  });
+  $("#halloween-admin-form", panel).onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const start = new Date(f.get("start_at")), end = new Date(f.get("end_at"));
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return toast("Укажи начало и конец события", true);
+    const stages = [...stagesBox.querySelectorAll("[data-stage-row]")].map((row) => ({
+      title: $("[data-stage-title]", row).value.trim(),
+      max_hp: Number($("[data-stage-hp]", row).value),
+      description: $("[data-stage-description]", row).value.trim(),
+    }));
+    const gifts = [...giftsBox.querySelectorAll("[data-gift-row]")].map((row) => ({
+      id: $("[data-gift-id]", row).value,
+      reward_type: $("[data-gift-type]", row).value,
+      stage: Number($("[data-gift-stage]", row).value),
+      required_damage: Number($("[data-gift-damage]", row).value),
+      emoji: $("[data-gift-emoji]", row).value.trim(),
+      title: $("[data-gift-title]", row).value.trim(),
+      description: $("[data-gift-description]", row).value.trim(),
+    }));
+    try {
+      const r = await api("PUT", "/admin/events/halloween", {
+        enabled: f.has("enabled"), start_at: start.toISOString(), end_at: end.toISOString(),
+        raid: { boss_name: f.get("boss_name").trim(), regen_per_minute: Number(f.get("regen_per_minute")), stages, gifts },
+      });
+      toast(r.active ? "🎃 Хэллоуин включён" : "Настройки ивента сохранены");
+      await adminHalloween(panel);
+    } catch (_) {}
+  };
+}
+
 async function pageAdmin() {
   if (denied("analytics.read")) return;
   let show;
   show = initPanel({
     ...adminBanTabs(() => show),
     async quotes(panel) { await adminQuotes(panel); },
+    async events(panel) { await adminHalloween(panel); },
     async kombucha(panel) { await kbDebugPanel(panel); },
     async analytics(panel) {
       const a = await api("GET", "/admin/analytics");
@@ -800,6 +1233,7 @@ const NOTIF = {
   trade: (p) => [p.accepted ? "🤝" : p.gift ? "🎁" : "🔄", p.accepted ? `@${esc(p.username)} принял(а) твоё предложение обмена` : p.gift ? `@${esc(p.username)} дарит тебе чайный гриб` : `@${esc(p.username)} предлагает обмен грибами`, "/market#trades"],
   kombucha: (p) => ["🍄", esc(p.text || p.message || "Новости с подоконника"), p.kombucha_id ? `/g/${p.kombucha_id}` : "/"],
   sale: (p) => ["💰", `@${esc(p.username)} купил(а) твой гриб «${esc(p.kombucha_name)}» — +${p.amount} $₽`, "/wallet"],
+  halloween: (p) => ["🎃", esc(p.text || "На подоконнике случилось что-то странное"), p.kombucha_id ? `/g/${p.kombucha_id}` : "/events"],
   appeal: (p) => ["⚖️", p.decision === "accept" || p.decision === "approve" ? "Апелляцию приняли — блокировка снята" : `Апелляцию отклонили${p.comment ? ": " + esc(p.comment) : ""}`, "/banned"],
 };
 
@@ -818,6 +1252,11 @@ async function pageNotifications() {
 }
 
 // ---------------------------------------------------------------- мини-игра «Чайный гриб»
+const HALLOWEEN_HAT_UI = {
+  pumpkin: { emoji: "🎃", title: "Тыква" }, witch: { emoji: "🧙‍♀️", title: "Ведьмина шляпа" },
+  horns: { emoji: "😈", title: "Рога" }, ghost_halo: { emoji: "👻", title: "Нимб-призрак" },
+  foil: { emoji: "🛸", title: "Шапочка из фольги" },
+};
 const KB_DISC = [ // [мутация, заливка, обводка] — первая подходящая по приоритету
   ["crystal", "#aef4ff", "#4fc3dc"], ["golden", "#ffd54a", "#b8860b"], ["spotted", "#e0442f", "#9c2414"],
   ["night", "#51639e", "#2c3866"], ["sweet_tooth", "#ffc2e0", "#e58db1"],
@@ -828,7 +1267,7 @@ function shade(hex, f = 0.6) {
   const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(v * f));
   return `rgb(${c.join(",")})`;
 }
-const RAR = { legendary: "Легендарная", epic: "Эпическая", rare: "Редкая", common: "Обычная" };
+const RAR = { legendary: "Легендарная", epic: "Эпическая", rare: "Редкая", common: "Обычная", event: "Постоянная хэллоуинская" };
 function mutChip(m) {
   return `<span class="kb-mut r-${m.rarity}" title="${esc(RAR[m.rarity] || "")}: ${esc(m.title)}${m.inherited ? " (унаследована)" : ""}">${esc(m.emoji)} ${esc(m.title)}${m.serial ? ` <b class="kb-serial">#${m.serial}</b>` : ""}${m.inherited ? " 🧬" : ""}</span>`;
 }
@@ -839,7 +1278,7 @@ async function kombuchaCardModal(id) {
   modal(`<div class="kb-cardm"><div class="kb-cardm-svg">${kombuchaSVG(d)}</div>
     <h2>${esc(d.name)} ${d.frozen ? "🧊" : ""}</h2>
     <div class="muted">${esc(d.stage.title)} · ${d.xp} XP · поколение ${d.generation} · владелец <a href="/u/${encodeURIComponent(d.owner)}">@${esc(d.owner)}</a>${d.price != null ? ` · 🏷 ${d.price} $₽` : ""}</div>
-    <h3>Мутации</h3>${d.mutations.length ? `<table class="kb-cardm-t">${d.mutations.map((m) => `<tr><td>${esc(m.emoji)} ${esc(m.title)}</td><td>${esc(RAR[m.rarity])}</td><td><b>#${m.serial ?? "?"}</b> из ${m.issued}</td></tr>`).join("")}</table>` : `<p class="muted">Без мутаций</p>`}
+    <h3>Мутации</h3>${d.mutations.length ? `<table class="kb-cardm-t">${d.mutations.map((m) => `<tr><td>${esc(m.emoji)} ${esc(m.title)}</td><td>${esc(RAR[m.rarity] || "")}</td><td>${m.serial != null ? `<b>#${m.serial}</b> из ${m.issued}` : m.rarity === "event" ? "навсегда" : "—"}</td></tr>`).join("")}</table>` : `<p class="muted">Без мутаций</p>`}
     <h3>История владельцев</h3>${d.owners.length ? `<ol class="kb-owners">${d.owners.map((o) => `<li>@${esc(o.username || "?")} — ${HOW[o.how] || esc(o.how)}${o.price ? ` за ${o.price} $₽` : ""} <small class="muted">${esc(fmtDate(o.at))}</small></li>`).join("")}</ol>` : `<p class="muted">Всю жизнь у одного хозяина — @${esc(d.owner)}</p>`}
     <div class="modal-actions"><button class="btn btn-ghost" data-close>Закрыть</button></div></div>`);
 }
@@ -893,7 +1332,7 @@ function kbMutFx(k, w, h, top, level) {
     const rnd = (n) => (kbHash(m.code + n) % 1000) / 1000;          // стабильные «случайные» числа мутации
     if (idx < 3) L.discColors.push(col);
     if (m.rarity === "legendary" || m.rarity === "epic") L.glow.push(`drop-shadow(0 0 ${m.rarity === "legendary" ? 7 : 4}px ${col})`);
-    if (KB_OWN_FX.has(m.code)) return;                               // у этих — ручная отрисовка ниже
+    if (KB_OWN_FX.has(m.code) || m.code.startsWith("halloween_")) return; // у этих — ручная отрисовка ниже
     const place = hs % 3, kind = (hs >> 3) % 4;
     if (place === 0) {                                                // ГРИБ
       if (kind === 0) for (let i = 0; i < 2 + Math.round(r * 1.5); i++)
@@ -1178,7 +1617,7 @@ async function kbSugar(k, onDone) {
 // 🪰 Отгони мушек
 async function kbFlies(k, onDone) {
   const G = await kbStart(k, "flies"); if (!G) return;
-  const sh = kbGameShell("🪰 Отгони мушек", "Мушки летят к банке — тапни каждую, пока не села. Три севшие — конец.");
+  const sh = kbGameShell(HALLOWEEN_ACTIVE ? "🦇 Прогони ночной рой" : "🪰 Отгони мушек", HALLOWEEN_ACTIVE ? "Летучие мыши и ночные мушки слетаются к банке — отгони их!" : "Мушки летят к банке — тапни каждую, пока не села. Три севшие — конец.");
   sh.area.innerHTML = `<div class="kb-flies"><div class="kb-flies-jar">${kombuchaSVG({ ...k, id: "fl" + k.id }, { small: true })}</div></div>`;
   const box = sh.area.firstChild, taps = [], t0 = performance.now();
   let lives = G.lives, swat = 0, ended = false;
@@ -1189,7 +1628,7 @@ async function kbFlies(k, onDone) {
     if (ended) return;
     const d = document.createElement("button");
     const a = (f.angle * Math.PI) / 180;
-    d.className = "kb-fly"; d.textContent = "🪰";
+    d.className = "kb-fly halloween-fly"; d.textContent = HALLOWEEN_ACTIVE ? (Math.random() < 0.5 ? "🦇" : "🪰") : "🪰";
     d.style.setProperty("--fx", `${Math.cos(a) * 48}vmin`); d.style.setProperty("--fy", `${Math.sin(a) * 48}vmin`);
     d.style.animationDuration = `${f.dur}ms`;
     let gone = false;
@@ -1300,7 +1739,7 @@ async function kbMeditate(k, onDone) {
   raf = requestAnimationFrame(loop);
 }
 
-// Полноэкранный просмотр гриба: только банка, весь интерфейс сайта скрыт. Выход — Esc, клик/тап или кнопка.
+// Полноэкранный просмотр гриба: наклон работает как в обычной банке. Выход — Esc или тап.
 function kbFullscreen(getK) {
   if ($(".kb-fs")) return;
   const k = getK();
@@ -1309,19 +1748,55 @@ function kbFullscreen(getK) {
   el.className = "kb-fs";
   el.setAttribute("role", "dialog");
   el.setAttribute("aria-label", `Гриб ${k.name} во весь экран`);
-  el.innerHTML = `<div class="kb-fs-art">${kombuchaSVG({ ...k, id: "fs" + k.id })}</div><div class="kb-fs-hint">Esc или тап — выйти</div>`;
+  const tiltButton = canOfferDeviceTilt()
+    ? `<button class="kb-tilt-btn kb-fs-tilt-btn" data-tilt title="Наклони телефон или проведи пальцем по банке" aria-label="Включить наклон телефона" aria-pressed="false">↕️</button>`
+    : "";
+  const fullscreenHint = REDUCED_MOTION ? "Esc или тап — выйти" : "Курсор / наклон / свайп · Esc / тап — выйти";
+  el.innerHTML = `<div class="kb-fs-art">${kombuchaSVG({ ...k, id: "fs" + k.id })}</div>${tiltButton}<div class="kb-fs-hint">${fullscreenHint}</div>`;
   document.body.appendChild(el);
   document.body.classList.add("kb-fs-on");
+  initTiltScene(el);
+  const fullscreenTiltControl = el.querySelector("[data-tilt]");
+  fullscreenTiltControl?.addEventListener("pointerdown", (event) => event.stopPropagation());
+  fullscreenTiltControl?.addEventListener("click", (event) => event.stopPropagation());
+
+  let touchStart = null, touchDraggedAt = 0;
+  el.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "touch") touchStart = { x: event.clientX, y: event.clientY };
+  }, { passive: true });
+  el.addEventListener("pointermove", (event) => {
+    if (event.pointerType === "touch" && touchStart
+      && Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y) >= 8) {
+      touchDraggedAt = performance.now();
+    }
+  }, { passive: true });
+  el.addEventListener("pointerup", (event) => { if (event.pointerType === "touch") touchStart = null; }, { passive: true });
+  el.addEventListener("pointercancel", (event) => { if (event.pointerType === "touch") touchStart = null; }, { passive: true });
+
   const close = () => {
     document.removeEventListener("keydown", onKey);
     document.removeEventListener("fullscreenchange", onFs);
     el.remove();
     document.body.classList.remove("kb-fs-on");
+    const mainScene = document.querySelector(".kb-main .kb-scene");
+    if (mainScene) {
+      const mainSvg = $(".kb-svg", mainScene);
+      if (mainSvg) {
+        mainSvg.style.setProperty("--cursor-x", "0px");
+        mainSvg.style.setProperty("--cursor-y", "0px");
+        mainSvg.style.setProperty("--cursor-tilt", "0deg");
+      }
+      initTiltScene(mainScene);
+    }
     if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
   };
-  const onKey = (e) => { if (e.key === "Escape") close(); };
+  const onKey = (event) => { if (event.key === "Escape") close(); };
   const onFs = () => { if (!document.fullscreenElement) close(); };
-  el.onclick = close;
+  el.onclick = (event) => {
+    if (event.target.closest?.("[data-tilt]")) return;
+    if (touchDraggedAt && performance.now() - touchDraggedAt < 600) { touchDraggedAt = 0; return; }
+    close();
+  };
   document.addEventListener("keydown", onKey);
   el.requestFullscreen?.().then(() => document.addEventListener("fullscreenchange", onFs)).catch(() => {});
   setTimeout(() => el.classList.add("hint-off"), 2500);
@@ -1335,6 +1810,7 @@ function kombuchaSVG(k, { small = false } = {}) {
   const top = 200 - level;
   let tint = k.alive ? `hsl(${28 + (100 - st.tea) * 0.15}, ${45 + st.tea * 0.4}%, ${62 - st.tea * 0.22}%)` : "#6b6b4a";
   if (has("cosmic") && k.alive) tint = "#2a1a4a";
+  if (has("halloween_zombie") && k.alive) tint = "#426b3d";
   const w = 34 + size * 11, h = 8 + size * 2.2;
   const cx = 110, cy = top + 4;
   const dirt = k.alive ? (100 - st.clean) / 100 : 0.8;
@@ -1372,6 +1848,9 @@ function kombuchaSVG(k, { small = false } = {}) {
   if (has("survivor")) acc.push(`<text x="${Math.max(w * 0.62, 22 * faceK + 12)}" y="${4}" class="kb-acc" font-size="14">🩹</text>`);
   if (has("phoenix")) acc.push(`<text x="${-w * 0.7}" y="${faceY + 4}" class="kb-acc kb-flick" font-size="16">🔥</text>`);
   if (has("chatty")) acc.push(`<text x="${w * 0.6}" y="${faceY}" class="kb-acc" font-size="14">💬</text>`);
+  const hat = k.halloween_hat_meta || HALLOWEEN_HAT_UI[k.halloween_hat];
+  if (hat) acc.push(`<text x="0" y="${faceY - 22}" class="kb-acc kb-halloween-hat" font-size="25">${esc(hat.emoji)}</text>`);
+  if (has("halloween_eyes")) acc.push(`<text x="0" y="${-h * 0.08}" class="kb-acc kb-burning-eyes" font-size="12">👁️ 👁️</text>`);
   const outside = [];
   if (has("holivar")) outside.push(`<text x="196" y="120" class="kb-acc" font-size="20">⚔️</text>`);
   if (has("sparkle")) outside.push(...[[28, 60], [192, 80], [24, 170], [196, 190]].map(([x, y], i) => `<text x="${x}" y="${y}" class="kb-acc kb-twinkle" font-size="14" style="animation-delay:${i * 0.4}s">✨</text>`));
@@ -1393,10 +1872,10 @@ function kombuchaSVG(k, { small = false } = {}) {
     ${outside.join("")}${FX.outside.join("")}
     <rect x="60" y="6" width="100" height="22" rx="6" class="kb-lid"${FX.lidColor ? ` style="fill:${FX.lidColor};stroke:${shade(FX.lidColor)}"` : ""}/>${FX.lid.join("")}
     <g clip-path="url(#kb-jar-${k.id || 0})">
-      <rect x="30" y="${top}" width="160" height="${230 - top}" fill="${tint}" class="kb-liquid"/>
-      <path d="M30,${top} Q70,${top - 4} 110,${top} T190,${top}" stroke="#ffffff55" stroke-width="2" fill="none"/>
+      <path class="kb-liquid" data-y="${top}" d="M30,${top} Q70,${top - 4} 110,${top} T190,${top} L420,400 L-200,400 Z" fill="${tint}"/>
+      <path class="kb-liquid-surface" data-y="${top}" d="M30,${top} Q70,${top - 4} 110,${top} T190,${top}" stroke="#ffffff55" stroke-width="2" fill="none"/>
       ${stars}${bubbles}${FX.liquid.join("")}
-      <g class="${k.alive ? "kb-float" : ""}"><g class="kb-mush" transform="translate(${cx},${cy})"${FX.glow.length ? ` style="filter:${FX.glow.slice(0, 3).join(" ")}"` : ""}>
+      ${HALLOWEEN_ACTIVE && k.halloween_gone ? "" : `<g class="${k.alive ? "kb-float" : ""}"><g class="kb-mush" data-cx="${cx}" data-cy="${cy}" transform="translate(${cx},${cy})"${FX.glow.length ? ` style="filter:${FX.glow.slice(0, 3).join(" ")}"` : ""}>
         <g class="kb-disc-wrap">
           <ellipse rx="${w}" ry="${h}" class="kb-disc" ${discFill ? `style="fill:${discFill};stroke:${shade(FX.discColors[0])}"` : disc ? `style="fill:${disc[1]};stroke:${disc[2]}"` : ""}/>
           <ellipse rx="${w * 0.8}" ry="${h * 0.5}" cy="-${h * 0.3}" class="kb-disc-hi"/>
@@ -1408,16 +1887,124 @@ function kombuchaSVG(k, { small = false } = {}) {
           ${k.mood === "happy" || k.mood === "sticky" ? `<circle cx="-16" cy="4" r="3" class="kb-blush"/><circle cx="16" cy="4" r="3" class="kb-blush"/>` : ""}
         </g>
         ${acc.join("")}
-      </g></g>
+      </g></g>`}
       <g opacity="${dirt.toFixed(2)}">${spots}</g>
       ${k.mold ? Array.from({ length: 9 }, (_, i) => `<circle cx="${cx + (((i * 37) % 80) - 40) * (w / 60)}" cy="${cy - h * 0.4 + ((i * 13) % 10) - 5}" r="${3 + (i % 3) * 2}" class="kb-moldspot"/>`).join("") : ""}
     </g>
     <path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z" class="kb-jar"${FX.glass.length ? ` style="fill:${FX.glass[0]}40;stroke:${FX.glass[FX.glass.length - 1]};stroke-width:4"` : ""}/>${FX.jar.join("")}
+    ${k.halloween_web_until ? `<g class="kb-jar-web"><path d="M40 42 Q72 48 96 30 M40 42 Q50 72 38 100 M40 42 L78 66 L96 30 M50 48 L47 70 L70 61 L78 66 L69 84 L50 79 L47 70 M184 190 Q158 177 150 210 M184 190 Q160 198 138 190 M184 190 L160 168 L150 210 M174 184 L168 201 L151 194 L160 168"/></g>` : ""}
     <path d="M52,50 L50,190" class="kb-glare"/>${has("clean_freak") ? `<path d="M64,60 L63,110" class="kb-glare"/>` : ""}
     ${k.frozen ? `<path d="M40,40 Q40,28 55,26 L165,26 Q180,28 180,40 L184,200 Q184,214 168,214 L52,214 Q36,214 36,200 Z" class="kb-ice"/><text x="160" y="60" class="kb-acc" font-size="20">❄️</text>` : ""}
     ${small ? "" : `<g class="kb-mood-badge"><circle cx="186" cy="30" r="17"/><text x="186" y="37" text-anchor="middle" font-size="20">${KB_MOOD[k.mood]?.[0] || "🙂"}</text></g>`}
     <text x="110" y="228" text-anchor="middle" class="kb-label">3 л</text>
   </svg>`;
+}
+
+let kbTiltScene = null;
+let kbTiltRoll = 0;
+let kbTiltListening = false;
+function clampN(value, min, max) { return Math.min(max, Math.max(min, value)); }
+
+function hasCoarsePointer() {
+  return (navigator.maxTouchPoints || 0) > 0 || "ontouchstart" in window
+    || !!window.matchMedia?.("(pointer: coarse)")?.matches;
+}
+
+function canOfferDeviceTilt() {
+  return !REDUCED_MOTION && hasCoarsePointer() && "DeviceOrientationEvent" in window;
+}
+
+function applyKbTilt() {
+  if (!kbTiltScene || REDUCED_MOTION) return;
+  const svg = $(".kb-svg", kbTiltScene);
+  if (!svg) return;
+  const surface = $(".kb-liquid-surface", svg), liquid = $(".kb-liquid", svg);
+  const y = surface?.dataset.y || 100;
+  const liquidAngle = -kbTiltRoll;
+  if (surface) surface.setAttribute("transform", `rotate(${liquidAngle} 110 ${y})`);
+  if (liquid) liquid.setAttribute("transform", `rotate(${liquidAngle} 110 ${y})`);
+  const mush = $(".kb-mush", svg);
+  if (mush) {
+    const cx = Number(mush.dataset.cx || 110), cy = Number(mush.dataset.cy || 100);
+    const x = cx + kbTiltRoll * 1.25;
+    const y = cy + Math.abs(kbTiltRoll) * 0.08 + Math.sin(performance.now() / 260) * Math.min(Math.abs(kbTiltRoll) * 0.015, 0.3);
+    mush.setAttribute("transform", `translate(${x.toFixed(2)},${y.toFixed(2)}) rotate(${(kbTiltRoll * 0.25).toFixed(2)})`);
+  }
+}
+
+function initTiltScene(scene) {
+  if (!scene) return;
+  if (scene !== kbTiltScene) kbTiltRoll = 0;
+  kbTiltScene = scene;
+  if (REDUCED_MOTION) return;
+  if (!scene.dataset.tiltBound) {
+    scene.dataset.tiltBound = "1";
+    scene.addEventListener("pointermove", (e) => {
+      const touch = e.pointerType === "touch";
+      if (touch ? kbTiltListening : !window.matchMedia?.("(hover: hover)")?.matches) return;
+      const r = scene.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      const px = clampN((e.clientX - r.left) / r.width - 0.5, -0.5, 0.5);
+      const py = clampN((e.clientY - r.top) / r.height - 0.5, -0.5, 0.5);
+      kbTiltRoll = clampN(px * 24, -12, 12);
+      const svg = $(".kb-svg", scene);
+      if (svg) {
+        svg.style.setProperty("--cursor-x", `${(px * 6).toFixed(1)}px`);
+        svg.style.setProperty("--cursor-y", `${(py * 6).toFixed(1)}px`);
+        svg.style.setProperty("--cursor-tilt", `${clampN(px * 2, -1, 1).toFixed(1)}deg`);
+      }
+      applyKbTilt();
+    }, { passive: true });
+    const resetPointerTilt = () => {
+      if (!kbTiltListening) kbTiltRoll = 0;
+      const svg = $(".kb-svg", scene);
+      if (svg) {
+        svg.style.setProperty("--cursor-x", "0px");
+        svg.style.setProperty("--cursor-y", "0px");
+        svg.style.setProperty("--cursor-tilt", "0deg");
+      }
+      applyKbTilt();
+    };
+    scene.addEventListener("pointerleave", resetPointerTilt);
+    scene.addEventListener("pointerup", (e) => { if (e.pointerType === "touch") resetPointerTilt(); });
+    scene.addEventListener("pointercancel", (e) => { if (e.pointerType === "touch") resetPointerTilt(); });
+  }
+  const button = $("[data-tilt]", scene);
+  if (button) {
+    button.textContent = kbTiltListening ? "📱" : "↕️";
+    button.title = kbTiltListening ? "Наклон телефона включён" : "Наклони телефон или проведи пальцем по банке";
+    button.setAttribute("aria-label", kbTiltListening ? "Наклон телефона включён" : "Включить наклон телефона");
+    button.setAttribute("aria-pressed", kbTiltListening ? "true" : "false");
+    button.onclick = async () => {
+      try {
+        const DOE = window.DeviceOrientationEvent;
+        if (typeof DOE.requestPermission === "function") {
+          const permission = await DOE.requestPermission();
+          if (permission !== "granted") throw new Error("Разрешение не выдано");
+        }
+        if (!kbTiltListening) {
+          const orientationHandler = (event) => {
+            if (Number.isFinite(event.gamma)) {
+              kbTiltRoll = clampN(event.gamma, -18, 18);
+              applyKbTilt();
+            }
+          };
+          window.addEventListener("deviceorientation", orientationHandler, { passive: true });
+          kbTiltListening = true;
+        }
+        button.textContent = "📱";
+        button.title = "Наклон телефона включён";
+        button.setAttribute("aria-label", "Наклон телефона включён");
+        button.setAttribute("aria-pressed", "true");
+      } catch (_) {
+        button.textContent = "👆";
+        button.title = "Проведи пальцем по банке, чтобы наклонить жидкость";
+        button.setAttribute("aria-label", "Проведи пальцем по банке, чтобы наклонить жидкость");
+        button.setAttribute("aria-pressed", "false");
+      }
+    };
+  }
+  applyKbTilt();
 }
 
 function fmtLeft(sec) {
@@ -1442,6 +2029,7 @@ async function pageKombucha() {
     return;
   }
   let S, sel = Number(localStorage.getItem("kb-sel")) || null, timer;
+  let emptyJarSelected = false, emptyJarIndex = 0, waitingForSprout = false;
   const BTN = [["sugar", "🍬", "Сахар"], ["tea", "☕", "Заварка"], ["clean", "🧽", "Помыть банку"], ["pet", "🤚", "Погладить"]];
   const STAT = [["sweet", "🍬 Сахар"], ["tea", "☕ Заварка"], ["clean", "🧽 Чистота"], ["happy", "😊 Настроение"]];
   const say = (text) => { const b = $("#kb-say"); if (b) { b.textContent = text; b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop"); } };
@@ -1453,20 +2041,40 @@ async function pageKombucha() {
   };
 
   const renderJars = () => {
-    const tabs = S.items.map((k) => `<button class="kb-jar-tab ${k.id === cur()?.id ? "active" : ""} ${k.alive ? "" : "dead"} ${k.frozen ? "frozen" : ""}" data-sel="${k.id}">
+    const tabs = S.items.map((k) => `<button class="kb-jar-tab ${!emptyJarSelected && k.id === cur()?.id ? "active" : ""} ${k.alive ? "" : "dead"} ${k.frozen ? "frozen" : ""}" data-sel="${k.id}">
       <span class="kb-jar-mini">${kombuchaSVG(k, { small: true })}</span><span class="kb-jar-name">${esc(k.name)}</span>
       <small>${k.frozen ? (k.price != null ? `🏷 ${k.price} $₽` : "🧊 на полке") : k.alive ? esc(k.stage.title) : "закис 🪦"}${k.dies_in != null && !k.frozen ? " · ⚠️" : ""}</small></button>`);
-    for (let i = 0; i < S.jars.free; i++) tabs.push(`<button class="kb-jar-tab empty" data-plant><span class="kb-jar-plus">＋</span><span class="kb-jar-name">Пустая банка</span><small>посадить гриб</small></button>`);
+    for (let i = 0; i < S.jars.free; i++) tabs.push(`<button class="kb-jar-tab empty ${emptyJarSelected && i === emptyJarIndex ? "active" : ""}" data-empty-jar="${i}">
+      <span class="kb-jar-plus">＋</span><span class="kb-jar-name">Пустая банка</span><small>${emptyJarSelected && i === emptyJarIndex ? "выбрана" : "выбрать"}</small></button>`);
     if (S.jars.jars < S.jars.max) tabs.push(`<button class="kb-jar-tab shop" data-buy><span class="kb-jar-plus">🫙</span><span class="kb-jar-name">Купить банку</span><small>${S.prices.jar} $₽</small></button>`);
     return `<div class="kb-jars">${tabs.join("")}</div>`;
   };
 
+  const renderEmptyJar = () => {
+    const pending = S.items.find((item) => item.sprout_pending);
+    return `<div class="panel kb-empty kb-empty-jar">
+      <h2>🫙 Пустая банка</h2>
+      <p>Выбери, кого поселить: купить нового гриба или оставить банку для потомства.</p>
+      <div class="kb-empty-choices">
+        <button class="btn btn-accent" data-buy-mushroom>🍄 Купить гриб · ${S.prices.mushroom} $₽</button>
+        ${pending
+          ? `<button class="btn btn-ghost" data-plant-pending="${pending.id}">🌱 Посадить готовый отросток «${esc(pending.name)}»</button>`
+          : `<button class="btn btn-ghost" data-wait-sprout${waitingForSprout ? " disabled" : ""}>${waitingForSprout ? "✅ Ждём потомство" : "🌱 Подождать потомство"}</button>`}
+      </div>
+      <p class="muted">${pending
+        ? "Отросток уже готов. Посади его сюда бесплатно или оставь банку для нового гриба."
+        : "Если оставить банку пустой, любой твой гриб сможет поселить сюда отросток, когда будет готов разделиться."}</p>
+    </div>`;
+  };
+
   const renderMain = (k) => {
-    if (!k) return `<div class="panel kb-empty"><p>Банка пустая. Посади новый гриб!</p><button class="btn btn-accent" data-plant>🌱 Посадить гриб</button></div>`;
+    if (!k) return renderEmptyJar();
     const st = k.stage;
     const pct = st.next_xp ? Math.round(((k.xp - st.from_xp) / (st.next_xp - st.from_xp)) * 100) : 100;
     const sp = k.sprout_progress;
-    const sprout = k.sprout_pending ? `<div class="kb-note">🌱 Отросток готов и ждёт свободную банку. <button class="link-btn" data-buy>Купить банку за ${S.prices.jar} $₽</button></div>`
+    const sprout = k.sprout_pending ? `<div class="kb-note">🌱 Отросток уже готов.${S.jars.free
+        ? ` <button class="link-btn" data-open-empty>Выбери пустую банку, чтобы поселить его.</button>`
+        : ` Банки пока нет — <button class="link-btn" data-buy>купить за ${S.prices.jar} $₽</button>.`}</div>`
       : !sp.legend ? `<div class="kb-note muted">🌱 Гриб делится только на последней стадии — «Легенда трёхлитровой банки». Сейчас: «${esc(st.title)}».</div>`
       : sp.count >= sp.max ? `<div class="kb-note muted">🌳 Гриб уже разделился ${sp.max} раза — больше отростков не будет. Династия продолжается в малышах!</div>`
       : `<div class="kb-sprout" title="Легенда делится раз в 7 дней, всего до ${sp.max} раз, если 3 дня за ней ухаживали и на ней нет плесени"><span>🌱 Деление ${sp.count}/${sp.max}:</span>
@@ -1474,11 +2082,17 @@ async function pageKombucha() {
           <span class="${sp.care_days >= sp.need_days ? "ok" : ""}">${sp.care_days >= sp.need_days ? "✅" : "⏳"} дней ухода ${sp.care_days}/${sp.need_days}</span>
           <span class="${sp.next_in ? "" : "ok"}">${sp.next_in ? `⏳ следующее через ${fmtLeft(sp.next_in)}` : "✅ раз в 7 дней"}</span>
           ${sp.healthy ? "" : `<span>🦠 сначала вылечи плесень</span>`}</div>`;
-    return `<div class="panel kb-main ${k.alive ? "" : "is-dead"}">
+    const halloweenGone = HALLOWEEN_ACTIVE && k.halloween_gone;
+    return `<div class="panel kb-main ${k.alive ? "" : "is-dead"} ${halloweenGone ? "halloween-gone" : ""}">
       <div class="kb-scene">
         <button class="kb-fs-btn" data-fs title="Смотреть гриб во весь экран">⛶</button>
-        <div class="kb-say" id="kb-say">${esc(k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
+        ${canOfferDeviceTilt() ? `<button class="kb-tilt-btn" data-tilt title="Наклони телефон или проведи пальцем по банке" aria-label="Включить наклон телефона" aria-pressed="false">📱</button>` : ""}
+        ${HALLOWEEN_ACTIVE ? `<button class="kb-music-btn" data-spooky-music aria-pressed="${spookyMusicEnabled ? "true" : "false"}">${spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку"}</button>
+          ${isHalloweenAdmin() ? `<button class="kb-scare-btn" data-screamer-test title="Проверить скример" aria-label="Проверить скример">👻</button>` : ""}
+          <div class="kb-bat-swarm" aria-hidden="true"><span class="kb-bat bat-a">🦇</span><span class="kb-bat bat-b">🦇</span><span class="kb-bat bat-c">🦇</span></div>` : ""}
+        <div class="kb-say" id="kb-say">${esc(halloweenGone ? "В банке только комбуча. Я ненадолго исчез." : k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
         ${kombuchaSVG(k)}
+        ${halloweenGone ? `<div class="kb-gone-note">🍵 Гриб пропал. В банке осталась комбуча. Попробуй вернуться завтра.</div>` : ""}
       </div>
       <div class="kb-info">
         <div class="kb-name"><h2>${esc(k.name)}</h2><button class="link-btn" data-rename title="Переименовать">✏️</button><a class="link-btn kb-diary-link" href="/g/${k.id}" title="Дневник гриба — можно поделиться">📖 Дневник</a><a class="link-btn kb-diary-link" href="/g/${k.id}#tree" title="Родственное дерево">🌳 Род</a></div>
@@ -1534,35 +2148,78 @@ async function pageKombucha() {
           : `<div class="kb-cx r-${m.rarity}"><span class="e">❓</span><b>???</b><small>${esc(m.hint)}</small><small class="muted">${RAR[m.rarity]} · тираж ${m.issued}</small></div>`; }).join("")}</div></details>`).join("")}</details>`;
   };
 
+  const renderHalloweenTools = (k) => {
+    Object.assign(HALLOWEEN_HAT_UI, S.halloween?.hats || {});
+    const owned = S.halloween?.owned_hats || [];
+    if (!S.halloween?.active && !owned.length && !k?.halloween_hat && !k?.halloween_web_until) return "";
+    const hats = owned.map((code) => [code, HALLOWEEN_HAT_UI[code]]).filter((x) => x[1]);
+    return `<section class="panel kb-halloween-tools"><h3>🎃 Хэллоуинские находки</h3>
+      ${S.halloween?.active ? `<p class="muted">Событие активно — шапки останутся у тебя и после его конца.</p><a class="btn btn-sm btn-ghost" href="/events">🦇 Перейти к ивентам и рейду</a>` : `<p class="muted">Шапки можно носить и после окончания события.</p>`}
+      ${k?.halloween_web_until ? `<p class="kb-note">🕸️ На банке временная паутина — исчезнет ${esc(fmtDate(k.halloween_web_until))}.</p>` : ""}
+      ${HALLOWEEN_ACTIVE && k?.halloween_gone ? `<p class="kb-note">🍵 Сегодня меня нет в банке. Загляни завтра.</p>` : ""}
+      ${hats.length && k ? `<div class="kb-hat-equip"><label>Надеть на «${esc(k.name)}» <select class="input" id="kb-hat-select"><option value="">Без шапки</option>${hats.map(([code, hat]) => `<option value="${esc(code)}"${k.halloween_hat === code ? " selected" : ""}>${esc(hat.emoji)} ${esc(hat.title)}</option>`).join("")}</select></label><button class="btn btn-sm btn-accent" data-equip-hat>Надеть</button></div>` : owned.length ? `<p>В коллекции ${owned.length} ${plural(owned.length, "шапка", "шапки", "шапок")}.</p>` : `<p class="muted">Пока шапок нет. Загляни к другу и нажми «Сладость или гадость».</p>`}
+    </section>`;
+  };
+
   const render = () => {
-    if (!cur() && S.items.length) sel = S.items[0].id;
-    const k = cur();
+    if (emptyJarSelected && !S.jars.free) emptyJarSelected = false;
+    if (emptyJarSelected && emptyJarIndex >= S.jars.free) emptyJarIndex = Math.max(0, S.jars.free - 1);
+    if (!emptyJarSelected && !S.items.length && S.jars.free) { emptyJarSelected = true; emptyJarIndex = 0; }
+    const k = emptyJarSelected ? null : cur();
+    if (!k && !emptyJarSelected && S.items.length) sel = S.items[0].id;
     if (k) { sel = k.id; localStorage.setItem("kb-sel", sel); }
     root.innerHTML = `<div class="kb-bar-top"><span>🫙 Банки: <b>${S.jars.used}/${S.jars.jars}</b></span><span>Баланс: <a href="/wallet"><b>${S.wood} $₽</b></a></span></div>
-      ${renderJars()}${renderMain(k)}`;
+      ${renderJars()}${emptyJarSelected || !k ? renderEmptyJar() : renderMain(k)}${renderHalloweenTools(k)}`;
+    initTiltScene($(".kb-scene", root));
     renderCodex();
     setWood(S.wood);
-    $$("[data-sel]", root).forEach((b) => (b.onclick = () => { sel = Number(b.dataset.sel); render(); }));
+    $$("[data-sel]", root).forEach((b) => (b.onclick = () => { emptyJarSelected = false; sel = Number(b.dataset.sel); render(); }));
+    $$("[data-empty-jar]", root).forEach((b) => (b.onclick = () => { emptyJarSelected = true; emptyJarIndex = Number(b.dataset.emptyJar); render(); }));
+    $$("[data-open-empty]", root).forEach((b) => (b.onclick = () => { emptyJarSelected = true; emptyJarIndex = 0; render(); }));
     $$("[data-act]", root).forEach((b) => (b.onclick = () => doAct(b.dataset.act)));
     $$("[data-buy]", root).forEach((b) => (b.onclick = async () => {
       if (!confirm(`Купить банку за ${S.prices.jar} $₽?`)) return;
+      const emptyIndex = S.jars.free;
       const r = await call("POST", "/api/shop/jar");
       if (!r) return;
-      toast(r.sprouts.length ? `🫙 Банка куплена, в неё сел отросток «${r.sprouts[0]}» 🌱` : "🫙 Банка куплена — посади в неё гриб!");
+      emptyJarSelected = true;
+      emptyJarIndex = emptyIndex;
       await load();
+      toast("🫙 Банка куплена и выбрана — посели нового гриба или оставь её для потомства.");
     }));
-    $$("[data-plant]", root).forEach((b) => (b.onclick = async () => {
+    $$("[data-buy-mushroom]", root).forEach((b) => (b.onclick = async () => {
+      if (!confirm(`Купить нового гриба за ${S.prices.mushroom} $₽?`)) return;
       const name = ask("Имя нового гриба (уникальное на весь сайт). Оставь пустым — придумаем сами:");
       if (name === null) return;
+      b.disabled = true;
       const r = await call("POST", "/api/kombucha/plant", { name });
-      if (r) { sel = r.kombucha.id; await load(); toast("🌱 Гриб посажен"); }
+      if (r) { waitingForSprout = false; emptyJarSelected = false; sel = r.kombucha.id; await load(); toast(`🍄 Гриб куплен за ${S.prices.mushroom} $₽ и посажен`); }
+      else b.disabled = false;
+    }));
+    $$("[data-plant-pending]", root).forEach((b) => (b.onclick = async () => {
+      const parentId = Number(b.dataset.plantPending);
+      b.disabled = true;
+      const r = await call("POST", `/api/kombucha/sprout/${parentId}/plant`);
+      if (r) { waitingForSprout = false; emptyJarSelected = false; sel = r.kombucha.id; await load(); toast(`🌱 Отросток «${r.kombucha.name}» посажен`); }
+      else b.disabled = false;
+    }));
+    $$("[data-wait-sprout]", root).forEach((b) => (b.onclick = () => {
+      waitingForSprout = true;
+      render();
+      toast("🌱 Банка остаётся пустой и ждёт отросток от любого готового гриба");
     }));
     const btn = (sel_) => $(sel_, root);
     if (btn("[data-fs]")) btn("[data-fs]").onclick = () => kbFullscreen(() => cur());
+    if (btn("[data-equip-hat]") && k) btn("[data-equip-hat]").onclick = async () => {
+      const code = $("#kb-hat-select", root).value || null;
+      const r = await call("POST", `/api/events/halloween/hat/${k.id}`, { code });
+      if (r) { S.items = S.items.map((x) => x.id === k.id ? r.kombucha : x); S.halloween.owned_hats = r.owned_hats; render(); toast(code ? "Шапка надета 🎃" : "Шапка снята"); }
+    };
     const afterGame = (r) => {
       S.items = S.items.map((x) => (x.id === r.kombucha.id ? r.kombucha : x));
       S.wood = r.wood_balance; render();
       if (r.result.mutation) toast(`🧬 Игра открыла мутацию: ${r.result.mutation.emoji} «${r.result.mutation.title}» #${r.result.mutation.serial}!`);
+      if (r.halloween_mutation) toast(`👁️ Постоянная хэллоуинская мутация: ${r.halloween_mutation.emoji} «${r.halloween_mutation.title}»`);
     };
     if (btn("[data-games]")) btn("[data-games]").onclick = () => kbGamesMenu(cur(), afterGame);
     const fsOpen = $(".kb-fs-art");
@@ -1608,7 +2265,13 @@ async function pageKombucha() {
     const k = cur();
     const r = await call("POST", `/api/kombucha/${k.id}/${action}`);
     if (!r) return;
-    S = r; render();
+    const oldIds = new Set(S.items.map((item) => item.id));
+    S = r;
+    if (waitingForSprout) {
+      const child = S.items.find((item) => item.is_sprout && !oldIds.has(item.id));
+      if (child) { sel = child.id; emptyJarSelected = false; waitingForSprout = false; }
+    }
+    render();
     // В облачке — только цитаты. Исключение — сахарная кома: там гриб стонет.
     const kk = r.kombucha;
     if (kk.mood === "sticky") say(action === "sugar" ? r.message : kk.phrase);
@@ -1616,13 +2279,26 @@ async function pageKombucha() {
     else { say(kk.phrase); if (r.message && action !== "talk") toast(r.message); }
     if (r.quote && kk.mood !== "sticky") { const b = $("#kb-say"); if (b) b.title = r.quote.lines.map((l) => l.who).join(", ") + (r.quote.book ? ` — ${r.quote.book}` : ""); }
     if (r.mutation) toast(`🧬 ${r.mutation.rarity_title} мутация: ${r.mutation.emoji} «${r.mutation.title}» #${r.mutation.serial}!${r.mutation.first_time ? " +15 $₽ за новую находку" : ""}`);
+    if (r.halloween_mutation) toast(`👁️ Постоянная хэллоуинская мутация: ${r.halloween_mutation.emoji} «${r.halloween_mutation.title}»`);
     if (r.new_badges?.length) newBadgesToast(r.new_badges);
     if (r.stage_up) toast(`🎉 Гриб вырос: теперь это «${r.kombucha.stage.title}»!`);
     if (r.sprout) toast(r.sprout.planted ? `🌱 Гриб дал отросток «${r.sprout.name}»! +50 $₽` : "🌱 Гриб дал отросток, но банки нет — купи её в магазине. +50 $₽");
     if (action === "daily" || r.stage_up || r.sprout) loadTop();
   };
   const load = async () => {
-    try { S = await api("GET", "/api/kombucha"); render(); } catch (_) {}
+    try {
+      const oldIds = new Set((S?.items || []).map((item) => item.id));
+      const next = await api("GET", "/api/kombucha");
+      if (waitingForSprout) {
+        const child = next.items.find((item) => item.is_sprout && !oldIds.has(item.id));
+        if (child) {
+          sel = child.id; emptyJarSelected = false; waitingForSprout = false;
+          toast(`🌱 В банке появился отросток «${child.name}»`);
+        }
+      }
+      S = next;
+      render();
+    } catch (_) {}
   };
   await load();
   clearInterval(timer);
@@ -1708,6 +2384,25 @@ async function profileExtras(d) {
         : `<p class="muted">${d.is_owner ? "Пусто. Заморозь гриб на <a href=\"/\">странице гриба</a> — и он встанет сюда." : "Пока пусто."}</p>`;
     } catch (_) {}
   }
+  if (!d.is_owner && ME && !ME.ban) {
+    try {
+      const event = await api("GET", "/api/events/state", undefined, { quiet: true });
+      if (event.active) {
+        const alive = new Set((d.garden || []).filter((k) => k.alive).map((k) => String(k.id)));
+        $$("#profile .profile-skin .kb-card[data-kcard]").forEach((card) => {
+          const id = card.dataset.kcard;
+          if (alive.has(id)) card.insertAdjacentHTML("beforeend", `<button class="btn btn-sm halloween-treat" data-treat="${esc(id)}">🎃 Сладость или гадость</button>`);
+        });
+        $$("#profile [data-treat]").forEach((button) => { button.onclick = async (e) => {
+          e.stopPropagation(); button.disabled = true;
+          try {
+            const r = await api("POST", `/api/events/halloween/treat/${button.dataset.treat}`, {});
+            toast(r.message); button.textContent = "✅ Сегодня уже заходил(а)";
+          } catch (_) { button.disabled = false; }
+        }; });
+      }
+    } catch (_) {}
+  }
 }
 
 // ---------------------------------------------------------------- «Деревянные» ($₽)
@@ -1719,7 +2414,7 @@ async function pageWallet() {
     $("#w-balance").textContent = `${d.balance} $₽`;
     setWood(d.balance);
     if (!more) $("#w-rules").innerHTML = d.rules.map((r) => `<div class="wallet-rule"><b class="plus">+${r.amount} $₽</b><span>${esc(r.title)}${r.reason === "daily_login" ? " (+ до 10 $₽ за стрик)" : ""}</span>${r.daily_cap ? `<small class="muted">до ${r.daily_cap} раз в день</small>` : ""}</div>`).join("")
-      + `<p class="muted">Потратить: банка для гриба — ${d.prices.jar} $₽, реанимация гриба — ${d.prices.revive} $₽, грибы на <a href="/market">рынке</a>. Продажа на рынке: тебе 95%, 5% сгорает.</p>`;
+      + `<p class="muted">Потратить: банка — ${d.prices.jar} $₽, новый гриб — ${d.prices.mushroom} $₽, реанимация — ${d.prices.revive} $₽, грибы на <a href="/market">рынке</a>. Продажа на рынке: тебе 95%, 5% сгорает.</p>`;
     const rows = d.items.map((t) => `<div class="wallet-row"><span class="${t.delta > 0 ? "plus" : "minus"}">${t.delta > 0 ? "+" : ""}${t.delta} $₽</span><span>${esc(t.title)}</span><small class="muted">${esc(fmtDate(t.created_at))} · баланс ${t.balance_after}</small></div>`).join("");
     if (more) hist.insertAdjacentHTML("beforeend", rows);
     else hist.innerHTML = rows || `<p class="muted">Пока пусто. Ответь на вопрос — и первые деревянные твои.</p>`;
@@ -1743,6 +2438,277 @@ function pageFaq() {
     items.forEach((it) => { const hit = !q || it.textContent.toLowerCase().includes(q); it.hidden = !hit; if (hit) n++; if (q && hit) it.open = true; });
     $("#faq-empty").hidden = n > 0;
   };
+}
+
+// ---------------------------------------------------------------- сезонные события
+function raidLeaderboardMarkup(entries, participants, myRank = null, myDamage = 0, title = "🏆 Общий рейтинг") {
+  const rows = (entries || []).map((item) => `<li class="${item.is_me ? "is-me" : ""}">
+    <span class="raid-rank-number">${item.rank}</span><b>@${esc(item.username || "игрок")}</b>
+    <span class="raid-rank-damage">${Number(item.damage || 0).toLocaleString("ru-RU")} урона</span></li>`).join("");
+  const count = Number(participants || 0);
+  const personal = myRank && !(entries || []).some((item) => item.is_me)
+    ? `<p class="raid-my-rank">Твоё место: <b>#${myRank}</b> · урон ${Number(myDamage || 0).toLocaleString("ru-RU")}</p>` : "";
+  return `<section class="raid-leaderboard"><h3>${esc(title)} <small>${count} ${plural(count, "участник", "участника", "участников")}</small></h3>
+    ${rows ? `<ol>${rows}</ol>` : `<p class="muted">Пока нет участников — нанеси первый удар!</p>`}${personal}</section>`;
+}
+
+function raidRewardLabel() {
+  return "🏅 Бейдж достижения";
+}
+
+function raidArchiveMarkup(data) {
+  const archive = data || {}, items = archive.items || [], records = archive.records || {};
+  const recordLabels = {
+    total_damage: ["🩸 Максимальный общий урон", "урона"],
+    personal_damage: ["⚔️ Личный рекорд урона", "урона"],
+    participants: ["👥 Самый массовый рейд", "участников"],
+    completed_stages: ["🎃 Больше всего пройдено стадий", "стадий"],
+  };
+  const recordCards = Object.entries(recordLabels).filter(([key]) => records[key]).map(([key, [title, unit]]) => {
+    const record = records[key];
+    const person = record.username ? `<small>@${esc(record.username)}</small>` : "";
+    return `<div class="raid-record"><small>${title}</small><b>${Number(record.value || 0).toLocaleString("ru-RU")}</b>
+      <span>${unit}${person ? ` · ${person}` : ""}</span><small>${esc(record.boss || "Рейд")} · ${record.start_at ? esc(fmtDate(record.start_at)) : ""}</small></div>`;
+  }).join("");
+  const entries = items.map((item) => {
+    const medals = (item.medals || []).map((winner) =>
+      `<span title="${Number(winner.damage || 0).toLocaleString("ru-RU")} урона">${esc(winner.medal)} <b>@${esc(winner.username)}</b></span>`).join("");
+    const rewardList = (item.contribution_rewards || []).filter((reward) => reward.reward_type === "badge").map((reward) =>
+      `<span>🏅 ${esc(reward.title)}</span>`).join("");
+    const outcome = item.boss_defeated ? "Босс повержен" : "Событие завершено";
+    return `<details class="raid-archive-entry"><summary>
+      <span class="raid-archive-boss">🎃 ${esc(item.boss || "Хэллоуинский босс")}</span>
+      <span class="raid-archive-meta">${item.start_at ? esc(fmtDate(item.start_at)) : ""} · ${Number(item.total_damage || 0).toLocaleString("ru-RU")} урона · ${item.participants || 0} участников</span>
+      <span class="raid-archive-podium">${medals || "Медалистов пока нет"}</span>
+    </summary><div class="raid-archive-body"><p class="raid-result-outcome">${outcome} · ${Number(item.completed_stages || 0)}/${Number(item.stage_count || 0)} стадий · архивировано ${item.archived_at ? esc(fmtDate(item.archived_at)) : ""}</p>
+      ${raidLeaderboardMarkup(item.leaderboard, item.participants, null, 0, "🏆 Итоговый рейтинг")}
+      ${rewardList ? `<div class="raid-archive-rewards"><b>Бейджи сезона</b>${rewardList}</div>` : ""}</div></details>`;
+  }).join("");
+  return `<section class="raid-archive"><div class="raid-archive-heading"><h3>📚 Архив прошлых рейдов</h3><small>${archive.total || 0} ${plural(Number(archive.total || 0), "событие", "события", "событий")}</small></div>
+    ${recordCards ? `<div class="raid-record-grid">${recordCards}</div>` : ""}
+    ${entries || `<p class="muted">Здесь появятся завершённые рейды и их медалисты.</p>`}</section>`;
+}
+
+async function pageEvents() {
+  const root = $("#events-root"), status = $("#events-status"), panel = $("#halloween-panel");
+  if (!root || !panel) return;
+  let event;
+  try { event = await api("GET", "/api/events/state", undefined, { quiet: true }); }
+  catch (_) { status.textContent = "Не удалось загрузить расписание события."; return; }
+  let raidArchiveData = { items: [], records: {}, total: 0 };
+  try { raidArchiveData = await api("GET", "/api/events/halloween/archive", undefined, { quiet: true }); } catch (_) {}
+  const renderInactive = () => {
+    const upcoming = event.enabled && new Date(event.start_at).getTime() > Date.now();
+    status.textContent = upcoming
+      ? `Хэллоуин запланирован: ${fmtDate(event.start_at)} — ${fmtDate(event.end_at)}.`
+      : event.raid_summary ? "Последний хэллоуинский рейд завершился — вот его итоги." : "Сейчас нет активных событий.";
+    const inactiveMessage = event.raid_summary
+      ? "Событие завершилось. Вклад каждого участника вошёл в общий итог."
+      : upcoming ? "Рейд начнётся в указанное время. Следи за банками!"
+        : "Загляни во время активного ивента — тогда здесь появится общий босс.";
+    const gifts = (event.raid_gifts || []).filter((gift) => gift?.reward_type === "badge").slice().reverse().map((gift) =>
+      `<li><span>${esc(gift.emoji || "🏅")}</span><div><b>${esc(gift.title)}</b><small>${raidRewardLabel(gift.reward_type)}${gift.event_key ? ` · ${esc(fmtDate(gift.event_key))}` : ""}${gift.description ? ` · ${esc(gift.description)}` : ""}</small></div></li>`).join("");
+    const summary = event.raid_summary;
+    const resultDates = summary?.start_at && summary?.end_at
+      ? `<p class="muted">${fmtDate(summary.start_at)} — ${fmtDate(summary.end_at)}</p>` : "";
+    const results = summary ? `<section class="raid-results"><p class="eyebrow">ИТОГИ ПОСЛЕДНЕГО СОБЫТИЯ</p>
+      <h2>${esc(summary.boss || "Общий хэллоуинский рейд")}</h2>${resultDates}
+      <div class="raid-result-stats"><div><b>${Number(summary.total_damage || 0).toLocaleString("ru-RU")}</b><small>общий урон</small></div>
+        <div><b>${summary.participants || 0}</b><small>участников</small></div>
+        <div><b>${summary.completed_stages || 0}/${summary.stage_count || 0}</b><small>стадий пройдено</small></div></div>
+      <p class="raid-result-outcome">${summary.boss_defeated ? "🎃 Общими усилиями босса одолели!" : "🌘 Босс продержался до конца события."}</p>
+      ${raidLeaderboardMarkup(summary.leaderboard, summary.participants, null, 0, "🏆 Рейтинг участников")}</section>` : "";
+    panel.innerHTML = `<h2>🌘 Сейчас тихо</h2><p class="muted">${inactiveMessage}</p>
+      ${results}
+      ${gifts ? `<section class="raid-rewards raid-gift-box"><h3>🏅 Твои бейджи за все рейды</h3><ul>${gifts}</ul></section>` : ""}
+      ${raidArchiveMarkup(raidArchiveData)}
+      ${isHalloweenAdmin() ? `<button class="btn btn-ghost scare-test" data-screamer-test>👻 Проверить скример</button>` : ""}`;
+  };
+  if (!event.active) { renderInactive(); return; }
+  status.textContent = `Хэллоуин идёт до ${fmtDate(event.end_at)}. Не оставляй грибов одних в темноте.`;
+  let raid;
+  try { raid = await api("GET", "/api/events/halloween/raid", undefined, { quiet: true }); }
+  catch (_) { panel.innerHTML = `<p class="muted">Не удалось загрузить босса. Попробуй обновить страницу.</p>`; return; }
+  if (!raid.active) { event.active = false; renderInactive(); return; }
+
+  let partyIds = (raid.party_ids || []).map(Number);
+  let partyDirty = false, tapBusy = false, tapAllowedAt = 0;
+  const canJoin = () => !!(event.active && ME && !ME.ban
+    && (ME.permissions?.includes("kombucha.play") || isHalloweenAdmin()));
+  const canTap = () => canJoin() && !tapBusy && Date.now() >= tapAllowedAt
+    && raid.available_mushrooms?.length > 0 && partyIds.length > 0;
+  const tapLabel = () => {
+    if (!ME) return "🔐 Войди, чтобы вступить в рейд";
+    if (ME.ban) return "🚫 Аккаунт заблокирован";
+    if (!canJoin()) return "🔒 Нет права на участие";
+    if (!raid.available_mushrooms?.length) return "🍄 Сначала заведи живого гриба";
+    if (!partyIds.length) return "Выставь хотя бы одного гриба";
+    return `🗡️ Атаковать · −${partyIds.length} HP`;
+  };
+  const tap = async () => {
+    if (tapBusy || Date.now() < tapAllowedAt || !canTap()) return;
+    tapBusy = true;
+    tapAllowedAt = Date.now() + 1000;
+    const buttons = [$("#halloween-boss", panel), $("#halloween-tap", panel)];
+    buttons.forEach((b) => { if (b) b.disabled = true; });
+    try {
+      const r = await api("POST", "/api/events/halloween/raid/tap", { kombucha_ids: partyIds });
+      raid = r;
+      partyIds = (r.party_ids || partyIds).map(Number);
+      partyDirty = false;
+      paint();
+      if (r.defeated) toast(r.message || "Стадия побеждена!");
+      const stageScene = $(".haunt-stage", panel);
+      const hitCount = Math.min(3, Math.max(1, Number(r.damage_dealt) || 1));
+      if (stageScene) {
+        stageScene.classList.add("raid-clash", `raid-hits-${hitCount}`);
+        const damagePop = $(".raid-damage-pop", stageScene);
+        if (damagePop) damagePop.textContent = `−${hitCount}`;
+        if (r.defeated) stageScene.classList.add("raid-phase-break");
+        setTimeout(() => stageScene.classList.remove("raid-clash", `raid-hits-${hitCount}`, "raid-phase-break"), 1050);
+      }
+      const hpBar = $(".raid-hp", panel);
+      if (hpBar) {
+        hpBar.classList.add("raid-hp-hit");
+        setTimeout(() => hpBar.classList.remove("raid-hp-hit"), 600);
+      }
+      const boss = $("#halloween-boss", panel);
+      if (boss) {
+        const effect = r.defeated ? "boss-defeat" : "boss-hit";
+        boss.classList.add(effect);
+        setTimeout(() => boss.classList.remove(effect), r.defeated ? 850 : 520);
+      }
+    } catch (_) {} finally {
+      setTimeout(() => { tapBusy = false; if (panel.isConnected) paint(); }, Math.max(0, tapAllowedAt - Date.now()));
+    }
+  };
+  const paint = () => {
+    const pct = Math.max(0, Math.min(100, raid.hp / raid.max_hp * 100));
+    // Health looks: >70% intact, 40–70% cracked, 10–40% corrupted, ≤10% critical.
+    const bossState = pct > 70
+      ? { className: "boss-healthy", tier: "healthy", caption: "ОН ЕЩЁ СИЛЁН" }
+      : pct > 40
+        ? { className: "boss-wounded", tier: "wounded", caption: "ПО КОЖЕ ИДУТ ТРЕЩИНЫ" }
+        : pct > 10
+          ? { className: "boss-corrupted", tier: "corrupted", caption: "ПЛЕСЕНЬ ПРОРЫВАЕТСЯ" }
+          : { className: "boss-critical", tier: "critical", caption: "ЕЩЁ ОДИН УДАР!" };
+    const ready = canTap();
+    const available = raid.available_mushrooms || [];
+    const selected = new Set(partyIds);
+    const teamSlots = [0, 1, 2].map((slot) => {
+      const chosen = partyIds[slot] || "";
+      const options = available.map((m) => {
+        const usedElsewhere = partyIds.some((id, index) => index !== slot && id === m.id);
+        return `<option value="${m.id}" ${m.id === chosen ? "selected" : ""} ${usedElsewhere ? "disabled" : ""}>${esc(m.name)} · чистота ${m.stats.clean}, счастье ${m.stats.happy}</option>`;
+      }).join("");
+      return `<label>Слот ${slot + 1}<select class="input raid-team-select" data-raid-slot="${slot}" ${canJoin() && available.length ? "" : "disabled"}>
+        <option value="">— не выставлять —</option>${options}</select></label>`;
+    }).join("");
+    const stageGifts = (raid.stage_gifts || []).filter((gift) => gift?.reward_type === "badge").map((gift) => {
+      const received = (raid.gifts_received || []).some((item) => item && item.id === gift.id
+        && (item.event_key || raid.event_key) === raid.event_key);
+      const remaining = Math.max(0, gift.required_damage - (raid.stage_damage || 0));
+      const progress = received ? "уже получен" : remaining === 0
+        ? "порог выполнен — бейдж выдаётся сразу после достижения нужного урона"
+        : `нанеси ещё ${remaining} урона на этой стадии`;
+      return `<li><b>${esc(gift.emoji)} ${esc(gift.title)}</b> <small>${raidRewardLabel(gift.reward_type)}</small> — ${progress}${gift.description ? `<small>${esc(gift.description)}</small>` : ""}</li>`;
+    }).join("");
+    const receivedGifts = (raid.gifts_received || []).filter((gift) => gift?.reward_type === "badge").slice().reverse().map((gift) =>
+      `<li><span>${esc(gift.emoji || "🏅")}</span><div><b>${esc(gift.title)}</b><small>${raidRewardLabel(gift.reward_type)}${gift.event_key ? ` · ${esc(fmtDate(gift.event_key))}` : ""}${gift.description ? ` · ${esc(gift.description)}` : ""}</small></div></li>`).join("");
+    const selectedNames = available.filter((m) => selected.has(m.id)).map((m) => esc(m.name));
+    const battleFighters = available.filter((m) => selected.has(m.id)).slice(0, 3).map((m, index) =>
+      `<span class="raid-fighter raid-fighter-${index + 1}" title="${esc(m.name)}">${kombuchaSVG({ ...m, id: `raid-${m.id}` }, { small: true })}</span>`).join("");
+    panel.innerHTML = `<div class="halloween-event-card">
+      <div class="haunt-stage" id="raid-arena"><span class="haunt-web">🕸️</span><span class="haunt-bats">🦇　🦇</span><span class="haunt-fly fly-a">🪰</span><span class="haunt-fly fly-b">🪰</span>
+        <div class="raid-projectiles" aria-hidden="true"><span class="raid-projectile raid-projectile-one">⚡</span><span class="raid-projectile raid-projectile-two">💫</span><span class="raid-projectile raid-projectile-three">🔥</span></div>
+        <span class="raid-impact" aria-hidden="true">💥</span><b class="raid-damage-pop" aria-hidden="true"></b>
+        <div class="raid-fighter-line" aria-hidden="true">${battleFighters}</div>
+        <button id="halloween-boss" class="halloween-boss ${bossState.className}" data-health-tier="${bossState.tier}" aria-label="Атаковать босса. ${bossState.caption}" ${ready ? "" : "disabled"}>🎃<span class="boss-mold">🦠</span></button><span class="haunt-caption">${bossState.caption}</span></div>
+      <div class="haunt-info"><p class="eyebrow">ОБЩИЙ РЕЙД · ФАЗА ${raid.phase} · СТАДИЯ ${raid.stage_number}/${raid.stage_count}</p>
+        <h2>${esc(raid.boss)}</h2><h3 class="raid-stage-title">${esc(raid.stage_title)}</h3>
+        <p>${esc(raid.stage_description || "Один босс для всех игроков сайта.")} Регенерация — <b>${raid.regen_per_minute} HP в минуту</b>.</p>
+        <p>Выставь до трёх своих живых грибов: каждый наносит 1 урон. При ударе каждый участник получает +1 чистоты и счастья, но теряет по 1 сахару и заварки.</p>
+        <div class="raid-hp"><div class="raid-hp-label"><b>${raid.hp.toLocaleString("ru-RU")} HP</b><span>${raid.max_hp.toLocaleString("ru-RU")} максимум</span></div><div class="raid-hp-bar"><i style="width:${pct}%"></i></div></div>
+        <div class="raid-meta"><span>Твой урон: <b>${raid.my_damage}</b></span><span>Урон на стадии: <b>${raid.stage_damage || 0}</b></span><span>Всего урона: <b>${raid.total_damage.toLocaleString("ru-RU")}</b></span></div>
+        ${raidLeaderboardMarkup(raid.leaderboard, raid.participants, raid.my_rank, raid.my_damage)}
+        ${ME ? `<section class="raid-party"><h3>🍄 Твоя боевая группа</h3>${available.length ? `<div class="raid-team-slots">${teamSlots}</div>
+          <p class="raid-team-status muted">${partyIds.length ? `Выставлено: ${selectedNames.join(", ")} · урон за удар: ${partyIds.length}` : "Выбери хотя бы одного гриба"}</p>`
+          : `<p class="muted">У тебя пока нет живых незамороженных грибов для рейда. Заведи гриб на <a href="/">подоконнике</a>.</p>`}</section>` : ""}
+        <button class="btn btn-accent raid-tap" id="halloween-tap" ${ready ? "" : "disabled"}>${tapLabel()}</button>
+        ${!ME ? `<a class="btn btn-ghost btn-sm" href="/login?next=/events">🔐 Войти и бить босса вместе</a>` : ""}
+        ${stageGifts ? `<section class="raid-rewards"><h3>🏅 Бейджи этой стадии</h3><ul>${stageGifts}</ul></section>` : ""}
+        ${ME && receivedGifts ? `<section class="raid-rewards raid-gift-box"><h3>🏅 Твои бейджи за все рейды</h3><ul>${receivedGifts}</ul></section>` : ""}
+          <div class="haunt-controls">${isHalloweenAdmin() ? `<button class="btn btn-ghost scare-test" data-screamer-test>👻 Проверить скример</button>` : ""}<button class="btn btn-ghost" data-spooky-music aria-pressed="${spookyMusicEnabled ? "true" : "false"}">${spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку"}</button></div>
+        <p class="muted">«Сладость или гадость» раз в день доступна на живых грибах друзей — открой профиль и постучи по банке.</p></div>
+    </div>${raidArchiveMarkup(raidArchiveData)}`;
+    $("#halloween-boss", panel).onclick = tap;
+    $("#halloween-tap", panel).onclick = tap;
+    $$('[data-raid-slot]', panel).forEach((select) => {
+      select.onchange = () => {
+        const next = $$('[data-raid-slot]', panel).map((item) => item.value ? Number(item.value) : null).filter(Boolean);
+        if (new Set(next).size !== next.length) {
+          toast("Одного гриба нельзя выставить в два слота", true);
+          select.value = partyIds[Number(select.dataset.raidSlot)] || "";
+          return;
+        }
+        partyIds = next;
+        partyDirty = true;
+        const fighterLine = $(".raid-fighter-line", panel);
+        if (fighterLine) {
+          fighterLine.replaceChildren(...partyIds.slice(0, 3).map((id, index) => {
+            const mushroom = available.find((item) => item.id === id);
+            const fighter = document.createElement("span");
+            fighter.className = `raid-fighter raid-fighter-${index + 1}`;
+            fighter.title = mushroom?.name || "Боец";
+            if (mushroom) fighter.innerHTML = kombuchaSVG({ ...mushroom, id: `raid-${mushroom.id}` }, { small: true });
+            return fighter;
+          }));
+        }
+        const statusLine = $(".raid-team-status", panel);
+        const names = available.filter((m) => partyIds.includes(m.id)).map((m) => m.name);
+        if (statusLine) statusLine.textContent = partyIds.length
+          ? `Выставлено: ${names.join(", ")} · урон за удар: ${partyIds.length}` : "Выбери хотя бы одного гриба";
+        [$("#halloween-boss", panel), $("#halloween-tap", panel)].forEach((button) => {
+          if (button) button.disabled = !canTap() || tapBusy;
+        });
+        const attackButton = $("#halloween-tap", panel);
+        if (attackButton) attackButton.textContent = tapLabel();
+      };
+    });
+  };
+  paint();
+  let raidRefreshBusy = false, raidPoll;
+  const refreshRaid = async () => {
+    if (raidRefreshBusy || tapBusy || document.hidden) return;
+    raidRefreshBusy = true;
+    try {
+      const fresh = await api("GET", "/api/events/halloween/raid", undefined, { quiet: true });
+      if (!fresh.active) {
+        event.active = false;
+        event.raid_summary = fresh.summary || event.raid_summary;
+        try { raidArchiveData = await api("GET", "/api/events/halloween/archive", undefined, { quiet: true }); } catch (_) {}
+        await applyEventTheme();
+        renderInactive();
+        clearInterval(raidPoll);
+        return;
+      }
+      const changed = fresh.hp !== raid.hp || fresh.max_hp !== raid.max_hp || fresh.phase !== raid.phase
+        || fresh.stage_number !== raid.stage_number || fresh.total_damage !== raid.total_damage
+        || fresh.my_damage !== raid.my_damage || fresh.my_rank !== raid.my_rank || fresh.participants !== raid.participants
+        || JSON.stringify(fresh.leaderboard) !== JSON.stringify(raid.leaderboard)
+        || fresh.stage_damage !== raid.stage_damage
+        || JSON.stringify(fresh.available_mushrooms) !== JSON.stringify(raid.available_mushrooms)
+        || JSON.stringify(fresh.gifts_received) !== JSON.stringify(raid.gifts_received);
+      if (changed) {
+        raid = fresh;
+        if (!partyDirty) partyIds = (fresh.party_ids || []).map(Number);
+        else partyIds = partyIds.filter((id) => fresh.available_mushrooms.some((m) => m.id === id));
+        paint();
+      }
+    } catch (_) {} finally { raidRefreshBusy = false; }
+  };
+  raidPoll = setInterval(refreshRaid, 5000);
+  window.addEventListener("pagehide", () => clearInterval(raidPoll), { once: true });
 }
 
 // ---------------------------------------------------------------- boot
@@ -1811,16 +2777,20 @@ async function pageHome() {
 }
 
 const PAGES = {
-  home: pageHome, diary: pageDiary, kombucha: pageKombucha, market: pageMarket, wallet: pageWallet,
+  home: pageHome, diary: pageDiary, kombucha: pageKombucha, events: pageEvents, market: pageMarket, wallet: pageWallet,
   profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, notifications: pageNotifications, admin: pageAdmin,
   settings: pageSettings, faq: pageFaq,
 };
 
 (async function boot() {
-  initHeader();
-  await loadMe();
+  const banPage = document.body.dataset.page === "banned";
+  if (!banPage) {
+    initHeader();
+    await loadMe();
+    await applyEventTheme();
+  }
   const fn = PAGES[document.body.dataset.page];
-  if (fn) fn();
+  if (fn) await fn();
 })();
 
 // ---------------------------------------------------------------- PWA
@@ -1829,7 +2799,9 @@ if ("serviceWorker" in navigator && (location.protocol === "https:" || location.
 }
 let kbInstallPrompt = null;
 window.addEventListener("beforeinstallprompt", (e) => {
-  e.preventDefault(); kbInstallPrompt = e;
+  e.preventDefault();
+  if (document.body.dataset.page === "banned") return;
+  kbInstallPrompt = e;
   if (localStorage.getItem("pwa-dismissed")) return;
   const b = document.createElement("div");
   b.className = "pwa-banner";

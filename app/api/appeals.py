@@ -22,14 +22,14 @@ def ban_out(b: Ban) -> dict:
 
 
 @bp.get("/me/ban")
-@login_required
+@login_required(allow_banned=True)
 async def my_ban():
     ban = await active_global_ban(g.user.id)
     return {"ban": ban_out(ban) if ban else None}
 
 
 @bp.post("/bans/<int:ban_id>/appeal")
-@login_required  # без проверки бана — забаненный должен иметь возможность обжаловать
+@login_required(allow_banned=True)  # исключение: забаненный должен иметь возможность обжаловать
 async def appeal(ban_id: int):
     text = req_str(json_body(), "text", min_len=10, max_len=2000)
     async with session_scope() as s:

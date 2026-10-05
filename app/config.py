@@ -21,6 +21,10 @@ class Config:
     )
     REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
     REDIS_CLIENT = None  # тесты подсовывают сюда fakeredis
+    # VAPID keys are required only for actual Web Push delivery. Preferences and PWA remain optional.
+    VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
+    VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
+    VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:admin@schematoz-bulboz.org")
 
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"

@@ -15,9 +15,10 @@
 - Если любой показатель лежит на нуле 24 часа — гриб закисает. Можно перезавести
   (поколение +1) или реанимировать за $₽.
 - Имя гриба уникально на весь сайт (без учёта регистра).
-- Несколько банок: одна бесплатно, остальные покупаются за «Деревянные».
-- Отросток: если гриб дошёл до последней стадии и за ним ухаживали 7+ разных дней,
-  от него отрастает новый гриб (в свободную банку, либо ждёт, пока купишь).
+- Несколько банок: первая бесплатно, дополнительные банки покупаются за «Деревянные»;
+  нового гриба в пустую банку можно купить за 1000 $₽ или дождаться бесплатного отростка.
+- Отросток: если гриб дошёл до последней стадии и выполнил условия ухода, от него
+  отрастает новый гриб в свободной банке либо ждёт, пока игрок выберет его.
 - 20 мутаций: выпадают случайно при действиях, у каждой своя стадия и условие.
   Остаются на грибе навсегда + попадают в коллекцию юзера (kombucha_codex).
 """
@@ -160,6 +161,13 @@ async def add_mutation(s, k: Kombucha, m: Mutation, at: datetime, inherited: boo
     await kb_achievements.after_mutation(s, k.user_id, m)
     diary.log(s, k, "inherited" if inherited else "mutation", at=at, emoji=m.emoji, title=m.title,
               rarity=RARITY[m.rarity][0], serial=serial)
+    if not inherited:
+        from .notifications import notify_once
+        from .push import enqueue_push
+        alert_key = f"mutation:{k.id}:{serial}"
+        body = f"Я мутировал: {m.emoji} «{m.title}». Не говори, что я не меняюсь."
+        await notify_once(s, k.user_id, "kombucha", alert_key, text=body, kombucha_id=k.id, category="mutation")
+        await enqueue_push(s, k.user_id, "mutation", "Появилась мутация 🧬", body, f"/g/{k.id}", alert_key)
     return {"code": m.code, "title": m.title, "emoji": m.emoji, "rarity": m.rarity,
             "rarity_title": RARITY[m.rarity][0], "serial": serial, "first_time": new}
 
@@ -188,9 +196,10 @@ def stage_for(xp: int) -> dict:
             "next_title": nxt[1] if nxt else None}
 
 
-def tick(k: Kombucha, at: datetime | None = None) -> None:
-    """Применить все прошедшие 12-часовые ступеньки убывания и проверить, не закис ли гриб.
-    updated_at — якорь ступенек: сдвигается только на целое число периодов."""
+def tick(k: Kombucha, at: datetime | None = None, halloween_active: bool = False,
+         halloween_window: tuple[datetime, datetime] | None = None) -> None:
+    """Применить ступеньки убывания и проверить, не закис ли гриб.
+    В период Хэллоуина чистота и счастье падают вдвое быстрее."""
     at = at or now()
     if not k.alive or k.frozen:
         return
@@ -201,8 +210,11 @@ def tick(k: Kombucha, at: datetime | None = None) -> None:
             break
         if not k.mold and rng.random() < (MOLD_CHANCE if k.clean < MOLD_CLEAN_BELOW else MOLD_CHANCE_CLEAN):
             k.mold = True
+        event_step = halloween_active or bool(
+            halloween_window and halloween_window[0] <= step_at < halloween_window[1])
         for s in STATS:
-            setattr(k, s, max(getattr(k, s) - DROP[s] - (MOLD_EXTRA.get(s, 0.0) if k.mold else 0.0), 0.0))
+            drop = DROP[s] * (2 if event_step and s in ("clean", "happy") else 1)
+            setattr(k, s, max(getattr(k, s) - drop - (MOLD_EXTRA.get(s, 0.0) if k.mold else 0.0), 0.0))
         if k.zero_since is None and any(getattr(k, s) <= 0 for s in STATS):
             k.zero_since = step_at
     k.updated_at = k.updated_at + PERIOD * steps
@@ -264,13 +276,19 @@ def _new(user_id: int, name: str, parent: Kombucha | None = None) -> Kombucha:
                     born_at=t, updated_at=t, mold=False, owners=[])
 
 
+async def halloween_decay_window(s) -> tuple[datetime, datetime] | None:
+    from . import halloween
+    return halloween.decay_window(await halloween.get_config(s))
+
+
 async def list_for(s, user_id: int, lock: bool = False) -> list[Kombucha]:
     q = select(Kombucha).where(Kombucha.user_id == user_id).order_by(Kombucha.id)
     if lock:
         q = q.with_for_update()
     items = list((await s.scalars(q)).all())
+    event_window = await halloween_decay_window(s)
     for k in items:
-        tick(k)
+        tick(k, halloween_window=event_window)
     return items
 
 
@@ -294,7 +312,7 @@ async def get_own(s, user_id: int, kid: int) -> Kombucha:
     k = await s.get(Kombucha, kid, with_for_update=True)
     if k is None or k.user_id != user_id:
         raise ApiError("Гриб не найден", 404, "not_found")
-    tick(k)
+    tick(k, halloween_window=await halloween_decay_window(s))
     return k
 
 
@@ -328,17 +346,15 @@ async def plant(s, user: User, name: str | None = None, parent: Kombucha | None 
     return k
 
 
-async def place_pending_sprouts(s, user: User) -> list[Kombucha]:
-    """После покупки банки — сначала сажаем отростки, которые ждали."""
-    planted = []
-    parents = (await s.scalars(select(Kombucha).where(Kombucha.user_id == user.id, Kombucha.sprout_pending.is_(True))
-                               .order_by(Kombucha.id).with_for_update())).all()
-    for p in parents:
-        if (await jars_info(s, user))["free"] <= 0:
-            break
-        planted.append(await plant(s, user, parent=p))
-        p.sprout_pending = False
-    return planted
+async def plant_pending_sprout(s, user: User, parent: Kombucha) -> Kombucha:
+    """Plant one offspring that was held until the player had an empty jar."""
+    if not parent.sprout_pending:
+        raise ApiError("У этого гриба нет ожидающего отростка", 409, "no_pending_sprout")
+    if (await jars_info(s, user))["free"] <= 0:
+        raise ApiError("Нет свободной банки для отростка", 409, "no_free_jar")
+    child = await plant(s, user, parent=parent)
+    parent.sprout_pending = False
+    return child
 
 
 async def buy_jar(s, user: User) -> dict:
@@ -349,7 +365,8 @@ async def buy_jar(s, user: User) -> dict:
     await s.flush()
     if user.jars >= wood.MAX_JARS:
         await kb_achievements.award(s, user.id, "kb_jars")
-    return {"sprouts": [k.name for k in await place_pending_sprouts(s, user)]}
+    # Keep the new jar empty so the player can buy a mushroom or choose an offspring.
+    return {"sprouts": []}
 
 
 # ---------------------------------------------------------------- действия
@@ -546,6 +563,8 @@ def out(k: Kombucha) -> dict:
         danger = max(int((k.zero_since + DEATH_AFTER - at).total_seconds()), 0)
     muts = [mo for mo in (mut_out(x) for x in (k.mutations or [])) if mo]
     muts.sort(key=lambda x: RARITY_ORDER.index(x["rarity"]))
+    from .halloween import active_mutations
+    muts.extend(active_mutations(k, at))
     st = stage_for(k.xp)
     return {
         "id": k.id, "name": k.name, "xp": k.xp, "best_xp": k.best_xp, "generation": k.generation, "alive": k.alive,
@@ -557,6 +576,11 @@ def out(k: Kombucha) -> dict:
         "mutations": muts, "mut_per_stage": MAX_MUT_PER_STAGE,
         "mut_slots": {str(st): n for st, n in sorted(stage_mut_counts(k).items())}, "care_days": k.care_days, "sprouted": k.sprouted, "sprout_pending": k.sprout_pending,
         "sprout_progress": sprout_progress(k, at), "mold": bool(k.mold),
+        "halloween_hat": k.halloween_hat,
+        "halloween_hat_meta": k.halloween_hat_meta,
+        "halloween_mutations": active_mutations(k, at),
+        "halloween_gone": bool(k.halloween_gone and k.halloween_gone_day == at.astimezone(MSK).date()),
+        "halloween_web_until": k.halloween_web_until.isoformat() if k.halloween_web_until and k.halloween_web_until > at else None,
         "owners": [{"username": o.get("username"), "at": o.get("at"), "how": o.get("how")} for o in (k.owners or [])],
         "is_sprout": k.parent_id is not None,
         "frozen": k.frozen, "frozen_at": k.frozen_at.isoformat() if k.frozen_at else None,
