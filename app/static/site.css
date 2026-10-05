@@ -919,10 +919,15 @@ body.kb-med-on { overflow: hidden; }
 .kb-practice{background:rgba(120,200,255,.12);border-radius:10px;padding:6px 10px}
 
 /* ---------- tilt, Halloween event, push settings ---------- */
-.kb-scene > .kb-svg { transform: translate3d(var(--cursor-x, 0px), var(--cursor-y, 0px), 0) rotate(var(--cursor-tilt, 0deg)); transition: transform .2s ease-out; }
+.kb-scene > .kb-svg { transform: translate3d(var(--cursor-x, 0px), var(--cursor-y, 0px), 0) rotate(var(--cursor-tilt, 0deg)); transition: transform .2s ease-out; touch-action: pan-y; }
 .kb-liquid, .kb-liquid-surface { transition: fill .6s ease, transform .18s ease-out; }
+.kb-tilt-btn { position:absolute; left:6px; bottom:48px; z-index:4; width:34px; height:34px; padding:0; border-radius:10px; border:1px solid #ffffff33; background:#0008; color:#fff; font:inherit; font-size:16px; cursor:pointer; }
+.kb-tilt-btn:hover { background:#000b; border-color:var(--accent); }
 .kb-gone-note { position:absolute; left:50%; bottom:8px; transform:translateX(-50%); width:max-content; max-width:100%; padding:6px 10px; border-radius:10px; background:#0d0b12d9; color:#f6d49b; font-size:12px; text-align:center; }
 .halloween-gone .kb-svg { filter:saturate(.75); }
+.kb-gone-mush { opacity:.76; filter:drop-shadow(0 0 8px #c8efff); }
+.kb-gone-mush text { animation:kb-ghost-pulse 2.2s ease-in-out infinite alternate; }
+@keyframes kb-ghost-pulse { from { opacity:.55; } to { opacity:1; } }
 .kb-halloween-tools { margin-top:12px; }
 .kb-halloween-tools h3 { margin:0 0 6px; }
 .kb-halloween-tools > p { margin:8px 0; }

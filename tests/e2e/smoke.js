@@ -75,30 +75,65 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   check("гриб: банка нарисована", !!d.window.document.querySelector(".kb-main .kb-svg"));
   const tiltScene = d.window.document.querySelector(".kb-main .kb-scene");
   const liquidSurface = tiltScene?.querySelector(".kb-liquid-surface");
-  check("гриб: управление наклоном привязано к курсору без сообщения о недоступности",
-    !!tiltScene && !tiltScene.querySelector("[data-tilt]") && !/наклон недоступен/i.test(tiltScene.textContent || ""));
+  check("гриб: управление наклоном доступно без сообщения о недоступности",
+    !!tiltScene && !/наклон недоступен/i.test(tiltScene.textContent || ""));
   if (tiltScene && liquidSurface) {
     const oldMatchMedia = d.window.matchMedia;
     d.window.matchMedia = (query) => query === "(hover: hover)"
       ? { matches: true }
       : oldMatchMedia?.call(d.window, query) || { matches: false };
     tiltScene.getBoundingClientRect = () => ({ left: 0, top: 0, width: 200, height: 240 });
-    const moveCursor = (clientX) => {
+    const movePointer = (clientX, pointerType = "mouse") => {
       const event = new d.window.MouseEvent("pointermove", { bubbles: true, clientX, clientY: 120 });
-      Object.defineProperty(event, "pointerType", { value: "mouse" });
+      Object.defineProperty(event, "pointerType", { value: pointerType });
       tiltScene.dispatchEvent(event);
     };
-    moveCursor(200);
+    const liquidBody = tiltScene.querySelector(".kb-liquid");
+    check("гриб: жидкость доходит до дна банки без клиновидной пустоты",
+      liquidBody?.getAttribute("d")?.endsWith("L420,400 L-200,400 Z"));
+    movePointer(200);
     check("гриб: курсор справа наклоняет поверхность жидкости", liquidSurface.getAttribute("transform")?.startsWith("rotate(-12 110 "));
-    moveCursor(0);
+    movePointer(0);
     check("гриб: курсор слева наклоняет поверхность в другую сторону", liquidSurface.getAttribute("transform")?.startsWith("rotate(12 110 "));
     tiltScene.dispatchEvent(new d.window.Event("pointerleave"));
     check("гриб: поверхность возвращается в горизонталь после ухода курсора", liquidSurface.getAttribute("transform")?.startsWith("rotate(0 110 "));
+    d.window.matchMedia = () => ({ matches: false });
+    movePointer(150, "touch");
+    check("гриб: касание/перетаскивание на мобильном тоже наклоняет жидкость",
+      liquidSurface.getAttribute("transform")?.startsWith("rotate(-6 110 "));
+    const touchEnd = new d.window.MouseEvent("pointerup", { bubbles: true });
+    Object.defineProperty(touchEnd, "pointerType", { value: "touch" });
+    tiltScene.dispatchEvent(touchEnd);
+    check("гриб: наклон от касания сбрасывается после отпускания пальца",
+      liquidSurface.getAttribute("transform")?.startsWith("rotate(0 110 "));
     if (oldMatchMedia) d.window.matchMedia = oldMatchMedia;
     else delete d.window.matchMedia;
   }
   check("гриб: пункт «Мой гриб» активен", !!d.window.document.querySelector('.main-nav a[href="/"].active'));
+  const desktopMatchMedia = d.window.matchMedia, desktopOrientation = d.window.DeviceOrientationEvent;
+  d.window.matchMedia = (query) => ({ matches: query === "(pointer: coarse)" });
+  let permissionResult = "denied";
+  const MobileOrientation = class DeviceOrientationEvent {};
+  MobileOrientation.requestPermission = async () => permissionResult;
+  d.window.DeviceOrientationEvent = MobileOrientation;
   d.window.document.querySelector('[data-act="tea"]').click(); await sleep(900);
+  const mobileTiltButton = d.window.document.querySelector(".kb-main [data-tilt]");
+  check("гриб: на мобильном снова есть кнопка датчика наклона", !!mobileTiltButton);
+  mobileTiltButton?.click(); await sleep(0);
+  check("гриб: отказ датчика оставляет подсказку для касания, без сообщения о недоступности",
+    !!mobileTiltButton && mobileTiltButton.title.includes("Проведи пальцем")
+      && !/наклон недоступен/i.test(d.window.document.querySelector(".kb-main .kb-scene")?.textContent || ""));
+  permissionResult = "granted";
+  mobileTiltButton?.click(); await sleep(0);
+  const orientation = new d.window.Event("deviceorientation");
+  Object.defineProperty(orientation, "gamma", { value: 14 });
+  d.window.dispatchEvent(orientation);
+  const mobileSurface = d.window.document.querySelector(".kb-main .kb-liquid-surface");
+  check("гриб: датчик телефона наклоняет жидкость", mobileSurface?.getAttribute("transform")?.startsWith("rotate(-14 110 "));
+  if (desktopMatchMedia) d.window.matchMedia = desktopMatchMedia;
+  else delete d.window.matchMedia;
+  if (desktopOrientation) d.window.DeviceOrientationEvent = desktopOrientation;
+  else delete d.window.DeviceOrientationEvent;
   check("гриб: заварка долита, кнопка на кулдауне", d.window.document.querySelector('[data-act="tea"]')?.disabled === true);
   check("гриб: банки, коллекция из 240 мутаций по стадиям, таймер 12 ч", !!d.window.document.querySelector(".kb-jar-tab.active") && d.window.document.querySelectorAll(".kb-cx").length === 240 && d.window.document.querySelectorAll(".kb-cx-stage").length === 6 && txt(d, ".kb-next").includes("12 часов"));
   check("гриб: в шапке баланс $₽", !d.window.document.querySelector("#wood-chip").hidden && Number(txt(d, "#wood-balance")) > 0);

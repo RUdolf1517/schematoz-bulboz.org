@@ -1836,10 +1836,12 @@ function kombuchaSVG(k, { small = false } = {}) {
     ${outside.join("")}${FX.outside.join("")}
     <rect x="60" y="6" width="100" height="22" rx="6" class="kb-lid"${FX.lidColor ? ` style="fill:${FX.lidColor};stroke:${shade(FX.lidColor)}"` : ""}/>${FX.lid.join("")}
     <g clip-path="url(#kb-jar-${k.id || 0})">
-      <path class="kb-liquid" data-y="${top}" d="M30,${top} Q70,${top - 4} 110,${top} T190,${top} L190,230 L30,230 Z" fill="${tint}"/>
+      <path class="kb-liquid" data-y="${top}" d="M30,${top} Q70,${top - 4} 110,${top} T190,${top} L420,400 L-200,400 Z" fill="${tint}"/>
       <path class="kb-liquid-surface" data-y="${top}" d="M30,${top} Q70,${top - 4} 110,${top} T190,${top}" stroke="#ffffff55" stroke-width="2" fill="none"/>
       ${stars}${bubbles}${FX.liquid.join("")}
-      ${HALLOWEEN_ACTIVE && k.halloween_gone ? "" : `<g class="${k.alive ? "kb-float" : ""}"><g class="kb-mush" data-cx="${cx}" data-cy="${cy}" transform="translate(${cx},${cy})"${FX.glow.length ? ` style="filter:${FX.glow.slice(0, 3).join(" ")}"` : ""}>
+      ${HALLOWEEN_ACTIVE && k.halloween_gone
+        ? `<g class="kb-float"><g class="kb-gone-mush" transform="translate(${cx},${cy})" aria-hidden="true"><text x="0" y="${(h * 0.6).toFixed(1)}" text-anchor="middle" font-size="${Math.max(34, Math.min(58, w * 0.56))}">👻</text></g></g>`
+        : `<g class="${k.alive ? "kb-float" : ""}"><g class="kb-mush" data-cx="${cx}" data-cy="${cy}" transform="translate(${cx},${cy})"${FX.glow.length ? ` style="filter:${FX.glow.slice(0, 3).join(" ")}"` : ""}>
         <g class="kb-disc-wrap">
           <ellipse rx="${w}" ry="${h}" class="kb-disc" ${discFill ? `style="fill:${discFill};stroke:${shade(FX.discColors[0])}"` : disc ? `style="fill:${disc[1]};stroke:${disc[2]}"` : ""}/>
           <ellipse rx="${w * 0.8}" ry="${h * 0.5}" cy="-${h * 0.3}" class="kb-disc-hi"/>
@@ -1864,62 +1866,111 @@ function kombuchaSVG(k, { small = false } = {}) {
   </svg>`;
 }
 
-let kbCursorScene = null;
-let kbCursorTilt = 0;
+let kbTiltScene = null;
+let kbTiltRoll = 0;
+let kbTiltListening = false;
 function clampN(value, min, max) { return Math.min(max, Math.max(min, value)); }
 
-function applyKbCursorTilt() {
-  if (!kbCursorScene || REDUCED_MOTION) return;
-  const svg = $(".kb-svg", kbCursorScene);
+function hasCoarsePointer() {
+  return (navigator.maxTouchPoints || 0) > 0 || "ontouchstart" in window
+    || !!window.matchMedia?.("(pointer: coarse)")?.matches;
+}
+
+function canOfferDeviceTilt() {
+  return !REDUCED_MOTION && hasCoarsePointer() && "DeviceOrientationEvent" in window;
+}
+
+function applyKbTilt() {
+  if (!kbTiltScene || REDUCED_MOTION) return;
+  const svg = $(".kb-svg", kbTiltScene);
   if (!svg) return;
   const surface = $(".kb-liquid-surface", svg), liquid = $(".kb-liquid", svg);
   const y = surface?.dataset.y || 100;
-  const liquidAngle = -kbCursorTilt;
+  const liquidAngle = -kbTiltRoll;
   if (surface) surface.setAttribute("transform", `rotate(${liquidAngle} 110 ${y})`);
   if (liquid) liquid.setAttribute("transform", `rotate(${liquidAngle} 110 ${y})`);
   const mush = $(".kb-mush", svg);
   if (mush) {
     const cx = Number(mush.dataset.cx || 110), cy = Number(mush.dataset.cy || 100);
-    const x = cx + kbCursorTilt * 1.25;
-    const y = cy + Math.abs(kbCursorTilt) * 0.08 + Math.sin(performance.now() / 260) * Math.min(Math.abs(kbCursorTilt) * 0.015, 0.3);
-    mush.setAttribute("transform", `translate(${x.toFixed(2)},${y.toFixed(2)}) rotate(${(kbCursorTilt * 0.25).toFixed(2)})`);
+    const x = cx + kbTiltRoll * 1.25;
+    const y = cy + Math.abs(kbTiltRoll) * 0.08 + Math.sin(performance.now() / 260) * Math.min(Math.abs(kbTiltRoll) * 0.015, 0.3);
+    mush.setAttribute("transform", `translate(${x.toFixed(2)},${y.toFixed(2)}) rotate(${(kbTiltRoll * 0.25).toFixed(2)})`);
   }
 }
 
-function initCursorTiltScene(scene) {
+function initTiltScene(scene) {
   if (!scene) return;
-  if (scene !== kbCursorScene) kbCursorTilt = 0;
-  kbCursorScene = scene;
+  if (scene !== kbTiltScene) kbTiltRoll = 0;
+  kbTiltScene = scene;
   if (REDUCED_MOTION) return;
-  if (!scene.dataset.cursorTiltBound) {
-    scene.dataset.cursorTiltBound = "1";
+  if (!scene.dataset.tiltBound) {
+    scene.dataset.tiltBound = "1";
     scene.addEventListener("pointermove", (e) => {
-      if (e.pointerType === "touch" || !window.matchMedia("(hover: hover)").matches) return;
+      const touch = e.pointerType === "touch";
+      if (touch ? kbTiltListening : !window.matchMedia?.("(hover: hover)")?.matches) return;
       const r = scene.getBoundingClientRect();
       if (!r.width || !r.height) return;
       const px = clampN((e.clientX - r.left) / r.width - 0.5, -0.5, 0.5);
       const py = clampN((e.clientY - r.top) / r.height - 0.5, -0.5, 0.5);
-      kbCursorTilt = clampN(px * 24, -12, 12);
+      kbTiltRoll = clampN(px * 24, -12, 12);
       const svg = $(".kb-svg", scene);
       if (svg) {
         svg.style.setProperty("--cursor-x", `${(px * 6).toFixed(1)}px`);
         svg.style.setProperty("--cursor-y", `${(py * 6).toFixed(1)}px`);
         svg.style.setProperty("--cursor-tilt", `${clampN(px * 2, -1, 1).toFixed(1)}deg`);
       }
-      applyKbCursorTilt();
+      applyKbTilt();
     }, { passive: true });
-    scene.addEventListener("pointerleave", () => {
-      kbCursorTilt = 0;
+    const resetPointerTilt = () => {
+      if (!kbTiltListening) kbTiltRoll = 0;
       const svg = $(".kb-svg", scene);
       if (svg) {
         svg.style.setProperty("--cursor-x", "0px");
         svg.style.setProperty("--cursor-y", "0px");
         svg.style.setProperty("--cursor-tilt", "0deg");
       }
-      applyKbCursorTilt();
-    });
+      applyKbTilt();
+    };
+    scene.addEventListener("pointerleave", resetPointerTilt);
+    scene.addEventListener("pointerup", (e) => { if (e.pointerType === "touch") resetPointerTilt(); });
+    scene.addEventListener("pointercancel", (e) => { if (e.pointerType === "touch") resetPointerTilt(); });
   }
-  applyKbCursorTilt();
+  const button = $("[data-tilt]", scene);
+  if (button) {
+    button.textContent = kbTiltListening ? "📱" : "↕️";
+    button.title = kbTiltListening ? "Наклон телефона включён" : "Наклони телефон или проведи пальцем по банке";
+    button.setAttribute("aria-label", kbTiltListening ? "Наклон телефона включён" : "Включить наклон телефона");
+    button.setAttribute("aria-pressed", kbTiltListening ? "true" : "false");
+    button.onclick = async () => {
+      try {
+        const DOE = window.DeviceOrientationEvent;
+        if (typeof DOE.requestPermission === "function") {
+          const permission = await DOE.requestPermission();
+          if (permission !== "granted") throw new Error("Разрешение не выдано");
+        }
+        if (!kbTiltListening) {
+          const orientationHandler = (event) => {
+            if (Number.isFinite(event.gamma)) {
+              kbTiltRoll = clampN(event.gamma, -18, 18);
+              applyKbTilt();
+            }
+          };
+          window.addEventListener("deviceorientation", orientationHandler, { passive: true });
+          kbTiltListening = true;
+        }
+        button.textContent = "📱";
+        button.title = "Наклон телефона включён";
+        button.setAttribute("aria-label", "Наклон телефона включён");
+        button.setAttribute("aria-pressed", "true");
+      } catch (_) {
+        button.textContent = "👆";
+        button.title = "Проведи пальцем по банке, чтобы наклонить жидкость";
+        button.setAttribute("aria-label", "Проведи пальцем по банке, чтобы наклонить жидкость");
+        button.setAttribute("aria-pressed", "false");
+      }
+    };
+  }
+  applyKbTilt();
 }
 
 function fmtLeft(sec) {
@@ -2001,12 +2052,13 @@ async function pageKombucha() {
     return `<div class="panel kb-main ${k.alive ? "" : "is-dead"} ${halloweenGone ? "halloween-gone" : ""}">
       <div class="kb-scene">
         <button class="kb-fs-btn" data-fs title="Смотреть гриб во весь экран">⛶</button>
+        ${canOfferDeviceTilt() ? `<button class="kb-tilt-btn" data-tilt title="Наклони телефон или проведи пальцем по банке" aria-label="Включить наклон телефона" aria-pressed="false">📱</button>` : ""}
         ${HALLOWEEN_ACTIVE ? `<button class="kb-music-btn" data-spooky-music aria-pressed="${spookyMusicEnabled ? "true" : "false"}">${spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку"}</button>
           ${isHalloweenAdmin() ? `<button class="kb-scare-btn" data-screamer-test title="Проверить скример" aria-label="Проверить скример">👻</button>` : ""}
           <div class="kb-bat-swarm" aria-hidden="true"><span class="kb-bat bat-a">🦇</span><span class="kb-bat bat-b">🦇</span><span class="kb-bat bat-c">🦇</span></div>` : ""}
-        <div class="kb-say" id="kb-say">${esc(halloweenGone ? "В банке только комбуча. Я ненадолго исчез." : k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
+        <div class="kb-say" id="kb-say">${esc(halloweenGone ? "👻 Я стал призраком и скоро вернусь." : k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
         ${kombuchaSVG(k)}
-        ${halloweenGone ? `<div class="kb-gone-note">🍵 Гриб пропал. В банке осталась комбуча. Попробуй вернуться завтра.</div>` : ""}
+        ${halloweenGone ? `<div class="kb-gone-note">👻 Сегодня гриб стал призраком — загляни завтра.</div>` : ""}
       </div>
       <div class="kb-info">
         <div class="kb-name"><h2>${esc(k.name)}</h2><button class="link-btn" data-rename title="Переименовать">✏️</button><a class="link-btn kb-diary-link" href="/g/${k.id}" title="Дневник гриба — можно поделиться">📖 Дневник</a><a class="link-btn kb-diary-link" href="/g/${k.id}#tree" title="Родственное дерево">🌳 Род</a></div>
@@ -2084,7 +2136,7 @@ async function pageKombucha() {
     if (k) { sel = k.id; localStorage.setItem("kb-sel", sel); }
     root.innerHTML = `<div class="kb-bar-top"><span>🫙 Банки: <b>${S.jars.used}/${S.jars.jars}</b></span><span>Баланс: <a href="/wallet"><b>${S.wood} $₽</b></a></span></div>
       ${renderJars()}${emptyJarSelected || !k ? renderEmptyJar() : renderMain(k)}${renderHalloweenTools(k)}`;
-    initCursorTiltScene($(".kb-scene", root));
+    initTiltScene($(".kb-scene", root));
     renderCodex();
     setWood(S.wood);
     $$("[data-sel]", root).forEach((b) => (b.onclick = () => { emptyJarSelected = false; sel = Number(b.dataset.sel); render(); }));
@@ -2188,7 +2240,8 @@ async function pageKombucha() {
     render();
     // В облачке — только цитаты. Исключение — сахарная кома: там гриб стонет.
     const kk = r.kombucha;
-    if (kk.mood === "sticky") say(action === "sugar" ? r.message : kk.phrase);
+    if (HALLOWEEN_ACTIVE && kk.halloween_gone) say("👻 Я стал призраком и скоро вернусь.");
+    else if (kk.mood === "sticky") say(action === "sugar" ? r.message : kk.phrase);
     else if (action === "pet" || action === "talk") say(r.message);   // гриб говорит сам, от первого лица
     else { say(kk.phrase); if (r.message && action !== "talk") toast(r.message); }
     if (r.quote && kk.mood !== "sticky") { const b = $("#kb-say"); if (b) b.title = r.quote.lines.map((l) => l.who).join(", ") + (r.quote.book ? ` — ${r.quote.book}` : ""); }
