@@ -32,7 +32,7 @@ from . import wood
 from .kombucha_mutations import MUTATIONS
 
 SESSION_TTL = 120
-COOLDOWN = 300
+COOLDOWN = 30 * 60        # награда за медитацию — раз в 30 минут (как у мини-игр)
 LEAD_MS = 2500           # отсчёт перед первым ударом
 BEATS = 24
 PERFECT_MS, GOOD_MS = 80, 160

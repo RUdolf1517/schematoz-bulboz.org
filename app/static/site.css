@@ -1030,11 +1030,8 @@ body.halloween .site-footer { border-color:#43243f; }
 .kb-bat.bat-b { top:49%; font-size:19px; animation-duration:3.9s; animation-delay:-1.4s; }
 .kb-bat.bat-c { top:75%; font-size:22px; animation-duration:3.2s; animation-delay:-2.1s; }
 @keyframes kb-bat-flight { 0%{transform:translate(0,12px) rotate(-14deg) scale(.8)} 30%{transform:translate(54px,-17px) rotate(12deg) scale(1.12)} 62%{transform:translate(122px,19px) rotate(-9deg) scale(.9)} 100%{transform:translate(190px,-10px) rotate(17deg) scale(1.1)} }
-.kb-music-btn { position:absolute; top:6px; right:0; z-index:3; border:1px solid #812d4b; border-radius:999px; background:#160a16ed; color:#ffd9e1; padding:5px 9px; font:inherit; font-size:11px; cursor:pointer; box-shadow:0 0 15px #c51d4733; }
-.kb-music-btn[aria-pressed="true"] { color:#ff8792; border-color:#ff435f; animation:music-pulse 1.5s ease-in-out infinite; }
 .kb-scare-btn { position:absolute; right:6px; bottom:6px; z-index:4; width:36px; height:36px; border:1px solid #fa4168; border-radius:10px; background:#220918eF; color:#ffe0e9; font-size:21px; cursor:pointer; box-shadow:0 0 17px #f22a5f77; }
 .kb-scare-btn:hover { background:#801432; transform:scale(1.08); }
-@keyframes music-pulse { 50%{box-shadow:0 0 22px #fb214e99} }
 .haunt-controls { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
 .haunt-controls button { flex:1; min-width:170px; }
 .haunt-controls .scare-test { border-color:#a62546; color:#ff9bab; }

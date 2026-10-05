@@ -10,3 +10,7 @@ DATABASE_URL=$(.venv/bin/python scripts/dev_pg.py) REDIS_URL=memory:// DEMO_MODE
   .venv/bin/hypercorn app.asgi:asgi_app --bind 127.0.0.1:8001 &
 cd tests/e2e && npm i jsdom@24 && NODE_PATH=$PWD/node_modules node smoke.js
 ```
+
+Дополнительно `node tilt_music_check.js` (тот же сервер и jsdom) проверяет мобильный наклон жидкости:
+авто-включение датчика без нажатия, фолбэк-кнопку (iOS/без показаний датчика), отказ в разрешении
+и отсутствие кнопок музыки.
