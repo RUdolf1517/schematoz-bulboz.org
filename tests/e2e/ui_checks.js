@@ -1,5 +1,8 @@
-// Точечная jsdom-проверка мобильного наклона: автозапуск, fallback-кнопка, iOS-разрешение.
+// Точечные jsdom-проверки: мобильный наклон жидкости (автозапуск/фолбэк/iOS-разрешение),
+// отсутствие кнопок музыки и аватар в меню (картинка вместо буквы + фолбэк на букву).
 const { JSDOM, CookieJar, VirtualConsole } = require("jsdom");
+const fs = require("fs");
+const path = require("path");
 const BASE = process.env.BASE_URL || "http://127.0.0.1:8001";
 const results = [];
 const check = (name, ok, extra = "") => { results.push([name, !!ok, extra]); console.log(`${ok ? "✅" : "❌"} ${name}${extra && !ok ? ` — ${extra}` : ""}`); };
@@ -119,6 +122,73 @@ const fireOrientation = (win, gamma) => {
     check("нет кнопки «Выключить музыку»", !/Выключить музыку/i.test(html) && !/data-spooky-music/.test(html));
     check("нет звукового синтезатора музыки", !/spookyMusic/i.test((await fetch(BASE + "/static/app.js")).text()));
     dom.window.close();
+  }
+
+  // --- 6. Аватар в меню: картинка вместо буквы + фолбэк на букву ---
+  {
+    // Тест можно запускать повторно: сначала снимаем аватар.
+    await fetch(BASE + "/api/me/profile", {
+      method: "PATCH",
+      headers: { cookie: jar.getCookieStringSync(BASE), "content-type": "application/json" },
+      body: JSON.stringify({ avatar_url: null, avatar_frame: "none" }),
+    });
+
+    // 6.1 Без аватара в шапке — буква ника (и никакой «сломанной» картинки).
+    const { dom } = await openMobile({ jar });
+    const win = dom.window;
+    await sleep(1200);
+    let el = win.document.querySelector("#me-avatar");
+    check("меню без аватара: показана буква ника",
+      !!el && !el.querySelector("img") && el.textContent.trim() === "D", el?.textContent);
+    dom.window.close();
+
+    // 6.2 Загружаем картинку и ставим её аватаром (как это делает «Настройки профиля»).
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII=",
+      "base64");
+    const form = new FormData();
+    form.append("file", new Blob([png], { type: "image/png" }), "avatar.png");
+    const up = await fetch(BASE + "/api/uploads", {
+      method: "POST", headers: { cookie: jar.getCookieStringSync(BASE) }, body: form,
+    });
+    const upJson = await up.json();
+    check("аватар: картинка загружена", up.status === 201 && !!upJson.url, `status=${up.status}`);
+
+    const patch = await fetch(BASE + "/api/me/profile", {
+      method: "PATCH",
+      headers: { cookie: jar.getCookieStringSync(BASE), "content-type": "application/json" },
+      body: JSON.stringify({ avatar_url: upJson.url, avatar_frame: "neon" }),
+    });
+    const me = await fetch(BASE + "/api/auth/me", { headers: { cookie: jar.getCookieStringSync(BASE) } });
+    const meJson = await me.json();
+    check("аватар: /api/auth/me отдаёт avatar_url", patch.status === 200 && meJson.user.avatar_url === upJson.url,
+      `patch=${patch.status} avatar=${meJson.user?.avatar_url}`);
+
+    // 6.3 После перезагрузки страницы меню показывает картинку с рамкой.
+    const second = await openMobile({ jar });
+    const win2 = second.dom.window;
+    await sleep(1500);
+    el = win2.document.querySelector("#me-avatar");
+    const img = el?.querySelector("img");
+    check("меню с аватаром: показана картинка, а не буква", !!img);
+    check("меню с аватаром: тот же файл", img?.getAttribute("src") === upJson.url, img?.getAttribute("src"));
+    check("меню с аватаром: применена рамка профиля", el?.classList.contains("frame-neon"), el?.className);
+
+    // 6.4 Файл пропал (удалён/битый URL) — вместо «сломанной» картинки возвращается буква.
+    const mediaName = path.basename(upJson.url);
+    const mediaPath = path.join(process.cwd(), "..", "..", "var", "uploads", mediaName);
+    try { fs.unlinkSync(mediaPath); } catch (_) {}
+    let fallback = null;
+    try {
+      win2.eval(`typeof paintAvatar === "function" && paintAvatar(document.querySelector("#me-avatar"), ${JSON.stringify({ username: "dasha", avatar_url: upJson.url })});`);
+      const broken = win2.document.querySelector("#me-avatar img");
+      broken?.dispatchEvent(new win2.Event("error"));
+      const el2 = win2.document.querySelector("#me-avatar");
+      fallback = !!el2 && !el2.querySelector("img") && el2.textContent.trim() === "D";
+    } catch (e) { fallback = false; }
+    check("меню: битая картинка → буква, без «сломанной» иконки", fallback,
+      win2.document.querySelector("#me-avatar")?.innerHTML);
+    second.dom.window.close();
   }
 
   const failed = results.filter(([, ok]) => !ok);

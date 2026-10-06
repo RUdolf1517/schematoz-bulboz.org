@@ -231,7 +231,7 @@ async function loadMe() {
     return null;
   }
   $("#me-name").textContent = ME.user.username;
-  $("#me-avatar").textContent = ME.user.username[0].toUpperCase();
+  paintAvatar($("#me-avatar"), ME.user);
   $("#me-profile").href = `/u/${encodeURIComponent(ME.user.username)}`;
   $("#me-admin").hidden = !ME.permissions.includes("analytics.read");
   setBell(ME.unread_notifications || 0);
@@ -301,10 +301,29 @@ function newBadgesToast(codes) {
 }
 
 // ---------------------------------------------------------------- profile
+function avatarInner(u) {
+  return u?.avatar_url ? `<img src="${esc(u.avatar_url)}" alt="">` : initial(u?.username);
+}
+
 function avatarHTML(u, size = "") {
-  const inner = u.avatar_url ? `<img src="${esc(u.avatar_url)}" alt="">` : initial(u.username);
-  const frame = u.avatar_frame && u.avatar_frame !== "none" ? ` frame-${esc(u.avatar_frame)}` : "";
-  return `<span class="avatar ${size}${frame}">${inner}</span>`;
+  const frame = u?.avatar_frame && u.avatar_frame !== "none" ? ` frame-${esc(u.avatar_frame)}` : "";
+  return `<span class="avatar ${size}${frame}">${avatarInner(u)}</span>`;
+}
+
+// Обновляет уже отрисованный аватар (шапка/меню): картинка, буква и рамка.
+function paintAvatar(el, u, size = "") {
+  if (!el) return;
+  [...el.classList].forEach((cls) => {
+    if (cls.startsWith("frame-") || cls === "lg" || cls === "sm") el.classList.remove(cls);
+  });
+  if (size) el.classList.add(size);
+  if (u?.avatar_frame && u.avatar_frame !== "none" && /^[a-z0-9_-]+$/i.test(u.avatar_frame)) {
+    el.classList.add(`frame-${u.avatar_frame}`);
+  }
+  el.innerHTML = avatarInner(u);
+  const img = el.querySelector("img");
+  // Картинка могла не догрузиться (файл удалён, битый URL) — тогда буква, а не «сломанная» иконка.
+  if (img) img.onerror = () => { el.innerHTML = initial(u?.username); };
 }
 
 // классы/переменные темы профиля — только из белых списков (сервер валидирует тоже)
@@ -518,6 +537,8 @@ async function pageSettings() {
     try {
       const r = await api("PATCH", "/api/me/profile", collect());
       base.user = { ...base.user, ...r.user }; base.custom = { ...base.custom, ...r.settings };
+      if (ME) ME.user = { ...ME.user, ...r.user };
+      paintAvatar($("#me-avatar"), r.user);   // шапка обновляется сразу, без перезагрузки
       toast("Профиль сохранён ✨"); preview(); $("#st-dirty").hidden = true;
     } catch (_) {}
   };
