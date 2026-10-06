@@ -514,6 +514,47 @@ def test_admins_create_clubs_for_free(app, make_user):
     assert plain.post("/api/clubs", json={"name": "Хитрый", "tag": "ХИТ", "free": True}).status_code == 402
 
 
+def test_admin_gets_new_perms_without_reseed(app, make_user):
+    """Жалоба «админ, а бесплатно создать не могу, ивенты и дебаг клубов недоступны».
+
+    Причина — в БД/кэше прав нет новых прав из каталога (`clubs.manage`, `events.manage`).
+    После деплоя они должны появиться сами: без ручного `flask --app app seed` и без
+    ожидания истечения старого кэша прав в Redis.
+    """
+    from sqlalchemy import select, text
+
+    from app.auth import rbac
+    from app.extensions import get_redis
+
+    admin, a = _user(make_user, "admin")
+
+    async def wipe(s):
+        await s.execute(text("delete from role_permissions rp using permissions p "
+                             "where rp.permission_id = p.id and p.code in ('clubs.manage','events.manage')"))
+        await s.execute(text("delete from permissions where code in ('clubs.manage','events.manage')"))
+    _db(app, wipe)
+
+    with app.app_context():                      # старый кэш прав (ключ без версии каталога)
+        r = get_redis()
+        r.sadd(f"perm:{a['id']}", "kombucha.play", "market.trade")
+        r.expire(f"perm:{a['id']}", 300)
+    getattr(rbac, "reset_catalog_cache", lambda: None)()   # как в свежем процессе после деплоя
+
+    got = admin.get("/api/auth/me").get_json()["permissions"]
+    assert "clubs.manage" in got and "events.manage" in got, got
+
+    async def catalog(s):
+        from app.models import Permission
+        rows = (await s.scalars(select(Permission.code))).all()
+        return set(rows)
+    assert {"clubs.manage", "events.manage"} <= _db(app, catalog)   # каталог досыпан сам
+
+    assert admin.get("/admin/clubs").status_code == 200
+    assert admin.get("/admin/events/world").status_code == 200
+    r = admin.post("/api/clubs", json={"name": "Бесплатный", "tag": "БЕС"})
+    assert r.status_code == 201 and r.get_json()["free"] is True, r.get_json()
+
+
 def test_dev_reset_only_in_demo_mode(app, make_user):
     """DEMO_MODE-хелпер сбрасывает участие и кулдаун; в проде его нет."""
     c, u = _user(make_user)

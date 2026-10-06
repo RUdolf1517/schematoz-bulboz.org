@@ -58,6 +58,10 @@ flask --app app create-admin admin admin@example.com
 hypercorn "app.asgi:asgi_app" --bind 0.0.0.0:8000
 ```
 
+Новые права каталога (`clubs.manage`, `events.manage`) досыпаются автоматически при первой проверке
+прав, а кэш прав в Redis версионируется по каталогу — после обновления кода админам не нужно ждать
+истечения TTL или вручную гонять `flask --app app seed`.
+
 ### Тестовые аккаунты (создаёт `scripts/demo_data.py`)
 
 | Роль | Логин | Пароль |

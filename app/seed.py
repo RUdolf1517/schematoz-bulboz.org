@@ -83,19 +83,29 @@ LEGAL = {
 }
 
 
+async def seed_permissions(s) -> None:
+    """Создаёт недостающие права и пере-привязывает их к ролям из кода. Идемпотентно.
+
+    Вызывается из `seed`, а также лениво при проверке прав (см. `app/auth/rbac.py`):
+    после деплоя новые права вроде `clubs.manage`/`events.manage` появляются у админов
+    даже если `flask --app app seed` не запускали и в Redis лежит старый кэш прав.
+    """
+    perms = {p.code: p for p in (await s.scalars(select(Permission))).all()}
+    for code in sorted(ALL_PERMS - perms.keys()):
+        perms[code] = Permission(code=code)
+        s.add(perms[code])
+    await s.flush()
+    for code, (title, role_perms) in ROLES.items():
+        role = await s.scalar(select(Role).where(Role.code == code))
+        if role is None:
+            role = Role(code=code, title=title)
+            s.add(role)
+        role.permissions = [perms[p] for p in sorted(role_perms)]
+
+
 async def seed() -> None:
     async with session_scope() as s:
-        perms = {p.code: p for p in (await s.scalars(select(Permission))).all()}
-        for code in sorted(ALL_PERMS - perms.keys()):
-            perms[code] = Permission(code=code)
-            s.add(perms[code])
-        await s.flush()
-        for code, (title, role_perms) in ROLES.items():
-            role = await s.scalar(select(Role).where(Role.code == code))
-            if role is None:
-                role = Role(code=code, title=title)
-                s.add(role)
-            role.permissions = [perms[p] for p in sorted(role_perms)]
+        await seed_permissions(s)
         from .services import leagues
         await leagues.ensure_leagues(s)
         for slug, (title, consent, body) in LEGAL.items():

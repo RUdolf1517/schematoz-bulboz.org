@@ -2,6 +2,8 @@
 загружаются в той же корутине (и том же event loop), что и сама вьюха."""
 from __future__ import annotations
 
+import hashlib
+import logging
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
@@ -12,20 +14,56 @@ from ..db import session_scope
 from ..errors import ApiError
 from ..extensions import get_redis
 from ..models import Ban, BanScope, Permission, User, UserRole, role_permissions
+from ..permissions import ALL_PERMS
 from .sessions import current_user_id
 
 PERM_CACHE_TTL = 300
 
+log = logging.getLogger(__name__)
+
+# Версия каталога прав в ключе кэша: после деплоя с новыми правами (например clubs.manage)
+# старые записи Redis перестают использоваться и права перечитываются из БД — иначе админ
+# до истечения TTL остаётся без новых прав.
+CATALOG_VERSION = hashlib.sha1("|".join(sorted(ALL_PERMS)).encode()).hexdigest()[:10]
+_catalog_synced = False
+
 
 def _perm_key(uid: int) -> str:
-    return f"perm:{uid}"
+    return f"perm:{uid}:{CATALOG_VERSION}"
+
+
+def reset_catalog_cache() -> None:
+    """Заставит пере-синхронизировать каталог прав при следующей проверке (тесты, деплой)."""
+    global _catalog_synced
+    _catalog_synced = False
+
+
+async def _ensure_catalog() -> None:
+    """Раз на процесс досыпает недостающие права/роли из кода (`seed_permissions`).
+
+    Так новые права появляются у админов сразу после деплоя, даже если `flask seed`
+    пропустили. Ошибки (БД ещё мигрируется) не валят запрос — попробуем в следующий раз.
+    """
+    global _catalog_synced
+    if _catalog_synced:
+        return
+    from ..seed import seed_permissions
+    try:
+        async with session_scope() as s:
+            await seed_permissions(s)
+    except Exception as exc:  # noqa: BLE001 — каталог досыпем при следующем запросе
+        log.warning("Каталог прав не синхронизирован: %s", exc)
+        return
+    _catalog_synced = True
 
 
 def invalidate_perms(user_id: int) -> None:
-    get_redis().delete(_perm_key(user_id))
+    # чистим и старый (безверсионный) ключ — он мог остаться от прежнего кода
+    get_redis().delete(_perm_key(user_id), f"perm:{user_id}")
 
 
 async def get_user_perms(user_id: int) -> set[str]:
+    await _ensure_catalog()
     r = get_redis()
     cached = r.smembers(_perm_key(user_id))
     if cached:
