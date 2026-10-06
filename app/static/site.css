@@ -1271,3 +1271,7 @@ body.halloween .site-footer { border-color:#69203c; }
 .tk-post p { margin: 6px 0 8px; white-space: pre-wrap; }
 .tk-reacts { display: flex; gap: 6px; flex-wrap: wrap; }
 .tk-reacts .btn { padding: 2px 8px; }
+
+/* Форма основания клуба: «ООО "…"» — фиксированные части вокруг поля имени */
+.nc-name-wrap { display: inline-flex; align-items: center; gap: 4px; flex: 1 1 auto; }
+.nc-name-wrap input { flex: 1 1 auto; min-width: 120px; }

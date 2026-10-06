@@ -96,9 +96,13 @@ async function openPage({ jar, page }) {
     await sleep(200);
     const name = win.document.querySelector("#nc-name");
     const tag = win.document.querySelector("#nc-tag");
+    const wrap = win.document.querySelector(".nc-name-wrap");
     check("диалог основания открылся", !!name && !!tag);
+    check("«ООО \"…\"» — фиксированные части вокруг поля имени",
+      !!wrap && /ООО\s*"/.test(wrap.textContent || "") && /"\s*$/.test((wrap.textContent || "").trim()),
+      wrap?.textContent);
     if (name && tag) {
-      name.value = 'ООО "Тестовый"';   // формат из ТЗ: «ООО» и кавычки обязательны
+      name.value = "Тестовый";   // игрок вписывает только имя — «ООО» и кавычки подставит сервер
       tag.value = TAG;
       win.document.querySelector("#nc-emblem").value = "🍄";
       win.document.querySelector("#nc-save")?.click();
@@ -106,7 +110,7 @@ async function openPage({ jar, page }) {
       const club = await api(dasha.jar, "GET", `/api/clubs/${encodeURIComponent(TAG)}`);
       check("клуб создан через UI (есть на /c/ТЕСТ)", club.status === 200 && club.data.name === 'ООО "Тестовый"', `status=${club.status}`);
       check("создатель — глава клуба", club.data?.me?.role === "leader", JSON.stringify(club.data?.me));
-      check("название в форме ООО \"…\" и тег [ЧАЙ]",
+      check("имя обёрнуто в ООО \"…\" и тег [ЧАЙ]",
         club.data?.name === 'ООО "Тестовый"' && club.data?.tag === TAG, club.data?.name);
       check("в шапке клуба название без лишних кавычек",
         !/«ООО/.test(win.document.querySelector(".tk-hero-head h1")?.textContent || ""),

@@ -37,8 +37,8 @@ CREATE_COST = 500
 # своё название вместо «Пример». Принимаем прямые и типографские кавычки, храним прямые.
 NAME_CORE_RE = re.compile(r"^[\w \-.,'()ёЁ]{2,18}$", re.UNICODE)
 NAME_RE = re.compile(r'^ООО\s*[«"„“‘\']\s*(?P<core>.+?)\s*[»"“”‘’\']$', re.IGNORECASE)
-NAME_HINT = ('Название — в формате: ООО "Пример". Слово «ООО» и кавычки обязательны, '
-             'вместо «Пример» впиши своё название (2–18 символов).')
+NAME_HINT = ('Название — только имя: 2–18 символов, буквы, цифры, пробел, дефис, точка. '
+             '«ООО» и кавычки подставятся сами.')
 
 
 def format_club_name(core: str) -> str:
@@ -77,20 +77,19 @@ def week_key(at: datetime | None = None) -> str:
 
 
 def _clean_name(raw: str) -> str:
-    """Приводит название к виду ООО "Пример".
+    """Игрок вписывает только имя — «ООО "» и закрывающая кавычка добавляются сами.
 
-    «ООО» и кавычки обязательны (ТЗ): если их нет — подсказываем формат.
-    Длина итогового названия 3–24 символа, значит само имя внутри кавычек — 2–18.
+    Если название случайно пришло целиком (ООО "Имя" или «Имя»), лишнее снимаем,
+    чтобы не получить «ООО "ООО "Имя""». Итог всегда: ООО "Имя" (имя 2–18 символов).
     """
     name = re.sub(r"\s+", " ", str(raw or "")).strip()
     m = NAME_RE.match(name)
-    if m is None:
-        # Без «ООО» и кавычек не принимаем — сразу показываем правильный формат.
+    if m is not None:
+        name = m.group("core")
+    name = name.strip().strip("«»\"'“”„‘’").strip()
+    if not NAME_CORE_RE.match(name):
         raise ApiError(NAME_HINT, 400, "validation_error", field="name")
-    core = m.group("core").strip().strip("«»\"'“”„‘’")
-    if not NAME_CORE_RE.match(core):
-        raise ApiError(NAME_HINT, 400, "validation_error", field="name")
-    return format_club_name(core)
+    return format_club_name(name)
 
 
 def _clean_tag(raw: str) -> str:

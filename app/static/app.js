@@ -1992,8 +1992,9 @@ function createClubDialog() {
   dlg.innerHTML = `<div class="modal panel">
     <h2>Основать кооператив</h2>
     <p class="muted">${CLUB_FREE() ? "Тебе как администратору создание бесплатно." : "Создание стоит 500 $₽."}
-    Название — в формате <b>ООО "Пример"</b>: «ООО» и кавычки обязательны, вместо «Пример» впиши своё.</p>
-    <label class="kbd-row"><span>Название</span><input class="input" id="nc-name" maxlength="24" placeholder='ООО "Пример"'></label>
+    Название кооператива: впиши имя — «ООО» и кавычки подставятся сами.</p>
+    <label class="kbd-row"><span>Название</span><span class="nc-name-wrap"><b>ООО "</b><input class="input"
+      id="nc-name" maxlength="18" placeholder="Пример"><b>"</b></span></label>
     <label class="kbd-row"><span>Тег</span><input class="input" id="nc-tag" maxlength="5" placeholder="ЧАЙ"></label>
     <label class="kbd-row"><span>Герб</span><input class="input" id="nc-emblem" maxlength="4" placeholder="🍄"></label>
     <label class="kbd-row"><span>Цвета</span><input type="color" id="nc-color" value="#ff5a36"><input type="color" id="nc-color2" value="#ff8a3d"></label>

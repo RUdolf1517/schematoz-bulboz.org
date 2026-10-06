@@ -70,7 +70,7 @@ def _user(make_user, role="user"):
     return client, user
 
 
-def _make_club(client, user, name='ООО "Пример"', tag="ЧАЙ"):
+def _make_club(client, user, name="Пример", tag="ЧАЙ"):
     return client.post("/api/clubs", json={"name": name, "tag": tag, "emblem": "🍵",
                                            "color": "#33cc88", "color2": "#1188ff",
                                            "join_mode": "open", "min_level": 1, "description": "тест"})
@@ -79,9 +79,8 @@ def _make_club(client, user, name='ООО "Пример"', tag="ЧАЙ"):
 # ---------------------------------------------------------------- создание и вступление
 def test_create_club_costs_and_unique_names(app, make_user):
     c, u = _user(make_user)
-    bad_name = c.post("/api/clubs", json={"name": "Тест", "tag": "ТЕ"})                     # без ООО и кавычек
-    assert bad_name.status_code == 400 and bad_name.get_json()["error"] == "validation_error"
-    assert c.post("/api/clubs", json={"name": 'ООО "Тест"', "tag": "ТЕ"}).status_code == 402  # нет $₽
+    # игрок вписывает только имя — «ООО и кавычки» подставляет сервер (проверяется ниже)
+    assert c.post("/api/clubs", json={"name": "Тест", "tag": "ТЕ"}).status_code == 402          # нет $₽
     _give_wood(app, u["id"], 700)
     r = _make_club(c, u)
     assert r.status_code == 201, r.get_json()
@@ -91,11 +90,13 @@ def test_create_club_costs_and_unique_names(app, make_user):
     assert club["tank"]["stage"]["title"] == "Спора-Танк"
     # уникальность названия и тега
     _give_wood(app, u["id"], 600)
+    assert c.post("/api/clubs", json={"name": "Пример", "tag": "ДРУГ"}).status_code == 409
+    # полная форма с «ООО» тоже ловится как дубль: имя после нормализации то же
     assert c.post("/api/clubs", json={"name": 'ООО "Пример"', "tag": "ДРУГ"}).status_code == 409
     # кулдаун смены клуба: выйти и создать/вступить нельзя сутки
     assert c.post(f"/api/clubs/{club['tag']}/leave", json={}).status_code == 200
     _give_wood(app, u["id"], 600)
-    r = _make_club(c, u, name='ООО "Второй"', tag="ВТ")
+    r = _make_club(c, u, name="Второй", tag="ВТ")
     assert r.status_code == 429 and r.get_json()["error"] == "club_cooldown"
 
 
@@ -452,21 +453,36 @@ def test_raid_and_war_rewards_are_badges_for_starters(app, make_user):
     assert any(code == "club_war_win" for _, code in after), after
 
 
-def test_name_format_is_enforced(app, make_user):
-    """Название — строго в формате ООО "Пример"; «ООО» и кавычки обязательны."""
+def test_name_is_wrapped_into_ooo_format(app, make_user):
+    """Игрок вписывает только имя — «ООО "…"» сервер подставляет сам."""
     c, u = _user(make_user)
     _give_wood(app, u["id"], 4000)
-    r = c.post("/api/clubs", json={"name": "Просто имя", "tag": "ПР"})
-    assert r.status_code == 400 and r.get_json()["error"] == "validation_error"
-    assert 'ООО "Пример"' in r.get_json()["message"]
-    # «ООО» без кавычек тоже не проходит
-    assert c.post("/api/clubs", json={"name": "ООО Пример", "tag": "ПР"}).status_code == 400
-    # типографские кавычки принимаем и приводим к прямым
-    ok = c.post("/api/clubs", json={"name": "ООО «Типограф»", "tag": "ТИП"})
-    assert ok.status_code == 201, ok.get_json()
-    assert ok.get_json()["club"]["name"] == 'ООО "Типограф"'
-    # слишком короткое имя внутри кавычек — отказ
-    assert c.post("/api/clubs", json={"name": 'ООО "Я"', "tag": "ЯЯ"}).status_code == 400
+    r = c.post("/api/clubs", json={"name": "Ромашка", "tag": "РОМ"})
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["club"]["name"] == 'ООО "Ромашка"'
+    # пустое/слишком короткое/слишком длинное имя и запрещённый символ — отказ с подсказкой про формат
+    for bad in ("", "Я", "О" * 19, "имя!"):
+        r = c.post("/api/clubs", json={"name": bad, "tag": "БАД"})
+        assert r.status_code == 400 and r.get_json()["error"] == "validation_error", (bad, r.get_json())
+        assert "ООО" in r.get_json()["message"]
+
+
+def test_full_name_form_is_not_doubled(app, make_user):
+    """Если игрок всё-таки вписал «ООО "Имя"» — префикс не удваиваем."""
+    c, u = _user(make_user)
+    _give_wood(app, u["id"], 4000)
+    r = c.post("/api/clubs", json={"name": 'ООО "Ромашка"', "tag": "РОМ"})
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["club"]["name"] == 'ООО "Ромашка"'
+
+
+def test_typographic_quotes_are_stripped(app, make_user):
+    """«Имя» в типографских кавычках — тоже просто имя."""
+    c, u = _user(make_user)
+    _give_wood(app, u["id"], 4000)
+    r = c.post("/api/clubs", json={"name": "«Василёк»", "tag": "ВАС"})
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["club"]["name"] == 'ООО "Василёк"'
 
 
 def _balance(app, uid):
@@ -485,7 +501,7 @@ def test_admins_create_clubs_for_free(app, make_user):
 
     admin_before = _balance(app, a["id"])
     assert admin_before < 500                                  # денег на создание заведомо не хватает
-    r = admin.post("/api/clubs", json={"name": 'ООО "Бесплатный"', "tag": "БЕС"})
+    r = admin.post("/api/clubs", json={"name": "Бесплатный", "tag": "БЕС"})
     assert r.status_code == 201, r.get_json()
     assert r.get_json()["free"] is True
     assert _balance(app, a["id"]) == admin_before               # ничего не списали
@@ -493,9 +509,9 @@ def test_admins_create_clubs_for_free(app, make_user):
     # Обычный игрок по-прежнему платит: без денег — 402.
     plain_before = _balance(app, pu["id"])
     assert plain_before < 500
-    assert plain.post("/api/clubs", json={"name": 'ООО "Платный"', "tag": "ПЛА"}).status_code == 402
+    assert plain.post("/api/clubs", json={"name": "Платный", "tag": "ПЛА"}).status_code == 402
     # и «free» из тела запроса игнорируется — флаг считает только сервер по правам
-    assert plain.post("/api/clubs", json={"name": 'ООО "Хитрый"', "tag": "ХИТ", "free": True}).status_code == 402
+    assert plain.post("/api/clubs", json={"name": "Хитрый", "tag": "ХИТ", "free": True}).status_code == 402
 
 
 def test_dev_reset_only_in_demo_mode(app, make_user):
