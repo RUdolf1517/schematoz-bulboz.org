@@ -355,9 +355,7 @@ async def reward(s, user, k, game: str, token: str, res: dict) -> dict:
     else:
         r.set(_cd_key(k.id, game), 1, ex=COOLDOWN)
         r.set(f"mg:played:{k.id}:{game}", 1, ex=30 * 24 * 60 * 60)
-    from . import clubs as clubs_svc
-    club = await clubs_svc.club_bonus_for(s, user.id)
-    kb.tick(k, decay_slow=float(club.get("decay_slow", 0.0)))
+    kb.tick(k)
     stat = GAMES[game][2]
     happy = round(20 * acc)
     boost = round(15 * acc)
@@ -365,16 +363,15 @@ async def reward(s, user, k, game: str, token: str, res: dict) -> dict:
     if stat != "happy":
         cap = kb.STICKY_FROM - 1 if stat == "sweet" else 100.0   # сахарную кому игрой не устроить
         setattr(k, stat, min(cap, max(getattr(k, stat), min(cap, getattr(k, stat) + boost))))
-    # Показатели гриба уже обновлены выше: опыт считаем с множителем коридора и перком клуба.
+    # Показатели гриба уже обновлены выше: опыт считаем с множителем коридора.
     xp = kb.scaled_xp(0 if k.mold else round(10 * acc), k)
-    xp = kb.apply_club_xp(xp, float(club.get("xp_bonus", 0.0)))
     old_xp = k.xp
     k.xp += xp
     k.best_xp = max(k.best_xp, k.xp)
     if all(getattr(k, st) > 0 for st in kb.STATS):
         k.zero_since = None
     earned = await wood.earn(s, user.id, "minigame", f"{game}:{token}", amount=round(8 * acc))
-    m = _roll_mutation(k, acc, float(club.get("mut_chance", 0.0)))
+    m = _roll_mutation(k, acc)
     mut = await kb.add_mutation(s, k, m, kb.now()) if m else None
     diary.stage_check(s, k, old_xp)
     if acc >= 0.95:

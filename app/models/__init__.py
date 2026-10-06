@@ -1,8 +1,4 @@
 from .base import Base
-from .clubs import (BeautyVote, Club, ClubBankTx, ClubBannedUser, ClubDayStat, ClubEventProgress, ClubInvite,
-                    ClubJoinRequest, ClubLabCraft, ClubLabRun, ClubMember, ClubMembershipCooldown, ClubMuseumEntry,
-                    ClubPost, ClubReaction, ClubReport, ClubTank, ClubTankMutation, ClubWar, League,
-                    LeagueMembership)
 from .content import Upload
 from . import enums as _enums
 from .enums import *  # noqa: F401,F403
@@ -21,9 +17,3 @@ __all__ = [
     "HalloweenRaidArchive",
 ]
 __all__ += [n for n in dir(_enums) if n[0].isupper() and n != 'Enum']
-__all__ += [
-    "Club", "ClubMember", "ClubJoinRequest", "ClubInvite", "ClubTank", "ClubTankMutation", "ClubBankTx",
-    "ClubPost", "ClubReaction", "ClubReport", "ClubBannedUser", "ClubLabRun", "ClubLabCraft",
-    "ClubEventProgress", "League", "LeagueMembership", "ClubWar", "BeautyVote", "ClubMuseumEntry",
-    "ClubMembershipCooldown", "ClubDayStat",
-]

@@ -64,8 +64,6 @@ async def demo():
         today = datetime.now(timezone.utc).date()
         u["kotik_na_fizmate"].streak_days, u["kotik_na_fizmate"].streak_last_date = 12, today
         u["dasha"].streak_days, u["dasha"].streak_last_date = 3, today
-        for name in ("dasha", "kotik_na_fizmate", "artem", "lena_2007"):
-            u[name].wood = max(u[name].wood or 0, 3000)   # локальное превью: хватает на клуб и лабораторию
         for name, codes in {"kotik_na_fizmate": ["streak_7", "night_watch"], "dasha": ["night_watch"]}.items():
             for c in codes:
                 s.add(UserBadge(user_id=u[name].id, code=c))

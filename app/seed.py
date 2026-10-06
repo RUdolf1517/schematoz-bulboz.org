@@ -87,7 +87,7 @@ async def seed_permissions(s) -> None:
     """Создаёт недостающие права и пере-привязывает их к ролям из кода. Идемпотентно.
 
     Вызывается из `seed`, а также лениво при проверке прав (см. `app/auth/rbac.py`):
-    после деплоя новые права вроде `clubs.manage`/`events.manage` появляются у админов
+    после деплоя новые права появляются у админов сразу после обновления кода
     даже если `flask --app app seed` не запускали и в Redis лежит старый кэш прав.
     """
     perms = {p.code: p for p in (await s.scalars(select(Permission))).all()}
@@ -106,8 +106,6 @@ async def seed_permissions(s) -> None:
 async def seed() -> None:
     async with session_scope() as s:
         await seed_permissions(s)
-        from .services import leagues
-        await leagues.ensure_leagues(s)
         for slug, (title, consent, body) in LEGAL.items():
             if await s.scalar(select(LegalPage.id).where(LegalPage.slug == slug)) is None:
                 page = LegalPage(slug=slug, title=title, current_version=1, requires_consent=consent)

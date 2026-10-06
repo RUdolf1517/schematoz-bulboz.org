@@ -7,7 +7,6 @@ USER_PERMS = {"kombucha.play", "market.trade"}
 ADMIN_PERMS = USER_PERMS | {
     "ban.temporary", "ban.permanent", "ban.lift_any", "modlog.read_own", "modlog.read_all", "role.assign",
     "settings.captcha", "settings.antispam", "analytics.read", "legal.edit", "kombucha.debug", "quotes.edit",
-    "clubs.manage", "events.manage",
 }
 
 ROLES = {

@@ -74,10 +74,6 @@ class Kombucha(Base):
     halloween_web_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     frozen: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     frozen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # Бизнес-войны клубов: здоровье гриба (у последней стадии — 100) и дебаф «Раненый».
-    # На тамагочи не влияют: HP меняют только войны, «Раненый» ускоряет падение показателей.
-    hp: Mapped[float] = mapped_column(default=100.0, server_default="100")
-    wounded_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     price: Mapped[int | None]                     # выставлен на рынок за столько $₽
     listed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     born_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -42,8 +42,6 @@ SYSTEMD_DIR=${SYSTEMD_DIR:-/etc/systemd/system}
 SRC_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 NOTIFY_SERVICE=bulboz-notifications.service
 NOTIFY_TIMER=bulboz-notifications.timer
-CLUBS_SERVICE=bulboz-clubs.service
-CLUBS_TIMER=bulboz-clubs.timer
 
 log() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m⚠ %s\033[0m\n' "$*" >&2; }
@@ -305,7 +303,6 @@ update_app() {
   fi
   check_static
   install_notification_timer
-  install_clubs_timer
   log "Обновлено: сайт отвечает"
   web_push_status
   return 0
@@ -432,61 +429,6 @@ notification_cron_hint() {
      Если systemd нет — cron-задание раз в 5 минут:
        echo '*/5 * * * * $APP_USER cd $APP_DIR && $APP_DIR/.venv/bin/flask --app app run-notification-jobs >> $LOG_DIR/notifications.log 2>&1' | sudo tee /etc/cron.d/bulboz-notifications
 EOF
-}
-
-# Недельные итоги клубов + проверка рейдов: раз в час (идемпотентные команды, дешёвые).
-clubs_cron_hint() {
-  cat >&2 <<EOF
-     Если systemd нет — cron-задание раз в час:
-       echo '0 * * * * $APP_USER cd $APP_DIR && $APP_DIR/.venv/bin/flask --app app clubs-weekly >> $LOG_DIR/clubs.log 2>&1 && $APP_DIR/.venv/bin/flask --app app clubs-raids >> $LOG_DIR/clubs.log 2>&1' | sudo tee /etc/cron.d/bulboz-clubs
-EOF
-}
-
-install_clubs_timer() {
-  if ! systemd_available; then
-    warn "systemd недоступен — планировщик клубов не установлен"
-    clubs_cron_hint
-    return 0
-  fi
-  mkdir -p "$LOG_DIR"; chown "$APP_USER:$APP_USER" "$LOG_DIR"
-  cat >"$SYSTEMD_DIR/$CLUBS_SERVICE" <<EOF
-[Unit]
-Description=schematoz-bulboz.org: недельные итоги кооперативов и рейды
-After=network.target postgresql.service redis-server.service
-Wants=postgresql.service redis-server.service
-
-[Service]
-Type=oneshot
-User=$APP_USER
-WorkingDirectory=$APP_DIR
-EnvironmentFile=$APP_DIR/.env
-ExecStart=/bin/sh -c '$APP_DIR/.venv/bin/flask --app app clubs-raids && $APP_DIR/.venv/bin/flask --app app clubs-weekly'
-Nice=10
-NoNewPrivileges=true
-ProtectSystem=full
-ReadWritePaths=$APP_DIR/var
-EOF
-  cat >"$SYSTEMD_DIR/$CLUBS_TIMER" <<EOF
-[Unit]
-Description=Клубы: итоги недели и рейды каждый час
-
-[Timer]
-OnBootSec=10min
-OnUnitActiveSec=1h
-AccuracySec=1min
-RandomizedDelaySec=120s
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-  systemctl daemon-reload 2>/dev/null || true
-  if ! systemctl enable --now "$CLUBS_TIMER" >/dev/null 2>&1; then
-    warn "не удалось включить $CLUBS_TIMER"
-    clubs_cron_hint
-    return 0
-  fi
-  log "Планировщик клубов: $CLUBS_TIMER включён (каждый час; журнал: journalctl -u ${CLUBS_SERVICE%.service})"
 }
 
 # Идемпотентно ставит systemd service+timer для `run-notification-jobs` от пользователя bulboz.

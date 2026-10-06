@@ -31,13 +31,12 @@ EARN = {
     "sale": (0, None, "Продал гриб"),
 }
 # старые причины из Q&A-эпохи — только чтобы история кошелька читалась
-LEGACY_TITLES = {"demo_grant": "Демо-пополнение кошелька (превью)", "question": "Задал вопрос", "answer": "Ответил на вопрос", "comment": "Комментарий",
+LEGACY_TITLES = {"question": "Задал вопрос", "answer": "Ответил на вопрос", "comment": "Комментарий",
                  "debate_vote": "Голос в холиваре", "debate_answer": "Аргумент в холиваре", "scheme": "Ответ стал «Схемой»",
                  "wall_post": "Запись на стене", "task_reward": "Награда за задание", "task_refund": "Возврат за задание",
                  "task_create": "Создал задание (эскроу)"}
 SPEND_TITLES = {"buy_jar": "Купил банку", "revive": "Реанимация гриба",
-                "buy_kombucha": "Купил гриб на рынке", "buy_new_kombucha": "Купил нового гриба",
-                "club_create": "Основал кооператив", "club_deposit": "Взнос в копилку клуба"}
+                "buy_kombucha": "Купил гриб на рынке", "buy_new_kombucha": "Купил нового гриба"}
 MARKET_FEE = 0.05          # комиссия рынка сгорает — борьба с инфляцией
 MIN_PRICE, MAX_PRICE = 10, 1_000_000
 PRICES = {"jar": 300, "mushroom": 1000, "revive": 150}
@@ -77,18 +76,6 @@ async def earn(s, user_id: int, reason: str, ref, amount: int | None = None) -> 
         from .kombucha_achievements import check_rich
         await check_rich(s, user_id, bal)
     return amount
-
-
-async def demo_grant(s, user_id: int, amount: int, ref: str) -> int:
-    """Пополнение кошелька для DEMO_MODE/e2e (в проде путь недоступен). Не входит в EARN:
-    экономика игры не должна знать о демо-деньгах."""
-    await s.execute(insert(WoodTx).values(user_id=user_id, delta=amount, reason="demo_grant",
-                                          ref=str(ref)[:64], balance_after=0))
-    bal = (await s.execute(update(User).where(User.id == user_id).values(wood=User.wood + amount)
-                           .returning(User.wood))).scalar()
-    await s.execute(update(WoodTx).where(WoodTx.user_id == user_id, WoodTx.reason == "demo_grant",
-                                         WoodTx.ref == str(ref)[:64]).values(balance_after=bal))
-    return bal
 
 
 async def spend(s, user_id: int, amount: int, reason: str, ref) -> int:
