@@ -17,6 +17,7 @@ from ..errors import ApiError
 from ..models import Club, ClubMember, ClubPost, ClubReaction, ClubJoinRequest, ClubInvite, ClubMembershipCooldown
 from ..services import club_events, club_tank, clubs, leagues
 from ..services.antispam import hit_rate
+from ..services.captcha import captcha_required
 from . import bp
 from .utils import json_body
 
@@ -98,6 +99,7 @@ async def clubs_mine():
 
 @bp.post("/clubs")
 @login_required
+@captcha_required()
 async def clubs_create():
     data = json_body()
     async with session_scope() as s:
@@ -144,6 +146,7 @@ async def clubs_dev_grant():
 # ---------------------------------------------------------------- вступление/выход/роли
 @bp.post("/clubs/<tag>/join")
 @login_required
+@captcha_required()
 async def club_join(tag: str):
     data = json_body()
     async with session_scope() as s:
@@ -216,6 +219,7 @@ async def club_kick(s, club, member, uid: int):
 
 # ---------------------------------------------------------------- Танк
 @bp.post("/clubs/<tag>/tank/<action>")
+@captcha_required()
 @club_role_required()
 async def tank_action(s, club, member, action: str):
     json_body()
@@ -309,6 +313,7 @@ async def club_feed(s, club, member):
 
 
 @bp.post("/clubs/<tag>/feed")
+@captcha_required()
 @club_role_required()
 async def club_post(s, club, member):
     p = await clubs.post(s, member, club, json_body().get("body"))
@@ -353,6 +358,7 @@ async def club_settings(s, club, member):
 
 # ---------------------------------------------------------------- лаборатория
 @bp.post("/clubs/<tag>/lab/drain")
+@captcha_required()
 @club_role_required()
 async def club_lab_drain(s, club, member):
     data = json_body()
@@ -369,6 +375,7 @@ async def club_lab_collect(s, club, member, run_id: int):
 
 
 @bp.post("/clubs/<tag>/lab/craft")
+@captcha_required()
 @club_role_required()
 async def club_lab_craft(s, club, member):
     data = json_body()
@@ -430,7 +437,8 @@ async def club_events_state(s, club, member):
 @club_role_required("leader", "deputy")
 async def club_raid_start(s, club, member):
     raid = await club_events.start_raid(s, club, force=True)
-    return {"ok": True, "hp": raid.hp, "ends_at": raid.ends_at.isoformat() if raid.ends_at else None}
+    return {"ok": True, "id": raid.id, "hp": raid.hp,
+            "ends_at": raid.ends_at.isoformat() if raid.ends_at else None}
 
 
 @bp.post("/clubs/<tag>/war/team")

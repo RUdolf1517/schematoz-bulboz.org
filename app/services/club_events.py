@@ -1,7 +1,8 @@
 """Клубные события: рейд «Великая плесень», мировые ивенты и бизнес-войны.
 
 * Рейд — раз в месяц на 48 ч. Урон боссу наносят уход за личными грибами и мини-игры участников
-  (дневной потолок на человека). Победа → редкая мутация Танку и шапка всем; поражение → шрам.
+  (дневной потолок на человека). Победа → редкая мутация Танку и бейдж «Плеснебой» стартовому
+  составу клуба; поражение → шрам. Бизнес-война: победа → бейдж «Гроза конкурентов», поражение → шрам.
 * Мировые ивенты («Нашествие мушек», «Сахарный кризис», «Чайная ночь», сезонный Хэллоуин)
   включает админ: они меняют скорость падения показателей и требования к уходу.
   Во время Хэллоуина Танк может встать в атакующую группу, но теряет здоровье — урон зависит от мутаций.
@@ -127,8 +128,11 @@ async def start_raid(s: AsyncSession, club: Club, at: datetime | None = None, fo
     if existing is not None and not force:
         return existing
     hp = RAID_BOSS_BASE + RAID_BOSS_PER_MEMBER * max(1, club.members)
+    # Снапшот состава на старте: награды получают те, кто был в клубе в начале ивента.
+    starters = list(await s.scalars(select(ClubMember.user_id).where(ClubMember.club_id == club.id)))
     raid = ClubEventProgress(club_id=club.id, kind="raid", ref=ref, hp=hp, hp_max=hp, state="running",
-                             ends_at=at + timedelta(hours=RAID_HOURS), data={"damage": {}})
+                             ends_at=at + timedelta(hours=RAID_HOURS),
+                             data={"damage": {}, "members": [int(u) for u in starters]})
     s.add(raid)
     _feed(s, club.id, None, "raid", f"🦠 Рейд «Великая плесень»! У босса {hp} HP — бейте уходом и играми.", hp=hp)
     await tank_svc.notify_club(s, club.id, "club", tag=club.tag, hp=hp)
@@ -185,7 +189,8 @@ async def _finish_raid(s: AsyncSession, club: Club, raid: ClubEventProgress, won
     raid.state, raid.resolved_at = ("won" if won else "lost"), now()
     tank = await tank_svc.ensure_tank(s, club)
     if won:
-        _feed(s, club.id, None, "raid", "🏆 Великая плесень побеждена! Танк получает редкую мутацию, все — шапку.", won=True)
+        _feed(s, club.id, None, "raid", "🏆 Великая плесень побеждена! Танк получает редкую мутацию, "
+                                        "стартовому составу — бейдж «Плеснебой».", won=True)
         stage = tank_svc.stage_for(tank.xp)["size"]
         have = {r.stage for r in (await s.scalars(select(ClubTankMutation).where(
             ClubTankMutation.club_id == club.id))).all()}
@@ -193,9 +198,11 @@ async def _finish_raid(s: AsyncSession, club: Club, raid: ClubEventProgress, won
         if pool and rng.random() <= RAID_MUT_CHANCE + 0.5:      # победа — почти всегда награда
             pick = rng.choice(pool)
             s.add(ClubTankMutation(club_id=club.id, code=pick.code, stage=pick.stage))
-        await tank_svc.grant_hat_all(s, club, f"raid-{raid.ref}")
-        for m in (await s.scalars(select(ClubMember).where(ClubMember.club_id == club.id))).all():
-            notifications.notify(s, m.user_id, "club", club_id=club.id, tag=club.tag)
+        starters = [int(u) for u in ((raid.data or {}).get("members") or [])]
+        await tank_svc.grant_badge_all(s, club, "club_raid_win", starters or None)
+        for uid in (starters or [m.user_id for m in (await s.scalars(select(ClubMember).where(
+                ClubMember.club_id == club.id))).all()]):
+            notifications.notify(s, uid, "club", club_id=club.id, tag=club.tag)
     else:
         await tank_svc.add_scar(s, club, tank, "mold", "Рейд «Великая плесень»: босс оставил след")
         _feed(s, club.id, None, "raid", "💀 Рейд проигран. На Танке остался шрам.", won=False)
@@ -259,8 +266,15 @@ async def start_week(s: AsyncSession, week: str | None = None) -> int:
         # пары «соседи по очкам»: 1-й со 2-м, 3-й с 4-м и т.д.
         for i in range(0, len(group) - 1, 2):
             a, b = group[i], group[i + 1]
-            s.add(ClubWar(week_key=week, league_code=code, club_a_id=a.id, club_b_id=b.id,
-                          ends_at=now() + timedelta(days=7)))
+            war = ClubWar(week_key=week, league_code=code, club_a_id=a.id, club_b_id=b.id,
+                          ends_at=now() + timedelta(days=7))
+            # Снапшот состава на старте войны — бейдж получат только участники того момента.
+            snapshot = {}
+            for club in (a, b):
+                snapshot[str(club.id)] = [int(u) for u in await s.scalars(select(ClubMember.user_id).where(
+                    ClubMember.club_id == club.id))]
+            war.picks = {"__members__": snapshot}
+            s.add(war)
             made += 1
             for club in (a, b):
                 _feed(s, club.id, None, "war", f"⚔️ Бизнес-война недели: мы против «{b.name if club.id == a.id else a.name}»!", enemy_tag=b.tag if club.id == a.id else a.tag)
@@ -316,7 +330,10 @@ async def settle_wars(s: AsyncSession, week: str) -> int:
         war.score_a, war.score_b = score_a, score_b
         war.winner_id = a.id if score_a >= score_b else b.id
         war.state, war.resolved_at = "resolved", now()
-        loser = b if war.winner_id == a.id else a
+        winner = b if war.winner_id == a.id else a
+        loser = a if war.winner_id == b.id else b
+        snapshot = ((war.picks or {}).get("__members__") or {}).get(str(winner.id)) or []
+        await tank_svc.grant_badge_all(s, winner, "club_war_win", snapshot or None)
         tank = await tank_svc.ensure_tank(s, loser)
         await tank_svc.add_scar(s, loser, tank, "war", f"Война недели {week}: поражение")
         _feed(s, a.id, None, "war", f"⚔️ Итог войны: {score_a} : {score_b} — "

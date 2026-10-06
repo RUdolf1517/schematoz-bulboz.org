@@ -396,3 +396,55 @@ def test_club_reminders_via_notification_jobs(app, make_user):
     texts = _db(app, reminders)
     assert any("плесень" in t.lower() for t in texts), texts
     assert any("норма дня" in t.lower() for t in texts), texts
+
+
+def test_raid_and_war_rewards_are_badges_for_starters(app, make_user):
+    """Награды ивентов — только бейджи и только стартовому составу (никаких «шапок»)."""
+    from app.services import club_events
+    from app.models import ClubWar, UserBadge
+
+    owner, o = _user(make_user)
+    _give_wood(app, o["id"], 600)
+    tag = _make_club(owner, o).get_json()["club"]["tag"]
+    _alive(app)
+    started = owner.post(f"/api/clubs/{tag}/events/raid/start", json={}).get_json()
+    # Поздний участник: вступил уже после старта рейда — бейджа не получит.
+    late, lu = _user(make_user)
+    late.post(f"/api/clubs/{tag}/join", json={})
+
+    async def almost_dead(s):
+        from app.models import ClubEventProgress
+        raid = await s.get(ClubEventProgress, started["id"])
+        raid.hp = 1
+    _db(app, almost_dead)
+    owner.post(f"/api/clubs/{tag}/tank/sugar", json={})       # урон добивает босса
+
+    async def badges(s):
+        rows = (await s.execute(__import__("sqlalchemy").select(UserBadge))).scalars().all()
+        return [(r.user_id, r.code) for r in rows]
+    got = _db(app, badges)
+    assert (o["id"], "club_raid_win") in got
+    assert (lu["id"], "club_raid_win") not in got                 # поздний не в стартовом составе
+    assert all(code != "club_war_win" for _, code in got)
+
+    async def profiles(s):
+        rows = (await s.execute(__import__("sqlalchemy").select(User))).scalars().all()
+        return [u.profile or {} for u in rows]
+    assert all("club_hat" not in p for p in _db(app, profiles))    # шапок клубов не существует
+    assert not hasattr(club_events.tank_svc, "grant_hat_all")
+
+    # Война: бейдж победителю — тоже по снапшоту состава.
+    other, ou = _user(make_user)
+    _give_wood(app, ou["id"], 600)
+    _make_club(other, ou, name="Соперник", tag="СОП")
+
+    async def run_war(s):
+        week = club_events.week_key()
+        assert await club_events.start_week(s, week) >= 1
+        war = await s.scalar(__import__("sqlalchemy").select(ClubWar).order_by(ClubWar.id.desc()))
+        war.state = "picking"                      # состав не выбран: бой идёт «по умолчанию»
+        await s.flush()
+        return await club_events.settle_wars(s, week)
+    assert _db(app, run_war) >= 1
+    after = _db(app, badges)
+    assert any(code == "club_war_win" for _, code in after), after

@@ -426,7 +426,7 @@ def perks(codes: dict, level: int, stage: int, lab: list[dict] | None = None) ->
     return out
 
 
-CLUB_COSMETICS = [(1, "club_frame"), (2, "club_bg"), (3, "club_jar"), (4, "club_hat"), (5, "club_glow")]
+CLUB_COSMETICS = [(1, "club_frame"), (2, "club_bg"), (3, "club_jar"), (4, "club_flag"), (5, "club_glow")]
 
 
 async def refresh_perks(s: AsyncSession, club: Club, tank: ClubTank) -> dict:

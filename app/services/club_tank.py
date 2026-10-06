@@ -375,13 +375,17 @@ def phrase(club: Club, tank: ClubTank, contributors: int, norm: int, world: tupl
     return rng.choice(TALK["happy"]).format(n=club.members)
 
 
-async def grant_hat_all(s: AsyncSession, club: Club, hat: str) -> None:
-    """Победная шапка всем участникам клуба — «шапка в цветах клуба»."""
-    members = (await s.scalars(select(ClubMember.user_id).where(ClubMember.club_id == club.id))).all()
-    for uid in members:
-        u = await s.get(User, uid)
-        if u is not None:
-            u.profile = {**(u.profile or {}), "club_hat": hat}
+async def grant_badge_all(s: AsyncSession, club: Club, code: str, user_ids: list[int] | None = None) -> int:
+    """Выдать клубный бейдж участникам. user_ids — снапшот состава на старте ивента:
+    награду получают только те, кто был в клубе тогда (ТЗ: награды ивента — его стартовому составу)."""
+    from .gamification import award
+    if user_ids is None:
+        user_ids = list(await s.scalars(select(ClubMember.user_id).where(ClubMember.club_id == club.id)))
+    given = 0
+    for uid in dict.fromkeys(user_ids):
+        if await award(s, uid, code):
+            given += 1
+    return given
 
 
 async def add_scar(s: AsyncSession, club: Club, tank: ClubTank, code: str, note: str) -> None:
