@@ -1212,3 +1212,62 @@ body.halloween .site-footer { border-color:#69203c; }
   .kb-bat.bat-c { animation-duration:8.5s !important; }
   @keyframes kb-bat-flight-reduced { 0%{transform:translate(0,2px)} 100%{transform:translate(62px,-4px)} }
 }
+
+/* ---------------------------------------------------------------- кооперативы и Гриб-Танк */
+.club-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  border: 2px solid; border-color: var(--tk-a, #ff5a36); background: color-mix(in srgb, var(--tk-a, #ff5a36) 18%, transparent);
+  font-size: 13px; text-decoration: none; color: var(--fg); white-space: nowrap; }
+.club-badge b { color: var(--tk-b, #ff8a3d); }
+.club-mine { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+.tk-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin: 12px 0; }
+.tk-card { display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 16px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tk-a, #ff5a36) 22%, var(--card)), var(--card) 70%);
+  border: 1px solid var(--line); text-decoration: none; color: var(--fg); }
+.tk-card-emblem { font-size: 30px; }
+.tk-hero { background:
+  radial-gradient(1200px 320px at 10% -20%, color-mix(in srgb, var(--tk-a, #ff5a36) 18%, transparent), transparent 60%),
+  radial-gradient(800px 300px at 100% 0%, color-mix(in srgb, var(--tk-b, #ff8a3d) 14%, transparent), transparent 60%); }
+.tk-hero-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tk-hero-head h1 { margin: 0; font-size: 24px; }
+.tk-stage { margin-left: auto; color: var(--muted); }
+.tk-layout { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 18px; margin-top: 10px; }
+@media (max-width: 860px) { .tk-layout { grid-template-columns: 1fr; } }
+.tk-jar svg { width: 100%; max-width: 320px; height: auto; display: block; margin: 0 auto; }
+.tk-svg .tk-glass { fill: #ffffff10; stroke: var(--tk-a, #ff5a36); stroke-width: 5; }
+.tk-svg.moldy .tk-glass { stroke: #8fbf60; }
+.tk-svg.dead .tk-glass { stroke: #6b6b4a; }
+.tk-svg .tk-liquid-surface { opacity: .8; }
+.tk-svg .tk-bubble { animation: tk-rise 4s ease-in-out infinite; }
+@keyframes tk-rise { 0%, 100% { transform: translateY(0); opacity: .5 } 50% { transform: translateY(-14px); opacity: .9 } }
+.tk-hp { margin: 8px 0; }
+.tk-hp-bar { height: 12px; border-radius: 999px; background: var(--bg2); overflow: hidden; }
+.tk-hp-bar span { display: block; height: 100%; background: linear-gradient(90deg, #ff4d6d, #ff8a3d); transition: width .4s; }
+.tk-stats { margin-top: 8px; }
+.tk-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+@media (max-width: 600px) { .tk-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tk-notes { display: flex; flex-wrap: wrap; gap: 10px; font-size: 13px; margin-bottom: 10px; }
+.tk-notes .bad { color: var(--bad); }
+.tk-tabs { margin: 16px 0 10px; }
+.tk-req { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.tk-bank-head { font-size: 18px; margin-bottom: 10px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.tk-up { display: flex; flex-wrap: wrap; gap: 8px; }
+.tk-muts { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.tk-mut-card { background: var(--bg2); border-radius: 14px; padding: 12px; }
+.tk-me { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.kb-club { margin: 10px 0; }
+.kb-club-empty { display: block; padding: 10px 12px; border-radius: 12px; background: var(--bg2); color: var(--muted); font-size: 13px; text-decoration: none; }
+.kb-club-card { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--tk-a, #ff5a36) 45%, var(--line));
+  background: color-mix(in srgb, var(--tk-a, #ff5a36) 10%, var(--card)); }
+.modal-backdrop { position: fixed; inset: 0; background: #000a; display: flex; align-items: center; justify-content: center; z-index: 60; padding: 16px; }
+.modal { max-width: 460px; width: 100%; max-height: 90vh; overflow: auto; }
+
+/* Лента кооператива */
+.tk-feed { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.tk-post { padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel-2); }
+.tk-post.auto { opacity: .92; border-left: 3px solid var(--accent); }
+.tk-post-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tk-post-head .e { font-size: 18px; }
+.tk-post p { margin: 6px 0 8px; white-space: pre-wrap; }
+.tk-reacts { display: flex; gap: 6px; flex-wrap: wrap; }
+.tk-reacts .btn { padding: 2px 8px; }

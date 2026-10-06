@@ -104,6 +104,28 @@ def register_cli(app: Flask) -> None:
             return {"notifications": scanned, "push": delivered}
         click.echo(json.dumps(_run_db(app, _run()), ensure_ascii=False))
 
+    @app.cli.command("clubs-weekly")
+    def clubs_weekly():
+        """Недельные итоги кооперативов: стрики, лиги, войны, роспуск неактивных (идемпотентно)."""
+        from .services import clubs
+
+        async def _run():
+            async with session_scope() as s:
+                return await clubs.weekly_all(s)
+        result = _run_db(app, _run())
+        click.echo(f"Клубы: {result['clubs']}, расформировано: {result['disbanded']}, "
+                   f"лиги: {result['leagues']}, войны: {result['wars']} (неделя {result['week']})")
+
+    @app.cli.command("clubs-raids")
+    def clubs_raids():
+        """Проверить и закрыть истёкшие рейды, начать новые, если включено в админке."""
+        from .services import club_events
+
+        async def _run():
+            async with session_scope() as s:
+                return await club_events.tick_raids(s)
+        click.echo(f"Закрыто рейдов: {_run_db(app, _run())}")
+
     @app.cli.command("generate-vapid")
     @click.option("--subject", default="", help="Контакт владельца домена для push-сервисов: mailto: с реальным адресом (RFC 8292).")
     def generate_vapid(subject: str):

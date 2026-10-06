@@ -350,7 +350,7 @@ def _quote_fields(data: dict, partial: bool) -> dict:
     out = {}
     if "kind" in data or not partial:
         if data.get("kind") not in quotes.KINDS:
-            raise ApiError("kind: dubious | philo | halloween", 400, "validation_error", field="kind")
+            raise ApiError("kind: dubious | philo | halloween | tank | event:<код>", 400, "validation_error", field="kind")
         out["kind"] = data["kind"]
     if "text" in data or not partial:
         body = data.get("text")
@@ -438,3 +438,164 @@ async def quotes_delete(qid: int):
         await s.flush()
         await quotes.refresh_custom(s)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- клубы и мировые ивенты
+CLUBS_PERM = "clubs.manage"
+EVENTS_PERM = "events.manage"
+
+
+@bp.get("/clubs")
+@require_perm(CLUBS_PERM)
+async def admin_clubs():
+    from ..models import Club, ClubReport, ClubTank, ClubTankMutation
+    from ..services import club_tank
+    q = (request.args.get("q") or "").strip().lower()
+    async with session_scope() as s:
+        stmt = select(Club)
+        if q:
+            stmt = stmt.where(func.lower(Club.name).like(f"%{q}%") | func.lower(Club.tag).like(f"%{q}%"))
+        rows = (await s.scalars(stmt.order_by(Club.xp.desc()).limit(100))).all()
+        items = []
+        for club in rows:
+            tank = await s.get(ClubTank, club.id)
+            muts = (await s.scalars(select(ClubTankMutation.code).where(ClubTankMutation.club_id == club.id))).all()
+            items.append({"id": club.id, "name": club.name, "tag": club.tag, "emblem": club.emblem,
+                          "status": club.status, "members": club.members, "capacity": club.capacity,
+                          "level": club.level, "account": club.account, "join_mode": club.join_mode,
+                          "xp": club.xp, "leader_id": club.leader_id,
+                          "last_active_at": club.last_active_at.isoformat() if club.last_active_at else None,
+                          "tank": None if tank is None else {
+                              "xp": tank.xp, "stage": club_tank.stage_for(tank.xp)["size"],
+                              "stats": {k: round(getattr(tank, k)) for k in club_tank.STATS},
+                              "hp": round(tank.hp), "mold": tank.mold, "alive": tank.alive,
+                              "scars": len(tank.scars or []), "mutations": list(muts),
+                              "party_scale": club_tank.party_scale(club.members)}})
+        reports = (await s.scalars(select(ClubReport).where(ClubReport.status == "open")
+                                   .order_by(ClubReport.id.desc()).limit(50))).all()
+        return {"items": items,
+                "reports": [{"id": r.id, "club_id": r.club_id, "post_id": r.post_id, "reason": r.reason,
+                             "at": r.created_at.isoformat()} for r in reports],
+                "catalog": [{"code": m.code, "stage": m.stage, "title": m.title, "emoji": m.emoji,
+                             "dmg": m.dmg, "hp": m.hp, "upkeep": m.upkeep} for m in __import__(
+                                 "app.services.club_tank_mutations", fromlist=["MUTATIONS"]).MUTATIONS]}
+
+
+@bp.patch("/clubs/<int:club_id>")
+@require_perm(CLUBS_PERM)
+async def admin_club_patch(club_id: int):
+    from ..models import Club, ClubTank
+    from ..services import clubs as clubs_svc
+    data = json_body()
+    async with session_scope() as s:
+        club = await s.get(Club, club_id)
+        if club is None:
+            raise ApiError("Клуб не найден", 404, "club_not_found")
+        changed = {}
+        if "name" in data:
+            club.name = clubs_svc._clean_name(data["name"])
+            changed["name"] = club.name
+        if "tag" in data:
+            club.tag = clubs_svc._clean_tag(data["tag"])
+            changed["tag"] = club.tag
+        if data.get("disband"):
+            await clubs_svc.disband(s, club, reason=str(data.get("reason") or "Решение админа"))
+            changed["disbanded"] = True
+        if "status" in data and data["status"] in ("active", "banned"):
+            club.status = data["status"]
+            changed["status"] = club.status
+        if "tank" in (data or {}):
+            tank = await s.get(ClubTank, club.id)
+            if tank is not None:
+                t = data["tank"] or {}
+                for stat in ("sweet", "tea", "clean", "happy"):
+                    if stat in (t.get("stats") or {}):
+                        setattr(tank, stat, float(max(0, min(100, t["stats"][stat]))))
+                        changed[stat] = getattr(tank, stat)
+                if "xp" in t:
+                    tank.xp = max(0, int(t["xp"]))
+                    changed["xp"] = tank.xp
+                if "hp" in t:
+                    tank.hp = float(max(0, min(tank.hp_max, t["hp"])))
+                    changed["hp"] = tank.hp
+                for flag in ("mold", "alive"):
+                    if flag in t:
+                        setattr(tank, flag, bool(t[flag]))
+                        changed[flag] = bool(t[flag])
+                if t.get("hours"):
+                    tank.updated_at -= timedelta(hours=float(t["hours"]))
+                    changed["hours"] = t["hours"]
+                if t.get("mutation"):
+                    code = str(t["mutation"])
+                    from ..services import club_tank_mutations as muts
+                    if code not in muts.BY_CODE:
+                        raise ApiError("Неизвестная мутация Танка", 400, "validation_error")
+                    m = muts.BY_CODE[code]
+                    existing = await s.scalar(select(ClubTankMutation).where(ClubTankMutation.club_id == club.id,
+                                                                            ClubTankMutation.stage == m.stage))
+                    if existing is not None:
+                        existing.code = code
+                    else:
+                        s.add(ClubTankMutation(club_id=club.id, code=code, stage=m.stage))
+                    changed["mutation"] = code
+        log_action(s, g.user.id, "club.debug", "club", club_id, **{c: str(v) for c, v in changed.items()})
+        await s.flush()
+        return {"ok": True, "changed": changed}
+
+
+@bp.post("/clubs/reports/<int:report_id>")
+@require_perm(CLUBS_PERM)
+async def admin_club_report(report_id: int):
+    from ..models import ClubPost, ClubReport
+    data = json_body()
+    async with session_scope() as s:
+        r = await s.get(ClubReport, report_id)
+        if r is None:
+            raise ApiError("Жалоба не найдена", 404, "not_found")
+        r.status, r.decided_at, r.decided_by = ("resolved" if data.get("accept") else "rejected"), datetime.now(timezone.utc), g.user.id
+        if data.get("accept") and r.post_id:
+            post = await s.get(ClubPost, r.post_id)
+            if post is not None:
+                post.deleted_at, post.deleted_by = datetime.now(timezone.utc), g.user.id
+        return {"ok": True, "status": r.status}
+
+
+@bp.get("/events/world")
+@require_perm(EVENTS_PERM)
+async def admin_world_events():
+    from ..services import club_events
+    async with session_scope() as s:
+        cfg = await club_events.config(s)
+        return {"config": cfg, "active": await club_events.active_world(s),
+                "titles": club_events.WORLD_TITLES, "raid": cfg["raid"]}
+
+
+@bp.put("/events/world")
+@require_perm(EVENTS_PERM)
+async def admin_world_events_save():
+    from ..services import club_events
+    data = json_body()
+    async with session_scope() as s:
+        value = club_events.validate_config(data)
+        row = await s.get(Setting, "world_events", with_for_update=True)
+        if row is None:
+            row = Setting(key="world_events", value=value)
+            s.add(row)
+        else:
+            row.value = value
+        log_action(s, g.user.id, "world_events.save", "setting", 0, enabled=value.get("enabled"))
+        await s.flush()
+        return {"config": value}
+
+
+@bp.post("/events/world/raid/run")
+@require_perm(EVENTS_PERM)
+async def admin_run_raids():
+    from ..models import Club
+    from ..services import club_events
+    async with session_scope() as s:
+        started = 0
+        for club in (await s.scalars(select(Club).where(Club.status == "active"))).all():
+            await club_events.start_raid(s, club, force=True)
+            started += 1
+        return {"ok": True, "started": started}

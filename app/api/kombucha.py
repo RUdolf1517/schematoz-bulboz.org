@@ -45,6 +45,15 @@ def _name(data: dict, required: bool = False) -> str | None:
     return name
 
 
+async def _club_decay(s, user_id: int) -> float:
+    """Перк клуба «показатели падают медленнее» (0, если игрок без кооператива)."""
+    from ..services import clubs
+    try:
+        return await clubs.decay_slow_for(s, user_id)
+    except Exception:  # noqa: BLE001 — перк не должен ломать чтение состояния
+        return 0.0
+
+
 async def _state(s, user: User) -> dict:
     items = await kb.list_for(s, user.id)
     from ..services import halloween
@@ -264,8 +273,12 @@ async def kombucha_top():
             select(Kombucha, User.username).join(User, User.id == Kombucha.user_id)
             .where(Kombucha.alive.is_(True)).order_by(Kombucha.xp.desc(), Kombucha.id).limit(10))).all()
         event_window = await kb.halloween_decay_window(s)
+        slows = {}
         for k, _ in rows:
-            kb.tick(k, halloween_window=event_window)
+            slows[k.user_id] = slows.get(k.user_id, None)
+            if slows[k.user_id] is None:
+                slows[k.user_id] = await _club_decay(s, k.user_id)
+            kb.tick(k, halloween_window=event_window, decay_slow=slows[k.user_id])
     return {"items": [{"id": k.id, "username": u, "name": k.name, "xp": k.xp, "generation": k.generation,
                        "stage": kb.stage_for(k.xp)["title"], "mutations": len(k.mutations or []),
                        "kombucha": kb.public_out(k, u)}
@@ -296,7 +309,8 @@ async def kombucha_diary(kid: int):
         k = await s.get(Kombucha, kid)
         if k is None:
             raise ApiError("Гриб не найден", 404, "not_found")
-        kb.tick(k, halloween_window=await kb.halloween_decay_window(s))
+        kb.tick(k, halloween_window=await kb.halloween_decay_window(s),
+                decay_slow=await _club_decay(s, user.id))
         owner = (await s.execute(select(User.username).where(User.id == k.user_id))).scalar()
         d = await kb.diary.read(s, k, before)
         return {"kombucha": kb.public_out(k, owner), "mine": current_user_id() == k.user_id, **d}

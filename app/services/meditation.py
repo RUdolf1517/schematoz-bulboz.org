@@ -122,13 +122,13 @@ def _offsets(beats: list[int], taps: list) -> list[float]:
     return out
 
 
-def _roll_mutation(k, acc: float):
+def _roll_mutation(k, acc: float, mut_bonus: float = 0.0):
     if acc < MUT_FROM_ACC:
         return None
     size = kb.stage_for(k.xp)["size"]
     if kb.stage_mut_counts(k).get(size, 0) >= kb.MAX_MUT_PER_STAGE:
         return None
-    chance = 0.03 + 0.12 * (acc - MUT_FROM_ACC) / (1 - MUT_FROM_ACC)     # 3% … 15%
+    chance = 0.03 + 0.12 * (acc - MUT_FROM_ACC) / (1 - MUT_FROM_ACC) + mut_bonus   # 3% … 15% + перк клуба
     if rng.random() >= chance:
         return None
     pool = [m for m in MUTATIONS if m.stage == size and not kb.has_mut(k, m.code)]
@@ -163,16 +163,19 @@ async def finish(s, user, k, token: str, taps, meta=None) -> dict:
         r.set(f"med:cd:{k.id}", 1, ex=COOLDOWN)
         r.set(f"med:played:{k.id}", 1, ex=30 * 24 * 60 * 60)
 
-    kb.tick(k)
+    from . import clubs as clubs_svc
+    club = await clubs_svc.club_bonus_for(s, user.id)
+    kb.tick(k, decay_slow=float(club.get("decay_slow", 0.0)))
     happy = round(25 * acc)
     k.happy = min(100.0, k.happy + happy)
-    # Счастье поднято — считаем опыт с множителем «идеального коридора».
+    # Счастье поднято — считаем опыт с множителем «идеального коридора» и перком клуба.
     xp = kb.scaled_xp(0 if k.mold else round(12 * acc), k)
+    xp = kb.apply_club_xp(xp, float(club.get("xp_bonus", 0.0)))
     old_xp = k.xp
     k.xp += xp
     k.best_xp = max(k.best_xp, k.xp)
     earned = await wood.earn(s, user.id, "meditation", token, amount=round(10 * acc))
-    m = _roll_mutation(k, acc)
+    m = _roll_mutation(k, acc, float(club.get("mut_chance", 0.0)))
     mut = await kb.add_mutation(s, k, m, kb.now()) if m else None
     diary.stage_check(s, k, old_xp)
     if acc >= 0.95:

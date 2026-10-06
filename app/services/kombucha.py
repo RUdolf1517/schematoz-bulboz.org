@@ -150,6 +150,28 @@ async def next_serial(s, code: str) -> int:
         .returning(MutationCounter.issued))).scalar()
 
 
+async def strip_mutations(s, rows: list[Kombucha], codes: list[str], wounded_days: int = 7) -> int:
+    """Лаборатория кооператива: грибы отдают мутации, а на неделю получают дебаф «Раненый»
+    (показатели падают вдвое быстрее — см. tick())."""
+    want = {c for c in codes if c}
+    taken = 0
+    for k in rows:
+        if k.frozen:
+            continue
+        kept, lost = [], 0
+        for entry in (k.mutations or []):
+            code = entry["code"] if isinstance(entry, dict) else str(entry)
+            if code in want and lost < len(want):
+                lost += 1
+                taken += 1
+            else:
+                kept.append(entry)
+        if lost:
+            k.mutations = kept
+            k.wounded_until = now() + timedelta(days=wounded_days)
+    return taken
+
+
 async def add_mutation(s, k: Kombucha, m: Mutation, at: datetime, inherited: bool = False) -> dict:
     """Повесить мутацию на гриб (с номером экземпляра) и в коллекцию юзера."""
     serial = await next_serial(s, m.code)
@@ -204,12 +226,18 @@ def stage_for(xp: int) -> dict:
 
 
 def tick(k: Kombucha, at: datetime | None = None, halloween_active: bool = False,
-         halloween_window: tuple[datetime, datetime] | None = None) -> None:
+         halloween_window: tuple[datetime, datetime] | None = None, decay_slow: float = 0.0) -> None:
     """Применить ступеньки убывания и проверить, не закис ли гриб.
-    В период Хэллоуина чистота и счастье падают вдвое быстрее."""
+    В период Хэллоуина чистота и счастье падают вдвое быстрее.
+    decay_slow — перк клуба: показатели падают на столько медленнее (0…0.15).
+    «Раненый» (бизнес-войны клубов) — наоборот, ускоряет падение вдвое."""
     at = at or now()
     if not k.alive or k.frozen:
         return
+    slow = 1.0 - max(0.0, min(0.6, decay_slow))
+    wounded = bool(k.wounded_until and at < k.wounded_until)
+    if wounded:
+        slow *= 0.5
     steps = int((at - k.updated_at) / PERIOD) if at > k.updated_at else 0
     for i in range(steps):
         step_at = k.updated_at + PERIOD * (i + 1)
@@ -220,7 +248,7 @@ def tick(k: Kombucha, at: datetime | None = None, halloween_active: bool = False
         event_step = halloween_active or bool(
             halloween_window and halloween_window[0] <= step_at < halloween_window[1])
         for s in STATS:
-            drop = DROP[s] * (2 if event_step and s in ("clean", "happy") else 1)
+            drop = DROP[s] * slow * (2 if event_step and s in ("clean", "happy") else 1)
             setattr(k, s, max(getattr(k, s) - drop - (MOLD_EXTRA.get(s, 0.0) if k.mold else 0.0), 0.0))
         if k.zero_since is None and any(getattr(k, s) <= 0 for s in STATS):
             k.zero_since = step_at
@@ -255,6 +283,13 @@ def scaled_xp(base_xp: int | float, k: Kombucha) -> int:
     if base_xp <= 0:
         return 0
     return max(1, int(base_xp * xp_mult(k)))
+
+
+def apply_club_xp(xp: int, club_bonus: float) -> int:
+    """Перк кооператива: +5…25% опыта личному грибу (и только опыта — не $₽ и не счастья)."""
+    if xp <= 0 or club_bonus <= 0:
+        return xp
+    return max(1, int(xp * (1.0 + club_bonus)))
 
 
 def mood(k: Kombucha) -> str:
@@ -435,6 +470,8 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
     in_danger = k.zero_since is not None
     danger_since = k.zero_since
     old_xp = k.xp
+    from . import clubs as clubs_svc
+    club_bonus = float((await clubs_svc.club_bonus_for(s, user.id)).get("xp_bonus", 0.0))
     games_24h = med_24h = 0
     daily_wood = 0
     if action == "daily":
@@ -448,6 +485,7 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
         k.happy = min(k.happy + 10, 100.0)
         # Коридор проверяем после применения действия (счастье уже поднято).
         gain = scaled_xp(0 if k.mold else 5 + 5 * n, k)
+        gain = apply_club_xp(gain, club_bonus)
         xp = gain
         k.xp += gain
         daily_wood = await wood.earn(s, user.id, "daily_bonus", f"{k.id}:{at.date().isoformat()}", amount=5 + min(care_24h, 15))
@@ -488,6 +526,7 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
         elif min(getattr(k, x) for x in STATS) < LOW_STAT:
             xp //= 2                      # штраф за запущенность — раньше коридора
         xp = scaled_xp(xp, k)             # и только потом множитель коридора
+        xp = apply_club_xp(xp, club_bonus)  # и перк кооператива (+5…25% опыта личному грибу)
         k.xp += xp
     else:
         raise ApiError("Неизвестное действие", 400, "validation_error")
@@ -508,7 +547,7 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
     await on_care(s, user.id)
 
     res: dict = {"message": msg, "mutation": None, "sprout": None, "wood": earned,
-                 "xp_gain": xp, "xp_mult": xp_mult(k),
+                 "xp_gain": xp, "xp_mult": xp_mult(k), "club_bonus": club_bonus,
                  "quote": quote if action in ACTIONS else None}
     msk = at.astimezone(MSK)
     m = None if k.mold else roll_mutation(Ctx(action=action, k=k, hour=msk.hour, weekday=msk.weekday(), games_24h=games_24h,

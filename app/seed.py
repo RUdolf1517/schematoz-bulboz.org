@@ -96,6 +96,8 @@ async def seed() -> None:
                 role = Role(code=code, title=title)
                 s.add(role)
             role.permissions = [perms[p] for p in sorted(role_perms)]
+        from .services import leagues
+        await leagues.ensure_leagues(s)
         for slug, (title, consent, body) in LEGAL.items():
             if await s.scalar(select(LegalPage.id).where(LegalPage.slug == slug)) is None:
                 page = LegalPage(slug=slug, title=title, current_version=1, requires_consent=consent)

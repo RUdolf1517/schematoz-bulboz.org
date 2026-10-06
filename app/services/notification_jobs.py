@@ -119,6 +119,8 @@ async def scan_notifications(at: datetime | None = None) -> dict:
                                        "Я закис. Если читаешь это — поливай своих грибов вовремя.",
                                        f"/g/{k.id}", k.id)
 
+        created += await _scan_clubs(s, at)
+
         for user in users:
             if user.last_seen_at and user.last_seen_at <= at - timedelta(hours=6):
                 key = f"missing:{user.id}:{int(user.last_seen_at.timestamp())}"
@@ -132,6 +134,62 @@ async def scan_notifications(at: datetime | None = None) -> dict:
                                            "До полуночи около трёх часов. Я бы напомнил раньше, но ты же занят(а).", "/")
         return {"checked_users": len(users), "checked_mushrooms": len(kombuchas), "created": created}
 
+
+
+async def _club_emit(s, user_id: int, key: str, title: str, body: str, url: str, category: str) -> bool:
+    """Клубное напоминание: сайтовое уведомление (kind=club) + push в подходящей категории."""
+    site_notice = await notify_once(s, user_id, "club", key, text=body, club_url=url)
+    push_notice = await enqueue_push(s, user_id, category, title, body, url, key)
+    return site_notice or push_notice
+
+
+async def _scan_clubs(s, at: datetime) -> int:
+    """Напоминания по кооперативам: голод и плесень Танка, норма дня за 4 часа до полуночи, стрик под угрозой."""
+    from ..models import Club, ClubDayStat, ClubMember
+    from . import club_tank
+
+    created = 0
+    clubs = (await s.scalars(select(Club).where(Club.status == "active"))).all()
+    for club in clubs:
+        tank = await club_tank.ensure_tank(s, club)
+        await club_tank.tick(s, club, tank, at)
+        url = f"/c/{club.tag}"
+        local = at.astimezone(club_tank.MSK)
+        day = local.date()
+        key_prefix = f"{club.id}:{day.isoformat()}"
+        members = [m.user_id for m in (await s.scalars(select(ClubMember).where(
+            ClubMember.club_id == club.id))).all()]
+        if not members:
+            continue
+        if tank.alive and tank.mold:
+            for uid in members:
+                created += await _club_emit(s, uid, f"club:mold:{key_prefix}", "Танк в плесени 🦠",
+                                            f"Кооператив [{(club.tag)}] не домыл банку: плесень лечат три разных участника.",
+                                            url, "mold")
+        elif tank.alive:
+            weak_key = next((k for k in club_tank.STATS if getattr(tank, k) <= club_tank.LOW_STAT), None)
+            if weak_key:
+                for uid in members:
+                    created += await _club_emit(s, uid, f"club:hungry:{key_prefix}:{weak_key}", "Гриб-Танк голоден",
+                                                f"В кооперативе [{club.tag}] показатель «{club_tank.STAT_TITLES[weak_key]}» "
+                                                f"ниже {int(club_tank.LOW_STAT)}. Загляни к общему Танку.",
+                                                url, "stat_low")
+        # Норма дня: за 4 часа до полуночи (МСК) напоминаем тем, кто ещё не внёс вклад.
+        row = await s.scalar(select(ClubDayStat).where(ClubDayStat.club_id == club.id, ClubDayStat.day == day))
+        target = (row.norm_target if row else None) or await club_tank.norm_target(club)
+        contributors = set((row.contributors if row else []) or [])
+        seconds_left = (datetime.combine(day + timedelta(days=1), datetime.min.time(), tzinfo=club_tank.MSK) - local
+                        ).total_seconds()
+        if len(contributors) < target and seconds_left <= 4 * 3600:
+            streak = club_tank.club_stats([row] if row else [])["streak"]
+            title = "Клубный стрик под угрозой 🔥" if streak >= 2 else "Клубу нужен твой вклад"
+            body = (f"Норма дня у [{club.tag}]: {len(contributors)}/{target}. До полуночи "
+                    f"{max(1, int(seconds_left // 3600))} ч — Танк считает нас.")
+            for uid in members:
+                if uid in contributors:
+                    continue
+                created += await _club_emit(s, uid, f"club:norm:{key_prefix}", title, body, url, "streak_expiring")
+    return created
 
 
 def today_date(at: datetime):
