@@ -86,7 +86,8 @@ def test_create_club_costs_and_unique_names(app, make_user):
     assert r.status_code == 201, r.get_json()
     club = r.get_json()["club"]
     assert club["members"] == 1 and club["account"] == 0
-    assert club["perks"]["xp_bonus"] >= 0.05 and club["capacity"] == 5
+    assert club["perks"]["xp_bonus"] == 0 and club["perks"]["active"] == []   # перки не выдаются сами
+    assert club["capacity"] == 5
     assert club["tank"]["stage"]["title"] == "Спора-Танк"
     # уникальность названия и тега
     _give_wood(app, u["id"], 600)
@@ -127,6 +128,71 @@ def test_join_limits_and_request_flow(app, make_user):
     assert other.get(f"/api/clubs/{tag}").get_json()["me"]["member"] is True
     # участник не может исключать
     assert other.delete(f"/api/clubs/{tag}/members/{o['id']}").status_code == 403
+
+
+def test_one_club_per_account(app, make_user):
+    """Один аккаунт — один кооператив: второй клуб создать или вступить нельзя."""
+    c, u = _user(make_user)
+    _give_wood(app, u["id"], 4000)
+    first = _make_club(c, u)
+    assert first.status_code == 201, first.get_json()
+
+    second = c.post("/api/clubs", json={"name": "Второй", "tag": "ВТ"})
+    assert second.status_code == 409 and second.get_json()["error"] == "already_in_club", second.get_json()
+
+    # в чужой клуб тоже не пускает
+    other, o = _user(make_user)
+    _give_wood(app, o["id"], 600)
+    other_tag = _make_club(other, o, name="Соседний", tag="СОС").get_json()["club"]["tag"]
+    r = c.post(f"/api/clubs/{other_tag}/join", json={})
+    assert r.status_code == 409 and r.get_json()["error"] == "already_in_club"
+
+    # в БД ровно одно участие, даже если кто-то пытается вставить второе напрямую
+    from sqlalchemy.exc import IntegrityError
+
+    async def dup(s):
+        s.add(ClubMember(club_id=__import__("sqlalchemy").select(Club.id)
+                         .where(Club.tag == other_tag).scalar_subquery(), user_id=u["id"], role="member"))
+        await s.flush()
+    with pytest.raises(IntegrityError):
+        _db(app, dup)
+
+    async def memberships(s):
+        return (await s.scalars(__import__("sqlalchemy").select(ClubMember.club_id)
+                                .where(ClubMember.user_id == u["id"]))).all()
+    assert len(_db(app, memberships)) == 1
+
+
+def test_approved_request_of_moved_player_is_stopped(app, make_user):
+    """Заявку нельзя одобрить тому, кто за это время уже основал свой кооператив."""
+    owner, o = _user(make_user)
+    _give_wood(app, o["id"], 600)
+    club = _make_club(owner, o, name="Заявочный", tag="ЗАЯ").get_json()["club"]
+    tag = club["tag"]
+
+    async def to_request(s):
+        row = await s.scalar(__import__("sqlalchemy").select(Club).where(Club.tag == tag))
+        row.join_mode = "request"
+    _db(app, to_request)
+
+    guest, g = _user(make_user)
+    _give_wood(app, g["id"], 4000)
+    assert guest.post(f"/api/clubs/{tag}/join", json={"message": "Пустите"}).status_code == 200
+
+    # пока заявка висела, игрок основал свой клуб
+    own = _make_club(guest, g, name="Свой", tag="СВО")
+    assert own.status_code == 201, own.get_json()
+
+    reqs = owner.get(f"/api/clubs/{tag}/requests").get_json()["items"]
+    assert len(reqs) == 1
+    r = owner.post(f"/api/clubs/{tag}/requests/{reqs[0]['id']}", json={"approve": True})
+    assert r.status_code == 409 and r.get_json()["error"] == "already_in_club", r.get_json()
+
+    async def memberships(s):
+        return (await s.scalars(__import__("sqlalchemy").select(ClubMember.club_id)
+                                .where(ClubMember.user_id == g["id"]))).all()
+    only = _db(app, memberships)
+    assert len(only) == 1 and only[0] == own.get_json()["club"]["id"]
 
 
 def test_roles_and_transfer(app, make_user):
@@ -232,6 +298,36 @@ def test_bank_cannot_be_withdrawn(app, make_user):
     assert not hasattr(clubs_svc, "withdraw")
 
 
+def test_perks_exist_only_while_lab_prep_lasts(app, make_user):
+    """Перк — не пассивка: он есть только пока действует собранный в лаборатории препарат."""
+    owner, o = _user(make_user)
+    _alive(app)
+    _give_wood(app, o["id"], 6000)
+    tag = _make_club(owner, o, name="Лабораторный", tag="ЛАБ").get_json()["club"]["tag"]
+
+    async def personal_bonus(s):
+        return float((await clubs_svc.club_bonus_for(s, o["id"])).get("xp_bonus", 0.0))
+
+    # без препарата у персонального гриба нет клубных бонусов
+    assert owner.get(f"/api/clubs/{tag}").get_json()["perks"]["xp_bonus"] == 0
+    assert _db(app, personal_bonus) == 0
+
+    async def set_prep(s, until_iso):
+        row = await s.scalar(__import__("sqlalchemy").select(Club).where(Club.tag == tag))
+        row.settings = {**(row.settings or {}), "lab": [{"kind": "xp_bonus", "value": 0.5, "until": until_iso}]}
+    future = (datetime.now(timezone.utc) + timedelta(hours=5)).isoformat()
+    _db(app, lambda s: set_prep(s, future))
+    perks = owner.get(f"/api/clubs/{tag}").get_json()["perks"]
+    assert perks["xp_bonus"] > 0 and perks["active"]
+    assert _db(app, personal_bonus) > 0
+
+    # время вышло — препарат больше ничего не даёт, хотя запись в настройках осталась
+    past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    _db(app, lambda s: set_prep(s, past))
+    assert owner.get(f"/api/clubs/{tag}").get_json()["perks"]["xp_bonus"] == 0
+    assert _db(app, personal_bonus) == 0
+
+
 def test_raid_and_wars_and_league_and_beauty(app, make_user):
     owner, o = _user(make_user)
     _give_wood(app, o["id"], 900)
@@ -292,8 +388,10 @@ def test_lab_prep_and_mutation_craft(app, make_user):
     _db(app, ready)
     prep = owner.post(f"/api/clubs/{tag}/lab/collect/{run_id}", json={}).get_json()["prep"]
     assert prep["kind"] == "xp_bonus" and prep["value"] > 0
-    perks = owner.get(f"/api/clubs/{tag}").get_json()["perks"]
-    assert perks["xp_bonus"] > 0.05                     # препарат усилил перк
+    page = owner.get(f"/api/clubs/{tag}").get_json()
+    perks = page["perks"]
+    assert perks["xp_bonus"] == prep["value"] > 0       # перк дал ровно препарат из лаборатории
+    assert perks["active"] and perks["active"][0]["kind"] == "xp_bonus"
 
     # крафт мутации Танка: три гриба клуба отдают мутации, грибы получают «Раненого»
     names = []
@@ -553,6 +651,36 @@ def test_admin_gets_new_perms_without_reseed(app, make_user):
     assert admin.get("/admin/events/world").status_code == 200
     r = admin.post("/api/clubs", json={"name": "Бесплатный", "tag": "БЕС"})
     assert r.status_code == 201 and r.get_json()["free"] is True, r.get_json()
+
+
+def test_club_page_self_heals_missing_league_catalog(app, make_user):
+    """«Данные не прошли проверку» после создания клуба: пустой каталог дивизионов.
+
+    Страница клуба (GET /api/clubs/<tag>) заводит клуб в лигу, а вставка ссылается на
+    справочник club_leagues. Если seed не наполнял справочник — раньше падал FK и игрок
+    видел безликую ошибку на своей же новой странице. Теперь справочник досыпается сам.
+    """
+    from sqlalchemy import text
+
+    c, u = _user(make_user)
+    _give_wood(app, u["id"], 700)
+    r = _make_club(c, u)
+    assert r.status_code == 201, r.get_json()
+    tag = r.get_json()["club"]["tag"]
+
+    async def wipe(s):
+        await s.execute(text("delete from club_league_memberships"))
+        await s.execute(text("delete from club_leagues"))
+    _db(app, wipe)
+
+    page = c.get(f"/api/clubs/{tag}")
+    assert page.status_code == 200, page.get_json()
+    assert page.get_json()["tank"]["league"]["league"] == "bronze"
+
+    async def codes(s):
+        from app.models import League
+        return set((await s.scalars(__import__("sqlalchemy").select(League.code))).all())
+    assert "bronze" in _db(app, codes)                     # справочник восстановлен
 
 
 def test_dev_reset_only_in_demo_mode(app, make_user):

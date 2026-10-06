@@ -87,7 +87,8 @@ async def _mine_block(s, user_id: int | None) -> dict | None:
                      "account": club.account, "level": club.level, "members": club.members},
             "tank": {"stage": st["size"], "stage_title": st["title"], "mood": club_tank.mood(tank),
                      "hp": round(tank.hp), "mold": tank.mold},
-            "perks": club.perks, "cooldown_until": None}
+            "perks": clubs.perks({}, club.level, st["size"], clubs.active_preps(club)),
+            "cooldown_until": None}
 
 
 @bp.get("/clubs/mine")

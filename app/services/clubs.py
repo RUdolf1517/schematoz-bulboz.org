@@ -19,6 +19,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..errors import ApiError
@@ -119,6 +120,27 @@ def ip_key() -> str | None:
     return hashlib.sha256(ip.encode()).hexdigest()[:16]
 
 
+def _constraint_of(e: IntegrityError) -> str:
+    m = re.search(r'constraint "([^"]+)"', str(getattr(e, "orig", e)))
+    return m.group(1) if m else ""
+
+
+def _member_conflict(e: IntegrityError) -> ApiError:
+    """Переводит нарушение уникальности в понятную ошибку.
+
+    Главный инвариант — один аккаунт, один кооператив (`uq_club_members_user`):
+    он ловит и двойной клик по «Основать», и одобрение заявки того, кто уже в клубе.
+    """
+    name = _constraint_of(e)
+    if name == "uq_club_members_user":
+        return ApiError("Ты уже в кооперативе — сначала выйди из текущего", 409, "already_in_club")
+    if name == "uq_clubs_name_lower":
+        return ApiError("Такое название уже занято", 409, "name_taken", field="name")
+    if name == "uq_clubs_tag_lower":
+        return ApiError("Такой тег уже занят", 409, "tag_taken", field="tag")
+    return ApiError("Данные не прошли проверку", 400, "constraint_violation", constraint=name or None)
+
+
 # ---------------------------------------------------------------- создание, вступление, выход
 async def create(s: AsyncSession, user: User, data: dict, *, free: bool = False) -> tuple[Club, ClubTank]:
     """Основать клуб. free=True (администраторы) — без списания 500 $₽.
@@ -146,14 +168,18 @@ async def create(s: AsyncSession, user: User, data: dict, *, free: bool = False)
                 description=str(data.get("description") or "")[:280],
                 join_mode=data.get("join_mode") if data.get("join_mode") in ("open", "request", "invite") else "open",
                 min_level=max(1, min(int(data.get("min_level") or 1), 50)),
-                leader_id=user.id, members=1, perks=perks({}, level=1, stage=1))
+                leader_id=user.id, members=1, perks=perks({}, 1, 1))                       # препаратов нет — перков нет
     s.add(club)
     await s.flush()
     s.add(ClubMember(club_id=club.id, user_id=user.id, role="leader"))
     tank = ClubTank(club_id=club.id)
     s.add(tank)
     _feed(s, club.id, user.id, "join", f"🏛 Кооператив {club.name} основан. Танк ждёт первых литров!")
-    await s.flush()
+    try:
+        # Проверка выше не спасает от гонки (двойной клик по «Основать»): решает индекс в БД.
+        await s.flush()
+    except IntegrityError as e:
+        raise _member_conflict(e) from e
     await _track_ip(s, club, user.id)
     return club, tank
 
@@ -227,6 +253,10 @@ async def _add_member(s: AsyncSession, club: Club, user: User, invite: ClubInvit
     club.last_active_at = now()
     member = ClubMember(club_id=club.id, user_id=user.id, role="member")
     s.add(member)
+    try:
+        await s.flush()          # инвариант «один аккаунт — один кооператив» (uq_club_members_user)
+    except IntegrityError as e:
+        raise _member_conflict(e) from e
     if invite is not None:
         invite.uses += 1
     _feed(s, club.id, user.id, "join", f"🥳 @{user.username} вступил в кооператив!",
@@ -310,15 +340,20 @@ async def decide_request(s: AsyncSession, actor: ClubMember, club: Club, request
     req = await s.get(ClubJoinRequest, request_id, with_for_update=True)
     if req is None or req.club_id != club.id or req.status != "pending":
         raise ApiError("Заявка не найдена", 404, "club_request_not_found")
-    req.status, req.decided_at, req.decided_by = ("accepted" if approve else "rejected"), now(), actor.user_id
     user = await s.get(User, req.user_id)
     if approve and user is not None:
+        # Пока заявка висела, игрок мог основать свой клуб или вступить в другой — тогда отказ
+        # (иначе один аккаунт оказался бы сразу в двух кооперативах).
+        if await s.scalar(select(ClubMember.club_id).where(ClubMember.user_id == user.id)) is not None:
+            raise ApiError(f"@{user.username} уже в другом кооперативе — заявку можно отклонить",
+                           409, "already_in_club")
         if club.members >= club.capacity:
             raise ApiError("В кооперативе нет свободных мест", 409, "club_full")
         await _check_ip(s, club, user.id, None)
         await _add_member(s, club, user, None)
     elif user is not None:
         notifications.notify(s, user.id, "club", club_id=club.id, tag=club.tag)
+    req.status, req.decided_at, req.decided_by = ("accepted" if approve else "rejected"), now(), actor.user_id
 
 
 async def invite(s: AsyncSession, actor: ClubMember, club: Club, max_uses: int = 1,
@@ -436,19 +471,70 @@ async def upgrade(s: AsyncSession, actor: ClubMember, club: Club, kind: str) -> 
 
 
 # ---------------------------------------------------------------- перки, лаборатория, косметика
+PERK_LEVEL_CAP = 10                            # уровень клуба 1…10 (дальше сила препарата не растёт)
+
+
+def _lerp(pair: tuple[float, float], k: float) -> float:
+    return pair[0] + (pair[1] - pair[0]) * k
+
+
+def perk_k(level: int, stage: int) -> float:
+    """Сила препарата клуба: 0 — Спора-Танк 1 уровня, 1 — Гриб-мутант и уровень 10+."""
+    stage_k = (stage - 1) / max(1, len(tank_svc.STAGES) - 1)
+    level_k = min(1.0, max(0.0, (int(level or 1) - 1) / (PERK_LEVEL_CAP - 1)))
+    return max(stage_k, level_k)
+
+
+def lab_value(kind: str, k: float) -> float:
+    """Сила препарата: опыт +5…25%, шанс мутации +1…3%, замедление падения −5…15%."""
+    pair = {"xp_bonus": PERK_XP, "mut_chance": PERK_MUT, "decay_slow": PERK_DECAY}[kind]
+    return round(_lerp(pair, max(0.0, min(1.0, k))), 4)
+
+
+def active_preps(club: Club) -> list[dict]:
+    """Действующие препараты лаборатории — у каждого срок 24 ч, потом перк исчезает."""
+    out = []
+    for prep in (club.settings or {}).get("lab") or []:
+        if not isinstance(prep, dict) or prep.get("kind") not in LAB_TITLES:
+            continue
+        try:
+            until = datetime.fromisoformat(str(prep.get("until")))
+        except (TypeError, ValueError):
+            continue
+        if until > now():
+            out.append(prep)
+    return out
+
+
 def perks(codes: dict, level: int, stage: int, lab: list[dict] | None = None) -> dict:
-    """Пассивные бонусы: 5→25% опыта, 1→3% шанса мутаций, 5→15% замедления падения."""
-    k = (stage - 1) / max(1, len(tank_svc.STAGES) - 1)
+    """Перки клуба. Ничего не выдаётся само по стадии: только препараты из лаборатории (24 ч).
+
+    Сила препарата растёт со стадией Танка и уровнем клуба (`perk_k`): опыт +5…25%,
+    шанс мутации +1…3%, замедление падения показателей личного гриба −5…15%.
+    """
+    k = perk_k(level, stage)
     out = {
-        "xp_bonus": round(PERK_XP[0] + (PERK_XP[1] - PERK_XP[0]) * k, 3),
-        "mut_chance": round(PERK_MUT[0] + (PERK_MUT[1] - PERK_MUT[0]) * k, 4),
-        "decay_slow": round(PERK_DECAY[0] + (PERK_DECAY[1] - PERK_DECAY[0]) * k, 3),
+        "xp_bonus": 0.0,
+        "mut_chance": 0.0,
+        "decay_slow": 0.0,
         "level": level,
         "cosmetics": sorted({c for lvl, c in CLUB_COSMETICS if lvl <= level}),
+        "active": [],
     }
     for prep in lab or []:
-        if prep.get("until") and datetime.fromisoformat(prep["until"]) > now():
-            out[prep["kind"]] = round(out.get(prep["kind"], 0) + float(prep.get("value", 0)), 4)
+        kind = prep.get("kind")
+        if kind not in LAB_TITLES:
+            continue
+        try:
+            until = datetime.fromisoformat(str(prep.get("until")))
+        except (TypeError, ValueError):
+            continue
+        if until <= now():
+            continue
+        value = lab_value(kind, k)
+        out[kind] = round(float(out.get(kind, 0.0)) + value, 4)
+        out["active"].append({"kind": kind, "title": LAB_TITLES[kind], "value": value,
+                              "until": until.isoformat()})
     return out
 
 
@@ -456,9 +542,14 @@ CLUB_COSMETICS = [(1, "club_frame"), (2, "club_bg"), (3, "club_jar"), (4, "club_
 
 
 async def refresh_perks(s: AsyncSession, club: Club, tank: ClubTank) -> dict:
-    codes = await tank_svc.mutation_codes_async(s, club.id)
-    club.perks = perks(codes, club.level, tank_svc.stage_for(tank.xp)["size"], (club.settings or {}).get("lab"))
+    club.perks = perks({}, club.level, tank_svc.stage_for(tank.xp)["size"], active_preps(club))
     return club.perks
+
+
+async def live_perks(s: AsyncSession, club: Club) -> dict:
+    """Перки «на сейчас»: препарат живёт 24 ч, поэтому снимок в БД может быть просрочен."""
+    tank = await tank_svc.ensure_tank(s, club)
+    return perks({}, club.level, tank_svc.stage_for(tank.xp)["size"], active_preps(club))
 
 
 async def lab_drain(s: AsyncSession, user: User, club: Club, kombucha_id: int, kind: str) -> ClubLabRun:
@@ -493,28 +584,28 @@ async def lab_collect(s: AsyncSession, club: Club, run_id: int, user_id: int) ->
         raise ApiError("Комбуча ещё настаивается", 429, "lab_not_ready",
                        retry_after=int((run.ready_at - now()).total_seconds()))
     run.collected_at = now()
-    prep = {"kind": run.kind, "value": LAB_VALUE.get(run.kind, 0.05), "until": (now() + LAB_EFFECT).isoformat(),
+    tank = await tank_svc.ensure_tank(s, club)
+    value = lab_value(run.kind, perk_k(club.level, tank_svc.stage_for(tank.xp)["size"]))
+    prep = {"kind": run.kind, "value": value, "until": (now() + LAB_EFFECT).isoformat(),
             "by": user_id, "at": now().isoformat()}
     lab = [p for p in (club.settings or {}).get("lab", [])
            if p.get("until") and datetime.fromisoformat(p["until"]) > now()]
     club.settings = {**(club.settings or {}), "lab": [*lab, prep]}
-    tank = await tank_svc.ensure_tank(s, club)
     await refresh_perks(s, club, tank)
     _feed(s, club.id, user_id, "lab", f"🧪 Препарат готов: +{int(prep['value'] * 100)}% "
                                      f"({LAB_TITLES[run.kind]}) на 24 часа для всех грибов клуба.")
     return prep
 
 
-LAB_VALUE = {"xp_bonus": 0.10, "mut_chance": 0.01, "decay_slow": 0.05}
 LAB_TITLES = {"xp_bonus": "опыт", "mut_chance": "шанс мутации", "decay_slow": "замедление падения"}
 
 
 async def decay_slow_for(s: AsyncSession, user_id: int) -> float:
-    """Насколько медленнее падают показатели личного гриба: перк клуба + препараты."""
+    """Насколько медленнее падают показатели личного гриба (препарат клуба, если действует)."""
     club, member = await my_club(s, user_id)
     if club is None:
         return 0.0
-    return float((club.perks or {}).get("decay_slow", 0.0))
+    return float((await live_perks(s, club)).get("decay_slow", 0.0))
 
 
 async def club_bonus_for(s: AsyncSession, user_id: int) -> dict:
@@ -522,7 +613,7 @@ async def club_bonus_for(s: AsyncSession, user_id: int) -> dict:
     club, member = await my_club(s, user_id)
     if club is None:
         return {"xp_bonus": 0.0, "mut_chance": 0.0, "decay_slow": 0.0, "club": None}
-    perks_ = club.perks or {}
+    perks_ = await live_perks(s, club)
     return {**perks_, "club": {"id": club.id, "tag": club.tag, "name": club.name, "emblem": club.emblem,
                                "color": club.color, "color2": club.color2}}
 
@@ -736,7 +827,7 @@ async def public_out(s: AsyncSession, club: Club, viewer_id: int | None = None) 
     return {"id": club.id, "name": club.name, "tag": club.tag, "emblem": club.emblem, "color": club.color,
             "color2": club.color2, "description": club.description, "join_mode": club.join_mode,
             "min_level": club.min_level, "members": members, "capacity": club.capacity, "level": club.level,
-            "xp": club.xp, "account": club.account, "status": club.status, "perks": club.perks,
+            "xp": club.xp, "account": club.account, "status": club.status, "perks": await live_perks(s, club),
             "leader_id": club.leader_id, "created_at": club.created_at.isoformat(),
             "last_active_at": club.last_active_at.isoformat() if club.last_active_at else None,
             "tank": data}

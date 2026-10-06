@@ -1961,7 +1961,8 @@ async function pageClubs() {
     <p class="muted">Общая 20-литровая банка — Гриб-Танк. Кормите его командой: чем больше живых участников,
     тем сильнее падают показатели, поэтому один задрот клуб не вытянет.</p>
     <div class="kb-row"><input class="input" id="clubs-q" placeholder="Поиск по названию или тегу" value="${esc(q)}">
-      <button class="btn btn-accent" id="clubs-create">${CLUB_FREE() ? "Основать бесплатно" : "Основать за 500 $₽"}</button></div>
+      ${mine?.club || mine?.cooldown_until ? "" :
+        `<button class="btn btn-accent" id="clubs-create">${CLUB_FREE() ? "Основать бесплатно" : "Основать за 500 $₽"}</button>`}</div>
     ${mine?.club ? `<div class="club-mine">${clubBadge(mine.club)} <b>${esc(mine.club.name)}</b>
       · ${esc(TANK_MOODS[mine.tank.mood] || "")} ${esc(mine.tank.stage_title)} · мест ${mine.club.members}
       · копилка ${mine.club.account} $₽ <a class="btn btn-sm" href="/c/${encodeURIComponent(mine.club.tag)}">Открыть</a></div>`
@@ -1979,7 +1980,7 @@ async function pageClubs() {
     || `<p class="muted">Здесь появятся клубы, которые распались.</p>`}</div>
   </div>`;
   $("#clubs-q").onkeydown = (e) => { if (e.key === "Enter") location.href = `/clubs?q=${encodeURIComponent(e.target.value)}`; };
-  $("#clubs-create").onclick = () => createClubDialog();
+  $("#clubs-create")?.addEventListener("click", () => createClubDialog());
 }
 
 const JOIN_MODE = { open: "свободное", request: "по заявке", invite: "по приглашению" };
@@ -2006,13 +2007,16 @@ function createClubDialog() {
   document.body.appendChild(dlg);
   $("#nc-cancel").onclick = () => dlg.remove();
   $("#nc-save").onclick = async () => {
+    const btn = $("#nc-save");
+    if (btn.disabled) return;                  // второй клик не должен создать второй клуб
+    btn.disabled = true;
     try {
       const r = await api("POST", "/api/clubs", { name: $("#nc-name").value, tag: $("#nc-tag").value,
         emblem: $("#nc-emblem").value || "🍄", color: $("#nc-color").value, color2: $("#nc-color2").value,
         join_mode: $("#nc-mode").value, min_level: +$("#nc-level").value || 1, description: $("#nc-desc").value });
       toast(`🤝 Кооператив ${r.club.name} основан!${r.free ? " (бесплатно)" : ""}`);
       location.href = `/c/${encodeURIComponent(r.club.tag)}`;
-    } catch (e) { toast(e.message, true); }
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
   };
 }
 
@@ -2262,7 +2266,7 @@ async function clubDecide(tag, id, approve) {
 
 const WORLD_RU = { flies: "Нашествие мушек", sugar_crisis: "Сахарный кризис", tea_night: "Чайная ночь", halloween: "Хэллоуин" };
 
-// Блок «Мой клуб» на странице гриба: Танк, перк, быстрый переход.
+// Блок «Мой клуб» на странице гриба: свой клуб и быстрый переход (Танк — на странице клуба).
 let CLUB_CACHE = null;
 async function fetchMineClub(force = false) {
   if (!ME) return null;
@@ -2279,13 +2283,14 @@ async function renderClubBlock(k) {
     box.innerHTML = `<a class="kb-club-empty" href="/clubs">🤝 Кооперативы: общий Гриб-Танк, рейды и перки к личному грибу →</a>`;
     return;
   }
-  const c = mine.club, t = mine.tank || {};
-  const perks = mine.perks || {};
+  const c = mine.club;
+  const prep = (mine.perks?.active || [])[0];      // препарат из лаборатории, если он сейчас действует
+  const role = { leader: "глава (SEO)", deputy: "зам", member: "грибник" }[c.role] || "участник";
   box.innerHTML = `<div class="kb-club-card" style="--tk-a:${esc(c.color)};--tk-b:${esc(c.color2)}">
     <a class="club-badge" href="/c/${encodeURIComponent(c.tag)}"><b>[${esc(c.tag)}]</b> <span>${esc(c.emblem)}</span></a>
-    <div><b>${esc(c.name)}</b> <small class="muted">${esc(TANK_MOODS[t.mood] || "")} ${esc(t.stage_title || "")} · ❤️ ${t.hp ?? "—"}${t.mold ? " · 🦠 плесень!" : ""}</small></div>
-    <div class="muted small">Перк: +${Math.round((perks.xp_bonus || 0) * 100)}% опыта · +${((perks.mut_chance || 0) * 100).toFixed(1)}% шанса мутации · −${Math.round((perks.decay_slow || 0) * 100)}% падения показателей</div>
-    <a class="btn btn-sm" href="/c/${encodeURIComponent(c.tag)}">К Танку</a></div>`;
+    <div><b>${esc(c.name)}</b> <small class="muted">ты ${esc(role)} · участников ${c.members}/${c.capacity ?? "—"}</small></div>
+    ${prep ? `<div class="muted small">🧪 Препарат лаборатории: +${Math.round(prep.value * 100)}% ${esc(prep.title)} · ещё ${fmtLeft(Math.max(0, Math.round((new Date(prep.until) - Date.now()) / 1000)))}</div>` : ""}
+    <a class="btn btn-sm" href="/c/${encodeURIComponent(c.tag)}">Открыть клуб</a></div>`;
 }
 
 // Тег клуба рядом с ником в шапке («[ЧАЙ] у ника везде»).
@@ -2674,7 +2679,7 @@ async function pageKombucha() {
           return `<div class="kb-stat"><span>${label}</span><div class="kb-bar${off ? " off" : v < 25 ? " low" : ""}"><i class="kb-zone" style="left:${lo}%;width:${Math.max(0, hi - lo)}%"></i><span style="width:${v}%"></span></div><b>${v}</b></div>`; }).join("")}</div>
         ${k.alive && !k.mold ? corridorMarkup(k.corridor, k.stats) : ""}   /* у закисшего/плесневелого опыт всё равно 0 */
         <div id="kb-club" class="kb-club"></div>
-        ${k.club_bonus > 0 ? `<div class="kb-corridor ok">🤝 Перк кооператива: +${Math.round(k.club_bonus * 100)}% опыта за уход</div>` : ""}
+        ${k.club_bonus > 0 ? `<div class="kb-corridor ok">🧪 Препарат лаборатории клуба: +${Math.round(k.club_bonus * 100)}% опыта за уход</div>` : ""}
         ${k.frozen ? `<div class="kb-note kb-frozen-note">🧊 Гриб заморожен${k.frozen_at ? ` с ${esc(fmtDate(k.frozen_at))}` : ""}: показатели не падают, банку не занимает, стоит на полке в твоём профиле.
             Продать или обменять можно только замороженный гриб.</div>
           <div class="kb-dead-actions">

@@ -1,8 +1,17 @@
 from __future__ import annotations
 
-from flask import jsonify
+import re
+
+from flask import jsonify, request
 from sqlalchemy.exc import IntegrityError
 from werkzeug.exceptions import HTTPException
+
+_CONSTRAINT_RE = re.compile(r'constraint "([^"]+)"')
+
+
+def _constraint_name(text: str) -> str | None:
+    m = _CONSTRAINT_RE.search(text or "")
+    return m.group(1) if m else None
 
 
 class ApiError(Exception):
@@ -25,9 +34,13 @@ def register_error_handlers(app) -> None:
     def _integrity(e: IntegrityError):
         # Нарушение уникальности/ограничений, не пойманное сервисом явно
         code = getattr(getattr(e, "orig", None), "sqlstate", None) or ""
-        if "23505" in str(code) or "unique" in str(e.orig).lower():
+        text = str(e.orig)
+        if "23505" in str(code) or "unique" in text.lower():
             return jsonify({"error": "already_exists", "message": "Такая запись уже есть"}), 409
-        return jsonify({"error": "constraint_violation", "message": "Данные не прошли проверку"}), 400
+        # Раньше это была безликая ошибка: без имени ограничения непонятно, что чинить.
+        app.logger.error("IntegrityError (%s) на %s %s: %s", code or "?", request.method, request.path, text)
+        return jsonify({"error": "constraint_violation", "message": "Данные не прошли проверку",
+                        "constraint": _constraint_name(text)}), 400
 
     from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 

@@ -231,7 +231,7 @@ async def act(s: AsyncSession, user: User, club: Club, tank: ClubTank, action: s
         return await _cure(s, user, club, tank, at)
     setattr(tank, key, min(100.0, getattr(tank, key) + add))
     codes = await mutation_codes_async(s, club.id)
-    xp = int(round(base_xp * (1 + muts.club_xp_bonus(codes) + float((club.perks or {}).get("xp_bonus", 0)))))
+    xp = int(round(base_xp * (1 + muts.club_xp_bonus(codes))))   # перк клуба — личным грибам, не Танку
     tank.xp += xp
     tank.best_xp = max(tank.best_xp, tank.xp)
     tank.updated_at = at

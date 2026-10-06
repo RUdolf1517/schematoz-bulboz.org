@@ -50,9 +50,12 @@ class Club(Base):
 
 
 class ClubMember(Base):
-    """Участник кооператива. Роли: leader (SEO), deputy (зам, до 3), member (грибник)."""
+    """Участник кооператива. Роли: leader (SEO), deputy (зам, до 3), member (грибник).
+
+    Инвариант: один аккаунт — максимум один кооператив (уникальный индекс uq_club_members_user).
+    """
     __tablename__ = "club_members"
-    __table_args__ = (Index("ix_club_members_user", "user_id"),)
+    __table_args__ = (Index("uq_club_members_user", "user_id", unique=True),)
     club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     role: Mapped[str] = mapped_column(String(8), default="member", server_default="member")   # leader | deputy | member

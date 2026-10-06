@@ -44,10 +44,13 @@ async def ensure_membership(s: AsyncSession, club: Club, week: str | None = None
     row = await s.scalar(select(LeagueMembership).where(LeagueMembership.club_id == club.id,
                                                         LeagueMembership.week_key == week))
     if row is None:
+        # Каталог дивизионов создаёт seed; без него вставка падала на FK и страница клуба
+        # отвечала «Данные не прошли проверку». Досыпаем сами — идемпотентно.
+        await ensure_leagues(s)
         last = await s.scalar(select(LeagueMembership).where(LeagueMembership.club_id == club.id)
                               .order_by(LeagueMembership.week_key.desc()))
-        row = LeagueMembership(club_id=club.id, league_code=(last.league_code if last else "bronze"),
-                               week_key=week, score=0)
+        code = last.league_code if last and last.league_code in ORDER else "bronze"
+        row = LeagueMembership(club_id=club.id, league_code=code, week_key=week, score=0)
         s.add(row)
         await s.flush()
     return row
@@ -67,7 +70,8 @@ async def board(s: AsyncSession, club: Club, week: str | None = None) -> dict:
     rank = next((i + 1 for i, r in enumerate(rows) if r.club_id == club.id), None)
     clubs = {c.id: c for c in (await s.scalars(select(Club).where(
         Club.id.in_([r.club_id for r in rows or [0]])))).all()}
-    return {"league": mine.league_code, "league_title": next(t for c, t, _ in LEAGUE_SEED if c == mine.league_code),
+    return {"league": mine.league_code, "league_title": next((t for c, t, _ in LEAGUE_SEED if c == mine.league_code),
+                                                             mine.league_code),
             "week": week, "score": mine.score, "rank": rank, "size": len(rows), "outcome": mine.outcome,
             "top": [{"tag": clubs[r.club_id].tag if r.club_id in clubs else "?",
                      "name": clubs[r.club_id].name if r.club_id in clubs else "?",
