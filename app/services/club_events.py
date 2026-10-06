@@ -277,7 +277,7 @@ async def start_week(s: AsyncSession, week: str | None = None) -> int:
             s.add(war)
             made += 1
             for club in (a, b):
-                _feed(s, club.id, None, "war", f"⚔️ Бизнес-война недели: мы против «{b.name if club.id == a.id else a.name}»!", enemy_tag=b.tag if club.id == a.id else a.tag)
+                _feed(s, club.id, None, "war", f"⚔️ Бизнес-война недели: мы против {b.name if club.id == a.id else a.name}!", enemy_tag=b.tag if club.id == a.id else a.tag)
                 for m in (await s.scalars(select(ClubMember).where(ClubMember.club_id == club.id))).all():
                     notifications.notify(s, m.user_id, "club", club_id=club.id,
                                          enemy_tag=b.tag if club.id == a.id else a.tag)

@@ -33,7 +33,19 @@ from . import wood
 
 MSK = timezone(timedelta(hours=3))
 CREATE_COST = 500
-NAME_RE = re.compile(r"^[\w \-.,'«»\"()ёЁ]{3,24}$", re.UNICODE)
+# Название клуба — как в ТЗ: ООО "Пример". Слово «ООО» и кавычки обязательны, юзер вписывает
+# своё название вместо «Пример». Принимаем прямые и типографские кавычки, храним прямые.
+NAME_CORE_RE = re.compile(r"^[\w \-.,'()ёЁ]{2,18}$", re.UNICODE)
+NAME_RE = re.compile(r'^ООО\s*[«"„“‘\']\s*(?P<core>.+?)\s*[»"“”‘’\']$', re.IGNORECASE)
+NAME_HINT = ('Название — в формате: ООО "Пример". Слово «ООО» и кавычки обязательны, '
+             'вместо «Пример» впиши своё название (2–18 символов).')
+
+
+def format_club_name(core: str) -> str:
+    """Собрать каноничное название клуба: ООО "Имя"."""
+    return f'ООО "{core.strip()}"'
+
+
 TAG_RE = re.compile(r"^[A-Za-zА-Яа-яЁё0-9]{2,5}$")
 MIN_DEPOSIT = 50
 MEMBERSHIP_COOLDOWN = timedelta(hours=24)
@@ -65,11 +77,20 @@ def week_key(at: datetime | None = None) -> str:
 
 
 def _clean_name(raw: str) -> str:
-    name = re.sub(r"\s+", " ", str(raw or "")).strip().strip("«»\"'")
-    if not NAME_RE.match(name):
-        raise ApiError("Название: 3–24 символа — буквы, цифры, пробел, дефис, точка", 400,
-                       "validation_error", field="name")
-    return name
+    """Приводит название к виду ООО "Пример".
+
+    «ООО» и кавычки обязательны (ТЗ): если их нет — подсказываем формат.
+    Длина итогового названия 3–24 символа, значит само имя внутри кавычек — 2–18.
+    """
+    name = re.sub(r"\s+", " ", str(raw or "")).strip()
+    m = NAME_RE.match(name)
+    if m is None:
+        # Без «ООО» и кавычек не принимаем — сразу показываем правильный формат.
+        raise ApiError(NAME_HINT, 400, "validation_error", field="name")
+    core = m.group("core").strip().strip("«»\"'“”„‘’")
+    if not NAME_CORE_RE.match(core):
+        raise ApiError(NAME_HINT, 400, "validation_error", field="name")
+    return format_club_name(core)
 
 
 def _clean_tag(raw: str) -> str:
@@ -100,7 +121,12 @@ def ip_key() -> str | None:
 
 
 # ---------------------------------------------------------------- создание, вступление, выход
-async def create(s: AsyncSession, user: User, data: dict) -> tuple[Club, ClubTank]:
+async def create(s: AsyncSession, user: User, data: dict, *, free: bool = False) -> tuple[Club, ClubTank]:
+    """Основать клуб. free=True (администраторы) — без списания 500 $₽.
+
+    Флаг приходит только от API, который сам проверяет права; из тела запроса его брать нельзя.
+    """
+    free = bool(free)
     name, tag = _clean_name(data.get("name")), _clean_tag(data.get("tag"))
     if await s.scalar(select(Club.id).where(func.lower(Club.name) == name.lower())):
         raise ApiError("Такое название уже занято", 409, "name_taken", field="name")
@@ -113,7 +139,8 @@ async def create(s: AsyncSession, user: User, data: dict) -> tuple[Club, ClubTan
     if cd is not None and cd.until > now():
         raise ApiError("После выхода из клуба нужно выждать 24 часа", 429, "club_cooldown",
                        retry_after=int((cd.until - now()).total_seconds()))
-    await wood.spend(s, user.id, CREATE_COST, "club_create", f"club:{user.id}:{now().timestamp()}")
+    if not free:
+        await wood.spend(s, user.id, CREATE_COST, "club_create", f"club:{user.id}:{now().timestamp()}")
     club = Club(name=name, tag=tag, emblem=str(data.get("emblem") or "🍄")[:16],
                 color=_clean_color(data.get("color"), "#ff5a36"),
                 color2=_clean_color(data.get("color2"), "#ff8a3d"),
@@ -126,7 +153,7 @@ async def create(s: AsyncSession, user: User, data: dict) -> tuple[Club, ClubTan
     s.add(ClubMember(club_id=club.id, user_id=user.id, role="leader"))
     tank = ClubTank(club_id=club.id)
     s.add(tank)
-    _feed(s, club.id, user.id, "join", f"🏛 Кооператив «{club.name}» основан. Танк ждёт первых литров!")
+    _feed(s, club.id, user.id, "join", f"🏛 Кооператив {club.name} основан. Танк ждёт первых литров!")
     await s.flush()
     await _track_ip(s, club, user.id)
     return club, tank

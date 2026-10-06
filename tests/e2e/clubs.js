@@ -80,6 +80,8 @@ async function openPage({ jar, page }) {
       const mine = await api(jar, "GET", "/api/clubs/mine");
       const mineId = mine.data?.club?.id;
       if (mineId) await api(admin.jar, "PATCH", `/admin/clubs/${mineId}`, { disband: true, reason: "e2e: чистый прогон" });
+      // и снимаем кулдаун выхода, иначе повторный прогон не сможет вступить заново
+      await api(jar, "POST", "/api/clubs/dev/reset", {});
     }
   }
 
@@ -96,15 +98,19 @@ async function openPage({ jar, page }) {
     const tag = win.document.querySelector("#nc-tag");
     check("диалог основания открылся", !!name && !!tag);
     if (name && tag) {
-      name.value = "Тестовый";
+      name.value = 'ООО "Тестовый"';   // формат из ТЗ: «ООО» и кавычки обязательны
       tag.value = TAG;
       win.document.querySelector("#nc-emblem").value = "🍄";
       win.document.querySelector("#nc-save")?.click();
       await sleep(1800);
       const club = await api(dasha.jar, "GET", `/api/clubs/${encodeURIComponent(TAG)}`);
-      check("клуб создан через UI (есть на /c/ТЕСТ)", club.status === 200 && club.data.name === "Тестовый", `status=${club.status}`);
+      check("клуб создан через UI (есть на /c/ТЕСТ)", club.status === 200 && club.data.name === 'ООО "Тестовый"', `status=${club.status}`);
       check("создатель — глава клуба", club.data?.me?.role === "leader", JSON.stringify(club.data?.me));
-      check("название в кавычках и тег в форме [ЧАЙ]", club.data?.name === "Тестовый" && club.data?.tag === TAG);
+      check("название в форме ООО \"…\" и тег [ЧАЙ]",
+        club.data?.name === 'ООО "Тестовый"' && club.data?.tag === TAG, club.data?.name);
+      check("в шапке клуба название без лишних кавычек",
+        !/«ООО/.test(win.document.querySelector(".tk-hero-head h1")?.textContent || ""),
+        win.document.querySelector(".tk-hero-head h1")?.textContent);
     }
     dom.window.close();
   }

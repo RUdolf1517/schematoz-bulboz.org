@@ -1114,11 +1114,12 @@ async function adminClubs(panel) {
     const k = sel;
     panel.innerHTML = `<div class="kbd-row kbd-head">
         <input class="input" id="ac-q" placeholder="Поиск клуба: название или тег">
-        <span class="muted">${D.items.length} клубов</span></div>
+        <span class="muted">${D.items.length} клубов · тебе как администратору основание клуба бесплатно
+          (кнопка «Основать бесплатно» на странице 🤝 Кооперативы)</span></div>
       <div class="kbd">
         <div class="kbd-left">
           <select class="input" id="ac-sel">${D.items.map((x) => `<option value="${x.id}" ${k && x.id === k.id ? "selected" : ""}>
-            [${esc(x.tag)}] «${esc(x.name)}» · ${x.members}/${x.capacity} · ${x.status}</option>`).join("")}</select>
+            [${esc(x.tag)}] ${esc(x.name)} · ${x.members}/${x.capacity} · ${x.status}</option>`).join("")}</select>
           ${k ? `<div class="kbd-row"><input class="input" id="ac-name" value="${esc(k.name)}"><input class="input" id="ac-tag" value="${esc(k.tag)}"></div>
           <div class="kbd-row"><button class="btn btn-sm" id="ac-save">Сохранить</button>
             <button class="btn btn-sm" id="ac-ban">${k.status === "banned" ? "Разбанить" : "Забанить"}</button>
@@ -1943,7 +1944,7 @@ function tankHpBar(t) {
 
 function clubBadge(club) {
   if (!club) return "";
-  return `<a class="club-badge" href="/c/${encodeURIComponent(club.tag)}" title="Кооператив «${esc(club.name)}»"
+  return `<a class="club-badge" href="/c/${encodeURIComponent(club.tag)}" title="Кооператив ${esc(club.name)}"
     style="--tk-a:${esc(club.color || "#ff5a36")};--tk-b:${esc(club.color2 || "#ff8a3d")}">
     <b>[${esc(club.tag)}]</b> <span>${esc(club.emblem || "🍄")}</span></a>`;
 }
@@ -1960,20 +1961,20 @@ async function pageClubs() {
     <p class="muted">Общая 20-литровая банка — Гриб-Танк. Кормите его командой: чем больше живых участников,
     тем сильнее падают показатели, поэтому один задрот клуб не вытянет.</p>
     <div class="kb-row"><input class="input" id="clubs-q" placeholder="Поиск по названию или тегу" value="${esc(q)}">
-      <button class="btn btn-accent" id="clubs-create">Основать за ${500} $₽</button></div>
-    ${mine?.club ? `<div class="club-mine">${clubBadge(mine.club)} <b>«${esc(mine.club.name)}»</b>
+      <button class="btn btn-accent" id="clubs-create">${CLUB_FREE() ? "Основать бесплатно" : "Основать за 500 $₽"}</button></div>
+    ${mine?.club ? `<div class="club-mine">${clubBadge(mine.club)} <b>${esc(mine.club.name)}</b>
       · ${esc(TANK_MOODS[mine.tank.mood] || "")} ${esc(mine.tank.stage_title)} · мест ${mine.club.members}
       · копилка ${mine.club.account} $₽ <a class="btn btn-sm" href="/c/${encodeURIComponent(mine.club.tag)}">Открыть</a></div>`
     : mine?.cooldown_until ? `<p class="muted">После выхода из клуба новый можно выбрать только через сутки.</p>` : ""}
     <div class="tk-cards">${list.items.map((c) => `<a class="tk-card" href="/c/${encodeURIComponent(c.tag)}"
       style="--tk-a:${esc(c.color)};--tk-b:${esc(c.color2)}">
       <span class="tk-card-emblem">${esc(c.emblem)}</span>
-      <b>«${esc(c.name)}»</b><small>[${esc(c.tag)}] · ${esc(c.stage_title)}</small>
+      <b>${esc(c.name)}</b><small>[${esc(c.tag)}] · ${esc(c.stage_title)}</small>
       <small class="muted">${c.members}/${c.capacity} участников · вступление: ${JOIN_MODE[c.join_mode] || c.join_mode}${c.min_level > 1 ? ` · с ${c.min_level} ур.` : ""}</small>
     </a>`).join("") || `<p class="muted">Кооперативов пока нет — основай первый.</p>`}</div>
     <h2>🏛 Музей кооперативов</h2>
     <div class="tk-cards">${(list.museum || []).map((m) => `<div class="tk-card muted">
-      <span class="tk-card-emblem">${esc(m.emblem)}</span><b>«${esc(m.name)}»</b><small>[${esc(m.tag)}] · стадия ${m.stage}
+      <span class="tk-card-emblem">${esc(m.emblem)}</span><b>${esc(m.name)}</b><small>[${esc(m.tag)}] · стадия ${m.stage}
       · ${m.tank_xp} XP</small><small class="muted">${m.reason ? esc(m.reason) : "расформирован"}</small></div>`).join("")
     || `<p class="muted">Здесь появятся клубы, которые распались.</p>`}</div>
   </div>`;
@@ -1982,21 +1983,24 @@ async function pageClubs() {
 }
 
 const JOIN_MODE = { open: "свободное", request: "по заявке", invite: "по приглашению" };
+// Администраторы (право clubs.manage) основывают кооперативы без списания $₽.
+const CLUB_FREE = () => !!ME?.permissions?.includes("clubs.manage");
 
 function createClubDialog() {
   const dlg = document.createElement("div");
   dlg.className = "modal-backdrop";
   dlg.innerHTML = `<div class="modal panel">
     <h2>Основать кооператив</h2>
-    <p class="muted">Создание стоит 500 $₽. Название вводится без кавычек — они добавятся сами.</p>
-    <label class="kbd-row"><span>Название</span><input class="input" id="nc-name" maxlength="24" placeholder="Пример"></label>
+    <p class="muted">${CLUB_FREE() ? "Тебе как администратору создание бесплатно." : "Создание стоит 500 $₽."}
+    Название — в формате <b>ООО "Пример"</b>: «ООО» и кавычки обязательны, вместо «Пример» впиши своё.</p>
+    <label class="kbd-row"><span>Название</span><input class="input" id="nc-name" maxlength="24" placeholder='ООО "Пример"'></label>
     <label class="kbd-row"><span>Тег</span><input class="input" id="nc-tag" maxlength="5" placeholder="ЧАЙ"></label>
     <label class="kbd-row"><span>Герб</span><input class="input" id="nc-emblem" maxlength="4" placeholder="🍄"></label>
     <label class="kbd-row"><span>Цвета</span><input type="color" id="nc-color" value="#ff5a36"><input type="color" id="nc-color2" value="#ff8a3d"></label>
     <label class="kbd-row"><span>Вступление</span><select class="input" id="nc-mode"><option value="open">свободное</option><option value="request">по заявке</option><option value="invite">по приглашению</option></select></label>
     <label class="kbd-row"><span>Мин. уровень</span><input class="input" id="nc-level" type="number" min="1" max="50" value="1"></label>
     <label class="kbd-row"><span>Описание</span><textarea class="input" id="nc-desc" maxlength="280"></textarea></label>
-    <div class="kbd-row"><button class="btn btn-accent" id="nc-save">Основать (500 $₽)</button><button class="btn" id="nc-cancel">Отмена</button></div>
+    <div class="kbd-row"><button class="btn btn-accent" id="nc-save">${CLUB_FREE() ? "Основать бесплатно" : "Основать (500 $₽)"}</button><button class="btn" id="nc-cancel">Отмена</button></div>
   </div>`;
   document.body.appendChild(dlg);
   $("#nc-cancel").onclick = () => dlg.remove();
@@ -2005,7 +2009,7 @@ function createClubDialog() {
       const r = await api("POST", "/api/clubs", { name: $("#nc-name").value, tag: $("#nc-tag").value,
         emblem: $("#nc-emblem").value || "🍄", color: $("#nc-color").value, color2: $("#nc-color2").value,
         join_mode: $("#nc-mode").value, min_level: +$("#nc-level").value || 1, description: $("#nc-desc").value });
-      toast(`🤝 Кооператив «${r.club.name}» основан!`);
+      toast(`🤝 Кооператив ${r.club.name} основан!${r.free ? " (бесплатно)" : ""}`);
       location.href = `/c/${encodeURIComponent(r.club.tag)}`;
     } catch (e) { toast(e.message, true); }
   };
@@ -2023,7 +2027,7 @@ async function pageClub() {
   const t = C.tank;
   const joinBtn = C.me.member ? "" : `<button class="btn btn-accent" id="club-join">${C.join_mode === "request" ? "Оставить заявку" : C.join_mode === "invite" && !invite ? "Только по приглашению" : "Вступить"}</button>`;
   main.innerHTML = `<div class="panel tk-hero" style="--tk-a:${esc(C.color)};--tk-b:${esc(C.color2)}">
-    <div class="tk-hero-head">${clubBadge(club)}<h1>«${esc(C.name)}»</h1>${joinBtn}
+    <div class="tk-hero-head">${clubBadge(club)}<h1>${esc(C.name)}</h1>${joinBtn}
       <span class="tk-stage">${esc(TANK_MOODS[t.mood] || "")} ${esc(t.stage.title)} · ${t.xp} XP</span></div>
     <p class="muted">${esc(C.description || "Описание пока не заполнено")} · ${C.members}/${C.capacity} участников · уровень клуба ${C.level}${C.me.member ? ` · ты ${esc(ROLE_RU[C.me.role] || C.me.role)}` : ""}</p>
     <div class="tk-layout">
@@ -2211,10 +2215,10 @@ async function clubTab(tab, tag, C) {
       p.innerHTML = `<h3>🏆 ${esc(l.league_title)} · неделя ${esc(l.week)}</h3>
         <p class="muted">Наше место: ${l.rank ?? "—"} из ${l.size} · очков недели: ${l.score}${l.outcome ? ` · итог: ${{ up: "повышение ⬆️", down: "понижение ⬇️", stayed: "остались" }[l.outcome]}` : ""}</p>
         <table class="list"><tr><th>#</th><th>Клуб</th><th>Очки</th></tr>${l.top.map((r, i) =>
-          `<tr class="${r.me ? "tk-me" : ""}"><td>${i + 1}</td><td>${esc(r.emblem)} «${esc(r.name)}» [${esc(r.tag)}]</td><td>${r.score}</td></tr>`).join("")}</table>
+          `<tr class="${r.me ? "tk-me" : ""}"><td>${i + 1}</td><td>${esc(r.emblem)} ${esc(r.name)} [${esc(r.tag)}]</td><td>${r.score}</td></tr>`).join("")}</table>
         <h3>👑 Конкурс красоты</h3>
         <div class="tk-cards">${beauty.items.map((b) => `<div class="tk-card"><span>${esc(b.emblem)}</span>
-          <b>«${esc(b.name)}»</b><small class="muted">[${esc(b.tag)}] · ${b.votes} голосов</small>
+          <b>${esc(b.name)}</b><small class="muted">[${esc(b.tag)}] · ${b.votes} голосов</small>
           ${C.me.member && b.club_id !== C.id ? `<button class="btn btn-sm" data-vote="${b.club_id}">Голосовать</button>` : ""}</div>`).join("") || `<p class="muted">Голосов пока нет.</p>`}</div>`;
       $$("[data-vote]").forEach((btn) => (btn.onclick = async () => {
         try { await api("POST", `/api/clubs/${encodeURIComponent(tag)}/beauty`, { club_id: +btn.dataset.vote }); toast("Голос учтён 👑"); clubTab("league", tag, C); }
@@ -2278,7 +2282,7 @@ async function renderClubBlock(k) {
   const perks = mine.perks || {};
   box.innerHTML = `<div class="kb-club-card" style="--tk-a:${esc(c.color)};--tk-b:${esc(c.color2)}">
     <a class="club-badge" href="/c/${encodeURIComponent(c.tag)}"><b>[${esc(c.tag)}]</b> <span>${esc(c.emblem)}</span></a>
-    <div><b>«${esc(c.name)}»</b> <small class="muted">${esc(TANK_MOODS[t.mood] || "")} ${esc(t.stage_title || "")} · ❤️ ${t.hp ?? "—"}${t.mold ? " · 🦠 плесень!" : ""}</small></div>
+    <div><b>${esc(c.name)}</b> <small class="muted">${esc(TANK_MOODS[t.mood] || "")} ${esc(t.stage_title || "")} · ❤️ ${t.hp ?? "—"}${t.mold ? " · 🦠 плесень!" : ""}</small></div>
     <div class="muted small">Перк: +${Math.round((perks.xp_bonus || 0) * 100)}% опыта · +${((perks.mut_chance || 0) * 100).toFixed(1)}% шанса мутации · −${Math.round((perks.decay_slow || 0) * 100)}% падения показателей</div>
     <a class="btn btn-sm" href="/c/${encodeURIComponent(c.tag)}">К Танку</a></div>`;
 }

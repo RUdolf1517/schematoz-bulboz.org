@@ -70,7 +70,7 @@ def _user(make_user, role="user"):
     return client, user
 
 
-def _make_club(client, user, name="Пример", tag="ЧАЙ"):
+def _make_club(client, user, name='ООО "Пример"', tag="ЧАЙ"):
     return client.post("/api/clubs", json={"name": name, "tag": tag, "emblem": "🍵",
                                            "color": "#33cc88", "color2": "#1188ff",
                                            "join_mode": "open", "min_level": 1, "description": "тест"})
@@ -79,7 +79,9 @@ def _make_club(client, user, name="Пример", tag="ЧАЙ"):
 # ---------------------------------------------------------------- создание и вступление
 def test_create_club_costs_and_unique_names(app, make_user):
     c, u = _user(make_user)
-    assert c.post("/api/clubs", json={"name": "Тест", "tag": "ТЕ"}).status_code == 402      # нет $₽
+    bad_name = c.post("/api/clubs", json={"name": "Тест", "tag": "ТЕ"})                     # без ООО и кавычек
+    assert bad_name.status_code == 400 and bad_name.get_json()["error"] == "validation_error"
+    assert c.post("/api/clubs", json={"name": 'ООО "Тест"', "tag": "ТЕ"}).status_code == 402  # нет $₽
     _give_wood(app, u["id"], 700)
     r = _make_club(c, u)
     assert r.status_code == 201, r.get_json()
@@ -89,11 +91,11 @@ def test_create_club_costs_and_unique_names(app, make_user):
     assert club["tank"]["stage"]["title"] == "Спора-Танк"
     # уникальность названия и тега
     _give_wood(app, u["id"], 600)
-    assert c.post("/api/clubs", json={"name": "Пример", "tag": "ДРУГ"}).status_code == 409
+    assert c.post("/api/clubs", json={"name": 'ООО "Пример"', "tag": "ДРУГ"}).status_code == 409
     # кулдаун смены клуба: выйти и создать/вступить нельзя сутки
     assert c.post(f"/api/clubs/{club['tag']}/leave", json={}).status_code == 200
     _give_wood(app, u["id"], 600)
-    r = _make_club(c, u, name="Второй", tag="ВТ")
+    r = _make_club(c, u, name='ООО "Второй"', tag="ВТ")
     assert r.status_code == 429 and r.get_json()["error"] == "club_cooldown"
 
 
@@ -251,7 +253,7 @@ def test_raid_and_wars_and_league_and_beauty(app, make_user):
     # войны: подбор пар и потолок очков на человека
     c2, u2 = _user(make_user)
     _give_wood(app, u2["id"], 600)
-    tag2 = _make_club(c2, u2, name="Соседи", tag="СОС").get_json()["club"]["tag"]
+    tag2 = _make_club(c2, u2, name='ООО "Соседи"', tag="СОС").get_json()["club"]["tag"]
     assert owner.post("/admin/events/world/raid/run", json={}).status_code in (401, 403)   # не админ
     from app.services import club_events
 
@@ -436,7 +438,7 @@ def test_raid_and_war_rewards_are_badges_for_starters(app, make_user):
     # Война: бейдж победителю — тоже по снапшоту состава.
     other, ou = _user(make_user)
     _give_wood(app, ou["id"], 600)
-    _make_club(other, ou, name="Соперник", tag="СОП")
+    _make_club(other, ou, name='ООО "Соперник"', tag="СОП")
 
     async def run_war(s):
         week = club_events.week_key()
@@ -448,3 +450,55 @@ def test_raid_and_war_rewards_are_badges_for_starters(app, make_user):
     assert _db(app, run_war) >= 1
     after = _db(app, badges)
     assert any(code == "club_war_win" for _, code in after), after
+
+
+def test_name_format_is_enforced(app, make_user):
+    """Название — строго в формате ООО "Пример"; «ООО» и кавычки обязательны."""
+    c, u = _user(make_user)
+    _give_wood(app, u["id"], 4000)
+    r = c.post("/api/clubs", json={"name": "Просто имя", "tag": "ПР"})
+    assert r.status_code == 400 and r.get_json()["error"] == "validation_error"
+    assert 'ООО "Пример"' in r.get_json()["message"]
+    # «ООО» без кавычек тоже не проходит
+    assert c.post("/api/clubs", json={"name": "ООО Пример", "tag": "ПР"}).status_code == 400
+    # типографские кавычки принимаем и приводим к прямым
+    ok = c.post("/api/clubs", json={"name": "ООО «Типограф»", "tag": "ТИП"})
+    assert ok.status_code == 201, ok.get_json()
+    assert ok.get_json()["club"]["name"] == 'ООО "Типограф"'
+    # слишком короткое имя внутри кавычек — отказ
+    assert c.post("/api/clubs", json={"name": 'ООО "Я"', "tag": "ЯЯ"}).status_code == 400
+
+
+def _balance(app, uid):
+    from app.db import session_scope
+    from app.services import wood
+
+    async def fn(s):
+        return await wood.balance(s, uid)
+    return _db(app, fn)
+
+
+def test_admins_create_clubs_for_free(app, make_user):
+    """Администраторы основывают кооперативы без списания 500 $₽."""
+    admin, a = _user(make_user, "admin")
+    plain, pu = _user(make_user)
+
+    admin_before = _balance(app, a["id"])
+    assert admin_before < 500                                  # денег на создание заведомо не хватает
+    r = admin.post("/api/clubs", json={"name": 'ООО "Бесплатный"', "tag": "БЕС"})
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["free"] is True
+    assert _balance(app, a["id"]) == admin_before               # ничего не списали
+
+    # Обычный игрок по-прежнему платит: без денег — 402.
+    plain_before = _balance(app, pu["id"])
+    assert plain_before < 500
+    assert plain.post("/api/clubs", json={"name": 'ООО "Платный"', "tag": "ПЛА"}).status_code == 402
+    # и «free» из тела запроса игнорируется — флаг считает только сервер по правам
+    assert plain.post("/api/clubs", json={"name": 'ООО "Хитрый"', "tag": "ХИТ", "free": True}).status_code == 402
+
+
+def test_dev_reset_only_in_demo_mode(app, make_user):
+    """DEMO_MODE-хелпер сбрасывает участие и кулдаун; в проде его нет."""
+    c, u = _user(make_user)
+    assert c.post("/api/clubs/dev/reset", json={}).status_code == 404

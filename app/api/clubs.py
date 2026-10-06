@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from flask import g, request
 from sqlalchemy import func, select
 
-from ..auth.rbac import login_required
+from ..auth.rbac import get_user_perms, login_required
 from ..auth.sessions import current_user_id
 from ..db import session_scope
 from ..errors import ApiError
@@ -102,9 +102,11 @@ async def clubs_mine():
 @captcha_required()
 async def clubs_create():
     data = json_body()
+    # Администраторы основывают кооперативы бесплатно (право clubs.manage).
+    free = "clubs.manage" in await get_user_perms(g.user.id)
     async with session_scope() as s:
-        club, tank = await clubs.create(s, g.user, data)
-        return {"club": await clubs.public_out(s, club)}, 201
+        club, tank = await clubs.create(s, g.user, data, free=free)
+        return {"club": await clubs.public_out(s, club), "free": free}, 201
 
 
 @bp.get("/clubs/museum")
@@ -141,6 +143,24 @@ async def clubs_dev_grant():
     async with session_scope() as s:
         await wood.demo_grant(s, g.user.id, amount, f"e2e:{datetime.now(timezone.utc).timestamp()}")
         return {"ok": True, "wood": await wood.balance(s, g.user.id), "amount": amount}
+
+
+@bp.post("/clubs/dev/reset")
+@login_required
+async def clubs_dev_reset():
+    """Только DEMO_MODE: снять участие в клубе и кулдаун выхода — чтобы e2e можно было гонять повторно."""
+    from flask import current_app
+
+    if not current_app.config.get("DEMO_MODE"):
+        raise ApiError("Не найдено", 404, "not_found")
+    async with session_scope() as s:
+        member = await s.scalar(select(ClubMember).where(ClubMember.user_id == g.user.id))
+        if member is not None:
+            await s.delete(member)
+        cd = await s.get(ClubMembershipCooldown, g.user.id)
+        if cd is not None:
+            await s.delete(cd)
+        return {"ok": True}
 
 
 # ---------------------------------------------------------------- вступление/выход/роли
