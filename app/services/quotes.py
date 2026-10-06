@@ -148,6 +148,11 @@ KINDS = {
     "dubious": "Спорные (облачко и «Погладить»)",
     "philo": "Философы («Поговорить»)",
     "halloween": "Хэллоуин (жуткие цитаты)",
+    # Гриб-Танк говорит от лица «мы»; категории клубных ивентов — «ивент:<код>».
+    "tank": "Танк («мы», кооператив)",
+    "event:flies": "Ивент: Нашествие мушек",
+    "event:sugar_crisis": "Ивент: Сахарный кризис",
+    "event:tea_night": "Ивент: Чайная ночь",
 }
 CUSTOM_KEY = "quotes:custom:{}"
 HALLOWEEN_ACTIVE_KEY = "quotes:halloween:active"
@@ -185,6 +190,11 @@ async def ensure_custom() -> None:
     from ..db import session_scope
     async with session_scope() as s:
         await refresh_custom(s)
+
+
+def custom_lines(kind: str) -> list[str]:
+    """Тексты админских цитат указанного вида (для Танка и клубных ивентов). Пусто — если не заданы."""
+    return [c.get("text") or "" for c in _custom(kind) if (c.get("text") or "").strip()]
 
 
 def _pick(builtin_n: int, kind: str):

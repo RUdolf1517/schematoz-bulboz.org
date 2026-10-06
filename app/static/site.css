@@ -541,6 +541,14 @@ main.main-wide { max-width: 1180px; }
 .kb-bar span { background: var(--good); }
 .kb-bar.low span { background: var(--bad); }
 .kb-bar.over span { background: #ff8fd1; }
+/* зелёная подложка — «идеальный коридор» показателя; вне зоны полоска оранжевая */
+.kb-bar { position: relative; }
+.kb-bar > span { position: relative; z-index: 1; }   /* заливка поверх зелёной подложки */
+.kb-bar .kb-zone { position: absolute; top: 0; bottom: 0; background: #3ddc8433; border-left: 1px solid #3ddc8455; border-right: 1px solid #3ddc8455; pointer-events: none; }
+.kb-bar.off span { background: #ff9f45; }
+.kb-corridor { border-radius: 12px; padding: 8px 12px; font-size: 13px; margin-top: -6px; }
+.kb-corridor.ok { background: #3ddc8418; color: var(--good); }
+.kb-corridor.off { background: #ff9f4522; color: #ffb26b; }
 .kb-danger { background: #ff4d6d22; color: var(--bad); border-radius: 12px; padding: 10px 12px; font-size: 14px; margin-top: 12px; }
 .kb-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
 .kb-act { flex-direction: column; gap: 2px; padding: 10px 6px; white-space: normal; text-align: center; font-size: 13px; min-height: 76px; }
@@ -1030,11 +1038,8 @@ body.halloween .site-footer { border-color:#43243f; }
 .kb-bat.bat-b { top:49%; font-size:19px; animation-duration:3.9s; animation-delay:-1.4s; }
 .kb-bat.bat-c { top:75%; font-size:22px; animation-duration:3.2s; animation-delay:-2.1s; }
 @keyframes kb-bat-flight { 0%{transform:translate(0,12px) rotate(-14deg) scale(.8)} 30%{transform:translate(54px,-17px) rotate(12deg) scale(1.12)} 62%{transform:translate(122px,19px) rotate(-9deg) scale(.9)} 100%{transform:translate(190px,-10px) rotate(17deg) scale(1.1)} }
-.kb-music-btn { position:absolute; top:6px; right:0; z-index:3; border:1px solid #812d4b; border-radius:999px; background:#160a16ed; color:#ffd9e1; padding:5px 9px; font:inherit; font-size:11px; cursor:pointer; box-shadow:0 0 15px #c51d4733; }
-.kb-music-btn[aria-pressed="true"] { color:#ff8792; border-color:#ff435f; animation:music-pulse 1.5s ease-in-out infinite; }
 .kb-scare-btn { position:absolute; right:6px; bottom:6px; z-index:4; width:36px; height:36px; border:1px solid #fa4168; border-radius:10px; background:#220918eF; color:#ffe0e9; font-size:21px; cursor:pointer; box-shadow:0 0 17px #f22a5f77; }
 .kb-scare-btn:hover { background:#801432; transform:scale(1.08); }
-@keyframes music-pulse { 50%{box-shadow:0 0 22px #fb214e99} }
 .haunt-controls { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
 .haunt-controls button { flex:1; min-width:170px; }
 .haunt-controls .scare-test { border-color:#a62546; color:#ff9bab; }
@@ -1207,3 +1212,66 @@ body.halloween .site-footer { border-color:#69203c; }
   .kb-bat.bat-c { animation-duration:8.5s !important; }
   @keyframes kb-bat-flight-reduced { 0%{transform:translate(0,2px)} 100%{transform:translate(62px,-4px)} }
 }
+
+/* ---------------------------------------------------------------- кооперативы и Гриб-Танк */
+.club-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  border: 2px solid; border-color: var(--tk-a, #ff5a36); background: color-mix(in srgb, var(--tk-a, #ff5a36) 18%, transparent);
+  font-size: 13px; text-decoration: none; color: var(--fg); white-space: nowrap; }
+.club-badge b { color: var(--tk-b, #ff8a3d); }
+.club-mine { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+.tk-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin: 12px 0; }
+.tk-card { display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 16px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tk-a, #ff5a36) 22%, var(--card)), var(--card) 70%);
+  border: 1px solid var(--line); text-decoration: none; color: var(--fg); }
+.tk-card-emblem { font-size: 30px; }
+.tk-hero { background:
+  radial-gradient(1200px 320px at 10% -20%, color-mix(in srgb, var(--tk-a, #ff5a36) 18%, transparent), transparent 60%),
+  radial-gradient(800px 300px at 100% 0%, color-mix(in srgb, var(--tk-b, #ff8a3d) 14%, transparent), transparent 60%); }
+.tk-hero-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tk-hero-head h1 { margin: 0; font-size: 24px; }
+.tk-stage { margin-left: auto; color: var(--muted); }
+.tk-layout { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 18px; margin-top: 10px; }
+@media (max-width: 860px) { .tk-layout { grid-template-columns: 1fr; } }
+.tk-jar svg { width: 100%; max-width: 320px; height: auto; display: block; margin: 0 auto; }
+.tk-svg .tk-glass { fill: #ffffff10; stroke: var(--tk-a, #ff5a36); stroke-width: 5; }
+.tk-svg.moldy .tk-glass { stroke: #8fbf60; }
+.tk-svg.dead .tk-glass { stroke: #6b6b4a; }
+.tk-svg .tk-liquid-surface { opacity: .8; }
+.tk-svg .tk-bubble { animation: tk-rise 4s ease-in-out infinite; }
+@keyframes tk-rise { 0%, 100% { transform: translateY(0); opacity: .5 } 50% { transform: translateY(-14px); opacity: .9 } }
+.tk-hp { margin: 8px 0; }
+.tk-hp-bar { height: 12px; border-radius: 999px; background: var(--bg2); overflow: hidden; }
+.tk-hp-bar span { display: block; height: 100%; background: linear-gradient(90deg, #ff4d6d, #ff8a3d); transition: width .4s; }
+.tk-stats { margin-top: 8px; }
+.tk-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+@media (max-width: 600px) { .tk-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tk-notes { display: flex; flex-wrap: wrap; gap: 10px; font-size: 13px; margin-bottom: 10px; }
+.tk-notes .bad { color: var(--bad); }
+.tk-tabs { margin: 16px 0 10px; }
+.tk-req { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.tk-bank-head { font-size: 18px; margin-bottom: 10px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.tk-up { display: flex; flex-wrap: wrap; gap: 8px; }
+.tk-muts { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.tk-mut-card { background: var(--bg2); border-radius: 14px; padding: 12px; }
+.tk-me { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.kb-club { margin: 10px 0; }
+.kb-club-empty { display: block; padding: 10px 12px; border-radius: 12px; background: var(--bg2); color: var(--muted); font-size: 13px; text-decoration: none; }
+.kb-club-card { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--tk-a, #ff5a36) 45%, var(--line));
+  background: color-mix(in srgb, var(--tk-a, #ff5a36) 10%, var(--card)); }
+.modal-backdrop { position: fixed; inset: 0; background: #000a; display: flex; align-items: center; justify-content: center; z-index: 60; padding: 16px; }
+.modal { max-width: 460px; width: 100%; max-height: 90vh; overflow: auto; }
+
+/* Лента кооператива */
+.tk-feed { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.tk-post { padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel-2); }
+.tk-post.auto { opacity: .92; border-left: 3px solid var(--accent); }
+.tk-post-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tk-post-head .e { font-size: 18px; }
+.tk-post p { margin: 6px 0 8px; white-space: pre-wrap; }
+.tk-reacts { display: flex; gap: 6px; flex-wrap: wrap; }
+.tk-reacts .btn { padding: 2px 8px; }
+
+/* Форма основания клуба: «ООО "…"» — фиксированные части вокруг поля имени */
+.nc-name-wrap { display: inline-flex; align-items: center; gap: 4px; flex: 1 1 auto; }
+.nc-name-wrap input { flex: 1 1 auto; min-width: 120px; }

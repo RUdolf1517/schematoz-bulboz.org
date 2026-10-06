@@ -73,8 +73,6 @@ async function applyEventTheme() {
   document.body.classList.toggle("halloween", HALLOWEEN_ACTIVE);
   document.body.dataset.halloween = HALLOWEEN_ACTIVE ? "1" : "0";
   startHauntedButtons();
-  if (HALLOWEEN_ACTIVE) startSpookyMusic();
-  else stopSpookyMusic();
   const mark = $(".logo-mark");
   if (mark) mark.textContent = HALLOWEEN_ACTIVE ? "🎃" : "🍄";
   const nav = $("#events-nav");
@@ -172,84 +170,6 @@ function maybeHalloweenScreamer(force = false, ignoreCooldown = false) {
   return true;
 }
 
-let spookyMusic = null;
-let spookyMusicEnabled = localStorage.getItem("halloween-music-enabled") !== "0";
-function refreshSpookyMusicButtons() {
-  $$('[data-spooky-music]').forEach((button) => {
-    button.textContent = spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку";
-    button.setAttribute("aria-pressed", spookyMusicEnabled ? "true" : "false");
-  });
-}
-function stopSpookyMusic() {
-  if (!spookyMusic) return;
-  const sound = spookyMusic; spookyMusic = null;
-  clearInterval(sound.bellTimer);
-  if (sound.resumeHandler) {
-    document.removeEventListener("pointerdown", sound.resumeHandler);
-    document.removeEventListener("keydown", sound.resumeHandler);
-  }
-  try { sound.master.gain.setTargetAtTime(0.0001, sound.ctx.currentTime, 0.18); } catch (_) {}
-  setTimeout(() => sound.ctx.close().catch(() => {}), 700);
-  refreshSpookyMusicButtons();
-}
-function startSpookyMusic() {
-  if (!HALLOWEEN_ACTIVE || !spookyMusicEnabled || spookyMusic) return;
-  const Audio = window.AudioContext || window.webkitAudioContext;
-  if (!Audio) return;
-  let ctx = null;
-  try {
-    ctx = new Audio();
-    const master = ctx.createGain(), filter = ctx.createBiquadFilter();
-    filter.type = "lowpass"; filter.frequency.value = 380; filter.Q.value = 1.3;
-    master.gain.value = 0.055; filter.connect(master).connect(ctx.destination);
-    [[55, "sine", 0.38], [82.41, "triangle", 0.16], [110, "sine", 0.08], [41.2, "sine", 0.12]].forEach(([hz, type, vol]) => {
-      const osc = ctx.createOscillator(), gain = ctx.createGain();
-      osc.type = type; osc.frequency.value = hz; gain.gain.value = vol;
-      osc.connect(gain).connect(filter); osc.start();
-    });
-    const lfo = ctx.createOscillator(), lfoGain = ctx.createGain();
-    lfo.frequency.value = 0.075; lfoGain.gain.value = 115; lfo.connect(lfoGain).connect(filter.frequency); lfo.start();
-    const state = { ctx, master, filter, bellTimer: null, resumeHandler: null };
-    const resume = () => {
-      if (spookyMusic !== state || ctx.state === "closed") return;
-      ctx.resume().then(() => {
-        if (ctx.state === "running") {
-          document.removeEventListener("pointerdown", resume);
-          document.removeEventListener("keydown", resume);
-          state.resumeHandler = null;
-        }
-      }).catch(() => {});
-    };
-    state.resumeHandler = resume;
-    spookyMusic = state;
-    const bell = () => {
-      if (spookyMusic !== state || ctx.state !== "running") return;
-      const osc = ctx.createOscillator(), gain = ctx.createGain(), t = ctx.currentTime;
-      osc.type = "sine"; osc.frequency.value = [164.81, 196, 246.94, 293.66][Math.floor(Math.random() * 4)];
-      gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.11, t + 0.06);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 2.6); osc.connect(gain).connect(filter);
-      osc.start(t); osc.stop(t + 2.7);
-    };
-    state.bellTimer = setInterval(bell, 6500 + Math.random() * 5000);
-    document.addEventListener("pointerdown", resume, { passive: true });
-    document.addEventListener("keydown", resume);
-    resume();
-    refreshSpookyMusicButtons();
-  } catch (_) {
-    ctx?.close().catch(() => {});
-    spookyMusic = null;
-    refreshSpookyMusicButtons();
-  }
-}
-function toggleSpookyMusic() {
-  if (!HALLOWEEN_ACTIVE) return;
-  spookyMusicEnabled = !spookyMusicEnabled;
-  localStorage.setItem("halloween-music-enabled", spookyMusicEnabled ? "1" : "0");
-  if (spookyMusicEnabled) startSpookyMusic();
-  else stopSpookyMusic();
-  refreshSpookyMusicButtons();
-}
-
 let hauntedButtonTimer = null, hauntedPointerBound = false;
 function hauntButton(button) {
   if (!HALLOWEEN_ACTIVE || REDUCED_MOTION || !button?.isConnected) return;
@@ -283,7 +203,6 @@ function startHauntedButtons() {
 }
 
 document.addEventListener("click", (event) => {
-  if (event.target.closest("[data-spooky-music]")) toggleSpookyMusic();
   if (event.target.closest("[data-screamer-test]") && isHalloweenAdmin()) {
     if (REDUCED_MOTION) toast("Скример отключён системной настройкой reduced motion");
     else maybeHalloweenScreamer(true, true);
@@ -312,7 +231,7 @@ async function loadMe() {
     return null;
   }
   $("#me-name").textContent = ME.user.username;
-  $("#me-avatar").textContent = ME.user.username[0].toUpperCase();
+  paintAvatar($("#me-avatar"), ME.user);
   $("#me-profile").href = `/u/${encodeURIComponent(ME.user.username)}`;
   $("#me-admin").hidden = !ME.permissions.includes("analytics.read");
   setBell(ME.unread_notifications || 0);
@@ -334,6 +253,7 @@ function setBell(n) {
 }
 
 function initHeader() {
+  setTimeout(() => paintClubTag().catch(() => {}), 50);
   const btn = $("#user-menu-btn");
   if (btn) {
     const dd = $("#user-dropdown");
@@ -382,10 +302,29 @@ function newBadgesToast(codes) {
 }
 
 // ---------------------------------------------------------------- profile
+function avatarInner(u) {
+  return u?.avatar_url ? `<img src="${esc(u.avatar_url)}" alt="">` : initial(u?.username);
+}
+
 function avatarHTML(u, size = "") {
-  const inner = u.avatar_url ? `<img src="${esc(u.avatar_url)}" alt="">` : initial(u.username);
-  const frame = u.avatar_frame && u.avatar_frame !== "none" ? ` frame-${esc(u.avatar_frame)}` : "";
-  return `<span class="avatar ${size}${frame}">${inner}</span>`;
+  const frame = u?.avatar_frame && u.avatar_frame !== "none" ? ` frame-${esc(u.avatar_frame)}` : "";
+  return `<span class="avatar ${size}${frame}">${avatarInner(u)}</span>`;
+}
+
+// Обновляет уже отрисованный аватар (шапка/меню): картинка, буква и рамка.
+function paintAvatar(el, u, size = "") {
+  if (!el) return;
+  [...el.classList].forEach((cls) => {
+    if (cls.startsWith("frame-") || cls === "lg" || cls === "sm") el.classList.remove(cls);
+  });
+  if (size) el.classList.add(size);
+  if (u?.avatar_frame && u.avatar_frame !== "none" && /^[a-z0-9_-]+$/i.test(u.avatar_frame)) {
+    el.classList.add(`frame-${u.avatar_frame}`);
+  }
+  el.innerHTML = avatarInner(u);
+  const img = el.querySelector("img");
+  // Картинка могла не догрузиться (файл удалён, битый URL) — тогда буква, а не «сломанная» иконка.
+  if (img) img.onerror = () => { el.innerHTML = initial(u?.username); };
 }
 
 // классы/переменные темы профиля — только из белых списков (сервер валидирует тоже)
@@ -599,6 +538,8 @@ async function pageSettings() {
     try {
       const r = await api("PATCH", "/api/me/profile", collect());
       base.user = { ...base.user, ...r.user }; base.custom = { ...base.custom, ...r.settings };
+      if (ME) ME.user = { ...ME.user, ...r.user };
+      paintAvatar($("#me-avatar"), r.user);   // шапка обновляется сразу, без перезагрузки
       toast("Профиль сохранён ✨"); preview(); $("#st-dirty").hidden = true;
     } catch (_) {}
   };
@@ -981,7 +922,8 @@ async function kbDebugPanel(panel, login = "", selId = null) {
       <div class="kbd">
         <div class="kbd-left">
           <div class="kbd-prev">${kombuchaSVG(k)}</div>
-          <p class="muted" style="text-align:center">«${esc(k.name)}» · ${esc(k.stage.title)} · xp ${k.xp} · настроение: ${esc(KB_MOOD[k.mood]?.[1] || k.mood)} · мутаций: ${on.size}</p>
+          <p class="muted" style="text-align:center">«${esc(k.name)}» · ${esc(k.stage.title)} · xp ${k.xp} · настроение: ${esc(KB_MOOD[k.mood]?.[1] || k.mood)} · мутаций: ${on.size}<br>
+            ${k.corridor?.ok ? "✅ в идеальном коридоре (опыт ×1)" : `⚠️ вне коридора: ${esc(corridorProblems(k.corridor, k.stats).join(" / "))} (опыт ×0.5)`}</p>
           <div class="kbd-row"><b>Стадия:</b> ${D.stages.map((st) => `<button class="btn btn-sm ${st.size === k.stage.size ? "btn-accent" : ""}" data-stage="${st.size}" title="${esc(st.title)} (от ${st.xp} xp)">${st.size}</button>`).join("")}</div>
           ${["sweet", "tea", "clean", "happy"].map((st) => `<label class="kbd-row"><span>${{ sweet: "🍬 сахар", tea: "🫖 заварка", clean: "🧽 чистота", happy: "💛 счастье" }[st]}</span>
             <input type="range" min="0" max="100" value="${k.stats[st]}" data-stat="${st}"><b>${k.stats[st]}</b></label>`).join("")}
@@ -1084,7 +1026,12 @@ async function adminHalloween(panel) {
     <label class="check"><input type="checkbox" name="enabled" ${data.enabled ? "checked" : ""}> Разрешить событие</label>
     <label>Начало<input class="input" type="datetime-local" name="start_at" required value="${esc(localInput(data.start_at))}"></label>
     <label>Конец<input class="input" type="datetime-local" name="end_at" required value="${esc(localInput(data.end_at))}"></label>
-    <p class="event-admin-status">Сейчас: <b>${data.active ? "🟢 активно" : data.enabled ? "🕒 включено, но вне дат" : "⚫ выключено"}</b></p>
+    <p class="event-admin-status">Сейчас: <b>${data.active ? "🟢 активно" : data.enabled ? "🕒 включено, но вне дат" : "⚫ выключено"}</b>${data.results_closed ? " · итоги закрыты 🏁" : ""}</p>
+    <hr>
+    <h3>Итоги рейда</h3>
+    <p class="muted">Итоги попадают в архив и медали выдаются только когда админ закрывает их кнопкой. Даты и галочка «Разрешить событие» сами итоги не закрывают.</p>
+    <p class="muted">Прогресс текущего сезона: ${Number(data.raid_total_damage || 0).toLocaleString("ru-RU")} урона${data.results_closed ? " · итоги закрыты" : ""}</p>
+    <button class="btn btn-accent" type="button" id="raid-close-results" ${data.results_closed ? "disabled" : ""}>🏁 Закрыть итоги</button>
     <hr>
     <h3>Общий босс</h3>
     <label>Имя босса<input class="input" name="boss_name" maxlength="80" required value="${esc(raid.boss_name)}"></label>
@@ -1097,7 +1044,7 @@ async function adminHalloween(panel) {
     <button class="btn btn-ghost btn-sm" id="raid-add-gift" type="button">＋ Создать бейдж</button>
     <hr><button class="btn btn-accent">Сохранить настройки</button>
   </form>
-  <div class="panel"><h3>Эффекты события</h3><p class="muted">Скример срабатывает примерно на каждом третьем действии, не чаще одного раза за 15 секунд. Музыка включена по умолчанию. Чистота и счастье грибов во время ивента убывают вдвое быстрее; в рейде каждый выставленный гриб наносит 1 урон, получает +1 чистоты и счастья, но теряет по 1 сахару и заварки.</p>
+  <div class="panel"><h3>Эффекты события</h3><p class="muted">Скример срабатывает примерно на каждом третьем действии, не чаще одного раза за 15 секунд. Чистота и счастье грибов во время ивента убывают вдвое быстрее; в рейде каждый выставленный гриб наносит 1 урон, получает +1 чистоты и счастья, но теряет по 1 сахару и заварки.</p>
   <p class="muted">Также доступны хэллоуинские цитаты, постоянные мутации, «Сладость или гадость» и исчезновения грибов.</p></div>
   ${raidArchiveMarkup(archive)}`;
   const stagesBox = $("#raid-admin-stages", panel), giftsBox = $("#raid-admin-gifts", panel);
@@ -1108,6 +1055,16 @@ async function adminHalloween(panel) {
   $("#raid-add-gift", panel).onclick = () => {
     if (giftsBox.querySelectorAll("[data-gift-row]").length >= 100) return toast("Максимум 100 бейджей", true);
     giftsBox.insertAdjacentHTML("beforeend", giftRow());
+  };
+  const closeResults = $("#raid-close-results", panel);
+  if (closeResults) closeResults.onclick = async () => {
+    if (!confirm("Закрыть итоги рейда? Итоги попадут в архив, медали будут выданы, общий прогресс сбросится.")) return;
+    closeResults.disabled = true;
+    try {
+      await api("POST", "/admin/events/halloween/results/close");
+      toast("Итоги закрыты: архив и медали обновлены");
+      await adminHalloween(panel);
+    } catch (_) { closeResults.disabled = false; }
   };
   stagesBox.addEventListener("click", (event) => {
     if (!event.target.closest("[data-remove-stage]")) return;
@@ -1147,6 +1104,121 @@ async function adminHalloween(panel) {
   };
 }
 
+// Админка: клубы (список, переименование, роспуск, жалобы) и дебаг-панель Танка.
+async function adminClubs(panel) {
+  const D = await api("GET", "/admin/clubs");
+  let sel = D.items[0];
+  const mutByStage = {};
+  D.catalog.forEach((m) => (mutByStage[m.stage] ||= []).push(m));
+  const draw = () => {
+    const k = sel;
+    panel.innerHTML = `<div class="kbd-row kbd-head">
+        <input class="input" id="ac-q" placeholder="Поиск клуба: название или тег">
+        <span class="muted">${D.items.length} клубов · тебе как администратору основание клуба бесплатно
+          (кнопка «Основать бесплатно» на странице 🤝 Кооперативы)</span></div>
+      <div class="kbd">
+        <div class="kbd-left">
+          <select class="input" id="ac-sel">${D.items.map((x) => `<option value="${x.id}" ${k && x.id === k.id ? "selected" : ""}>
+            [${esc(x.tag)}] ${esc(x.name)} · ${x.members}/${x.capacity} · ${x.status}</option>`).join("")}</select>
+          ${k ? `<div class="kbd-row"><input class="input" id="ac-name" value="${esc(k.name)}"><input class="input" id="ac-tag" value="${esc(k.tag)}"></div>
+          <div class="kbd-row"><button class="btn btn-sm" id="ac-save">Сохранить</button>
+            <button class="btn btn-sm" id="ac-ban">${k.status === "banned" ? "Разбанить" : "Забанить"}</button>
+            <button class="btn btn-sm btn-danger" id="ac-destroy">Расформировать</button></div>
+          <p class="muted small">Копилка ${k.account} $₽ · уровень ${k.level} · вступление: ${esc(k.join_mode)} · лидер #${k.leader_id}<br>
+            Активность: ${esc(k.last_active_at ? fmtDate(k.last_active_at) : "—")}</p>` : ""}
+        </div>
+        <div class="kbd-right">
+          ${k?.tank ? `<h3>Танк: стадия ${k.tank.stage} · ${esc(k.tank.mold ? "🦠 плесень" : "")} ${esc(k.tank.alive ? "" : "💀 закис")}</h3>
+          <p class="muted">XP ${k.tank.xp} · ❤️ ${k.tank.hp} · падение ×${k.tank.party_scale} · шрамов ${k.tank.scars}<br>
+            мутации: ${k.tank.mutations.map((c) => esc(c)).join(", ") || "нет"}</p>
+          ${["sweet", "tea", "clean", "happy"].map((st) => `<label class="kbd-row"><span>${TANK_LABELS[st]}</span>
+            <input type="range" min="0" max="100" value="${k.tank.stats[st]}" data-tkstat="${st}"><b>${k.tank.stats[st]}</b></label>`).join("")}
+          <div class="kbd-row"><label>xp <input class="input" id="ac-xp" type="number" value="${k.tank.xp}"></label>
+            <label>hp <input class="input" id="ac-hp" type="number" value="${k.tank.hp}"></label>
+            <label>промотать часы <input class="input" id="ac-hours" type="number" value="0"></label></div>
+          <div class="kbd-row"><label><input type="checkbox" id="ac-mold" ${k.tank.mold ? "checked" : ""}> плесень</label>
+            <label><input type="checkbox" id="ac-alive" ${k.tank.alive ? "checked" : ""}> живой</label>
+            <select class="input" id="ac-mut"><option value="">— выдать мутацию —</option>
+              ${Object.entries(mutByStage).map(([st, list]) => `<optgroup label="Стадия ${st}">${list.map((m) =>
+                `<option value="${m.code}">${esc(m.emoji)} ${esc(m.title)} (+${m.dmg} урон)</option>`).join("")}</optgroup>`).join("")}</select></div>
+          <button class="btn btn-accent btn-sm" id="ac-tank-save">Применить к Танку</button>` : `<p class="muted">У клуба ещё нет Танка.</p>`}
+          <h3>Жалобы на ленту (${D.reports.length})</h3>
+          ${D.reports.map((r) => `<div class="tk-req">жалоба #${r.id} на пост ${r.post_id ?? "—"} клуба #${r.club_id}
+            <small class="muted">${esc(r.reason || "")}</small>
+            <button class="btn btn-sm btn-good" data-rep="${r.id}" data-acc="1">Удалить пост</button>
+            <button class="btn btn-sm" data-rep="${r.id}" data-acc="0">Отклонить</button></div>`).join("") || `<p class="muted">Открытых жалоб нет.</p>`}
+        </div>
+      </div>`;
+    $("#ac-sel").onchange = () => { sel = D.items.find((x) => x.id === +$("#ac-sel").value); draw(); };
+    $("#ac-q").onkeydown = async (e) => {
+      if (e.key !== "Enter") return;
+      const D2 = await api("GET", `/admin/clubs?q=${encodeURIComponent(e.target.value)}`);
+      D.items = D2.items; sel = D.items[0]; draw();
+    };
+    $("#ac-save") && ($("#ac-save").onclick = async () => {
+      await api("PATCH", `/admin/clubs/${k.id}`, { name: $("#ac-name").value, tag: $("#ac-tag").value });
+      toast("Клуб сохранён"); await adminClubs(panel);
+    });
+    $("#ac-ban") && ($("#ac-ban").onclick = async () => {
+      await api("PATCH", `/admin/clubs/${k.id}`, { status: k.status === "banned" ? "active" : "banned" });
+      toast("Статус изменён"); await adminClubs(panel);
+    });
+    $("#ac-destroy") && ($("#ac-destroy").onclick = async () => {
+      const reason = prompt("Причина расформирования (увидят участники):", "Решение админа");
+      if (reason === null) return;
+      await api("PATCH", `/admin/clubs/${k.id}`, { disband: true, reason });
+      toast("Клуб расформирован, Танк — в музее"); await adminClubs(panel);
+    });
+    $("#ac-tank-save") && ($("#ac-tank-save").onclick = async () => {
+      const stats = {};
+      $$("[data-tkstat]").forEach((el) => (stats[el.dataset.tkstat] = +el.value));
+      await api("PATCH", `/admin/clubs/${k.id}`, { tank: { stats, xp: +$("#ac-xp").value, hp: +$("#ac-hp").value,
+        hours: +$("#ac-hours").value, mold: $("#ac-mold").checked, alive: $("#ac-alive").checked,
+        mutation: $("#ac-mut").value || null } });
+      toast("Танк обновлён"); await adminClubs(panel);
+    });
+    $$("[data-rep]").forEach((b) => (b.onclick = async () => {
+      await api("POST", `/admin/clubs/reports/${b.dataset.rep}`, { accept: b.dataset.acc === "1" });
+      toast("Жалоба разобрана"); await adminClubs(panel);
+    }));
+  };
+  draw();
+}
+
+async function adminWorldEvents(panel) {
+  const D = await api("GET", "/admin/events/world");
+  const cfg = D.config.events || {};
+  panel.innerHTML = `<h2>🌍 Мировые ивенты</h2>
+    <p class="muted">Включаются на даты и множат падение показателей Танка. «Хэллоуин» — сезонный,
+    его расписание живёт во вкладке «Ивенты» 🎃.</p>
+    <label class="kbd-row"><input type="checkbox" id="we-enabled" ${D.config.enabled ? "checked" : ""}> мастер-выключатель</label>
+    ${Object.entries(D.titles).filter(([c]) => c !== "halloween").map(([code, title]) => {
+      const e = cfg[code] || {};
+      return `<div class="kbd-row"><label><input type="checkbox" data-we="${code}" ${e.enabled ? "checked" : ""}> ${esc(title)}</label>
+        <input class="input" type="date" data-we-start="${code}" value="${e.start_at ? e.start_at.slice(0, 10) : ""}">
+        <input class="input" type="date" data-we-end="${code}" value="${e.end_at ? e.end_at.slice(0, 10) : ""}">
+        <input class="input" type="number" step="0.1" min="1" max="3" data-we-mult="${code}" value="${e.mult || 1}"></div>`;
+    }).join("")}
+    <div class="kbd-row"><button class="btn btn-accent" id="we-save">Сохранить</button>
+      <button class="btn" id="we-raid">🦠 Запустить рейд всем клубам</button></div>
+    <p class="muted">Сейчас идут: ${(D.active.active || []).map((c) => esc(D.titles[c] || c)).join(", ") || "ничего"}</p>`;
+  $("#we-save").onclick = async () => {
+    const events = {};
+    Object.keys(D.titles).filter((c) => c !== "halloween").forEach((code) => {
+      events[code] = { enabled: $(`[data-we="${code}"]`)?.checked || false,
+        start_at: $(`[data-we-start="${code}"]`)?.value ? new Date($(`[data-we-start="${code}"]`).value).toISOString() : null,
+        end_at: $(`[data-we-end="${code}"]`)?.value ? new Date($(`[data-we-end="${code}"]`).value + "T23:59").toISOString() : null,
+        mult: +$(`[data-we-mult="${code}"]`)?.value || 1 };
+    });
+    await api("PUT", "/admin/events/world", { enabled: $("#we-enabled").checked, events, raid: D.raid });
+    toast("Мировые ивенты сохранены");
+  };
+  $("#we-raid").onclick = async () => {
+    const r = await api("POST", "/admin/events/world/raid/run", {});
+    toast(`Рейд запущен в ${r.started} клубах`);
+  };
+}
+
 async function pageAdmin() {
   if (denied("analytics.read")) return;
   let show;
@@ -1155,6 +1227,8 @@ async function pageAdmin() {
     async quotes(panel) { await adminQuotes(panel); },
     async events(panel) { await adminHalloween(panel); },
     async kombucha(panel) { await kbDebugPanel(panel); },
+    async clubs(panel) { await adminClubs(panel); },
+    async worldevents(panel) { await adminWorldEvents(panel); },
     async analytics(panel) {
       const a = await api("GET", "/admin/analytics");
       const L = { users_total: "Всего грибоводов", users_24h: "Новых за 24 ч", dau: "DAU", kombuchas_alive: "Живых грибов", kombuchas_born_24h: "Посажено за 24 ч", games_24h: "Игр за 24 ч", wood_earned_24h: "$₽ начислено за 24 ч" };
@@ -1458,7 +1532,7 @@ function kbGameShell(title, help) {
         flies: `отогнано мушек: ${R.swatted}` }[game] || "";
       sh.area.innerHTML = `<div class="kb-med-result"><h2>${esc(R.grade)}</h2><p class="kb-med-acc">Точность: <b>${Math.round(R.accuracy * 100)}%</b></p>${kbBotNote(R)}
         <p class="muted">${esc(extra)}</p>
-        ${R.practice ? `<p class="kb-practice">🏋️ Тренировка — играй сколько хочешь. Следующая награда через ${fmtLeft(R.reward_in)}.</p>` : `<p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за игры сегодня уже собраны · </span>`}💛 +${R.happy}${R.boost ? ` · ${ST[R.stat]} +${R.boost}` : ""}${R.xp ? ` · +${R.xp} опыта` : ""}</p>`}
+        ${R.practice ? `<p class="kb-practice">🏋️ Тренировка — играй сколько хочешь. Следующая награда через ${fmtLeft(R.reward_in)}.</p>` : `<p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за игры сегодня уже собраны · </span>`}💛 +${R.happy}${R.boost ? ` · ${ST[R.stat]} +${R.boost}` : ""}${R.xp ? ` · ${xpLabel(R.xp, R.xp_mult)}` : ""}</p>`}
         ${R.mutation ? `<p class="kb-med-mut">🧬 ${esc(R.mutation.rarity_title)} мутация: ${esc(R.mutation.emoji)} «${esc(R.mutation.title)}» #${R.mutation.serial}</p>`
           : `<p class="muted">${{ limit: "На этой стадии у гриба уже 3 мутации.", luck: "Мутация не пришла — чем точнее, тем выше шанс.", low: "С 75% точности появляется шанс мутации." }[R.mut_why] || ""}</p>`}
         <button class="btn btn-accent" data-close>Готово</button></div>`;
@@ -1726,7 +1800,7 @@ async function kbMeditate(k, onDone) {
       <h2>${esc(R.grade)}</h2>
       <p class="kb-med-acc">Точность: <b>${Math.round(R.accuracy * 100)}%</b></p>${kbBotNote(R)}
       <p class="muted">✨ идеально ${R.perfect} · 👍 хорошо ${R.good} · мимо ${R.miss}${R.extra ? ` · лишних тапов ${R.extra}` : ""}</p>
-      ${R.practice ? `<p class="kb-practice">🏋️ Тренировка — играй сколько хочешь. Следующая награда через ${fmtLeft(R.reward_in)}.</p>` : `<p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за сегодня уже собраны · </span>`}💛 +${R.happy} счастья${R.xp ? ` · +${R.xp} опыта` : ""}</p>`}
+      ${R.practice ? `<p class="kb-practice">🏋️ Тренировка — играй сколько хочешь. Следующая награда через ${fmtLeft(R.reward_in)}.</p>` : `<p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за сегодня уже собраны · </span>`}💛 +${R.happy} счастья${R.xp ? ` · ${xpLabel(R.xp, R.xp_mult)}` : ""}</p>`}
       ${R.mutation ? `<p class="kb-med-mut">🧬 ${esc(R.mutation.rarity_title)} мутация: ${esc(R.mutation.emoji)} «${esc(R.mutation.title)}» #${R.mutation.serial}</p>` : `<p class="muted">${{ limit: "На этой стадии у гриба уже 3 мутации — новые откроются на следующей стадии.", luck: "Мутация в этот раз не пришла — чем точнее, тем выше шанс (до 15%).", low: "С 75% точности появляется шанс мутации." }[R.mut_why] || ""}</p>`}
       <button class="btn btn-accent" data-close>Готово</button></div>`);
     el.querySelectorAll(".kb-med-help, .kb-med-combo, .kb-med-judge, .kb-med-bar").forEach((x) => x.remove());
@@ -1800,6 +1874,426 @@ function kbFullscreen(getK) {
   document.addEventListener("keydown", onKey);
   el.requestFullscreen?.().then(() => document.addEventListener("fullscreenchange", onFs)).catch(() => {});
   setTimeout(() => el.classList.add("hint-off"), 2500);
+}
+
+// ---------------------------------------------------------------- кооперативы и Гриб-Танк
+const TANK_MOODS = { ok: "😊", happy: "🤩", hungry: "😟", moldy: "🦠", dead: "💀" };
+const TANK_LABELS = { sweet: "🍬 сахар", tea: "🫖 заварка", clean: "🧽 чистота", happy: "💛 настроение" };
+
+// Большая банка на 20 литров: отдельный SVG, свои id (через club.id), без дублей с личным грибом.
+function tankSVG(t, club, { full = false } = {}) {
+  const uid = `tank-${club?.id || 0}`;
+  const st = t?.stats || { sweet: 70, tea: 70, clean: 90, happy: 70 };
+  const stage = t?.stage?.size || 1;
+  const alive = t?.alive !== false;
+  const codes = new Set((t?.mutations || []).map((m) => m.code));
+  const glow = (t?.mutations || []).find((m) => m.color)?.color;
+  const level = alive ? 30 + st.tea * 0.75 + stage * 6 : 46;
+  const top = 300 - level;
+  const tint = alive ? `hsl(${28 + (100 - st.tea) * 0.15}, ${45 + st.tea * 0.4}%, ${58 - st.tea * 0.2}%)` : "#6b6b4a";
+  const scale = full ? 1.05 : 1;
+  const moldSpots = t?.mold ? `<g class="tk-mold">${[0, 1, 2, 3, 4, 5].map((i) =>
+    `<circle cx="${70 + ((i * 53) % 180)}" cy="${top + 20 + ((i * 41) % 120)}" r="${4 + (i % 3) * 3}" fill="#8fbf60" opacity=".8"/>`).join("")}</g>` : "";
+  const scars = (t?.scars || []).slice(-4).map((_, i) =>
+    `<path d="M${80 + i * 38},${120 + (i % 2) * 26} l14,10 -12,9" stroke="#e0e0e0aa" stroke-width="3" fill="none"/>`).join("");
+  const muts = [...codes].slice(0, 6).map((c, i) => {
+    const m = (t?.mutations || []).find((x) => x.code === c) || {};
+    return `<text x="${64 + i * 34}" y="54" font-size="22" class="tk-mut">${m.emoji || "🧬"}</text>`;
+  }).join("");
+  const bubbles = alive ? [0, 1, 2, 3, 4].map((i) =>
+    `<circle class="tk-bubble" cx="${66 + ((i * 47) % 190)}" cy="${top + 30 + ((i * 29) % 120)}" r="${2 + (i % 3)}" fill="#ffffff55"/>`).join("") : "";
+  return `<svg class="tk-svg${t?.mold ? " moldy" : ""}${alive ? "" : " dead"}" viewBox="0 0 300 460" role="img"
+    aria-label="Гриб-Танк «${esc(club?.name || "")}»" style="--tk-a:${esc(club?.color || "#ff5a36")};--tk-b:${esc(club?.color2 || "#ff8a3d")}">
+    <defs>
+      <linearGradient id="${uid}-liq" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${tint}" stop-opacity=".95"/><stop offset="100%" stop-color="#5c3a1a" stop-opacity=".95"/>
+      </linearGradient>
+      <clipPath id="${uid}-clip"><path d="M40,60 Q40,40 66,36 L234,36 Q260,40 260,60 L268,320 Q268,344 244,344 L56,344 Q32,344 32,320 Z"/></clipPath>
+    </defs>
+    <g transform="translate(150 230) scale(${scale}) translate(-150 -230)">
+      <path d="M40,60 Q40,40 66,36 L234,36 Q260,40 260,60 L268,320 Q268,344 244,344 L56,344 Q32,344 32,320 Z" class="tk-glass"
+        ${glow ? `style="filter:drop-shadow(0 0 18px ${glow})"` : ""}/>
+      <g clip-path="url(#${uid}-clip)">
+        <rect x="30" y="${top}" width="240" height="${350 - top}" fill="url(#${uid}-liq)"/>
+        <path class="tk-liquid-surface" d="M30,${top} Q80,${top - 6} 150,${top} T270,${top}" stroke="#ffffff55" stroke-width="3" fill="none"/>
+        ${bubbles}${moldSpots}
+        <ellipse cx="150" cy="${top + 96}" rx="${34 + stage * 8}" ry="${16 + stage * 4}" fill="#f0d9a8cc"/>
+        <ellipse cx="150" cy="${top + 74}" rx="${26 + stage * 7}" ry="${12 + stage * 3}" fill="#f7e7c6ee"/>
+      </g>
+      ${scars}${muts}
+      <rect x="24" y="30" width="252" height="14" rx="7" fill="#ffffff22"/>
+      ${t?.hp != null ? `<rect x="24" y="18" width="${Math.max(2, 252 * Math.min(1, (t.hp / (t.hp_max || 100))))}" height="8" rx="4" fill="#ff4d6d"/>` : ""}
+    </g>
+  </svg>`;
+}
+
+function tankBars(t, clubId) {
+  if (!t) return "";
+  return `<div class="kb-stats tk-stats">${Object.entries(TANK_LABELS).map(([key, label]) => {
+    const v = t.stats?.[key] ?? 0;
+    return `<div class="kb-stat"><span>${label}</span><div class="kb-bar${v < 25 ? " low" : ""}"><span style="width:${Math.min(100, v)}%"></span></div><b>${Math.round(v)}</b></div>`;
+  }).join("")}</div>`;
+}
+
+function tankHpBar(t) {
+  if (!t) return "";
+  const pct = Math.round(100 * Math.min(1, t.hp / (t.hp_max || 100)));
+  return `<div class="tk-hp"><div class="tk-hp-bar"><span style="width:${pct}%"></span></div>
+    <small>❤️ Здоровье ${t.hp} / ${t.hp_max}</small></div>`;
+}
+
+function clubBadge(club) {
+  if (!club) return "";
+  return `<a class="club-badge" href="/c/${encodeURIComponent(club.tag)}" title="Кооператив ${esc(club.name)}"
+    style="--tk-a:${esc(club.color || "#ff5a36")};--tk-b:${esc(club.color2 || "#ff8a3d")}">
+    <b>[${esc(club.tag)}]</b> <span>${esc(club.emblem || "🍄")}</span></a>`;
+}
+
+async function pageClubs() {
+  const main = $("main");
+  const q = new URLSearchParams(location.search).get("q") || "";
+  const [list, mine] = await Promise.all([
+    api("GET", `/api/clubs${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+    ME ? api("GET", "/api/clubs/mine").catch(() => null) : Promise.resolve(null),
+  ]);
+  main.innerHTML = `<div class="panel">
+    <h1>🤝 Грибные кооперативы</h1>
+    <p class="muted">Общая 20-литровая банка — Гриб-Танк. Кормите его командой: чем больше живых участников,
+    тем сильнее падают показатели, поэтому один задрот клуб не вытянет.</p>
+    <div class="kb-row"><input class="input" id="clubs-q" placeholder="Поиск по названию или тегу" value="${esc(q)}">
+      <button class="btn btn-accent" id="clubs-create">${CLUB_FREE() ? "Основать бесплатно" : "Основать за 500 $₽"}</button></div>
+    ${mine?.club ? `<div class="club-mine">${clubBadge(mine.club)} <b>${esc(mine.club.name)}</b>
+      · ${esc(TANK_MOODS[mine.tank.mood] || "")} ${esc(mine.tank.stage_title)} · мест ${mine.club.members}
+      · копилка ${mine.club.account} $₽ <a class="btn btn-sm" href="/c/${encodeURIComponent(mine.club.tag)}">Открыть</a></div>`
+    : mine?.cooldown_until ? `<p class="muted">После выхода из клуба новый можно выбрать только через сутки.</p>` : ""}
+    <div class="tk-cards">${list.items.map((c) => `<a class="tk-card" href="/c/${encodeURIComponent(c.tag)}"
+      style="--tk-a:${esc(c.color)};--tk-b:${esc(c.color2)}">
+      <span class="tk-card-emblem">${esc(c.emblem)}</span>
+      <b>${esc(c.name)}</b><small>[${esc(c.tag)}] · ${esc(c.stage_title)}</small>
+      <small class="muted">${c.members}/${c.capacity} участников · вступление: ${JOIN_MODE[c.join_mode] || c.join_mode}${c.min_level > 1 ? ` · с ${c.min_level} ур.` : ""}</small>
+    </a>`).join("") || `<p class="muted">Кооперативов пока нет — основай первый.</p>`}</div>
+    <h2>🏛 Музей кооперативов</h2>
+    <div class="tk-cards">${(list.museum || []).map((m) => `<div class="tk-card muted">
+      <span class="tk-card-emblem">${esc(m.emblem)}</span><b>${esc(m.name)}</b><small>[${esc(m.tag)}] · стадия ${m.stage}
+      · ${m.tank_xp} XP</small><small class="muted">${m.reason ? esc(m.reason) : "расформирован"}</small></div>`).join("")
+    || `<p class="muted">Здесь появятся клубы, которые распались.</p>`}</div>
+  </div>`;
+  $("#clubs-q").onkeydown = (e) => { if (e.key === "Enter") location.href = `/clubs?q=${encodeURIComponent(e.target.value)}`; };
+  $("#clubs-create").onclick = () => createClubDialog();
+}
+
+const JOIN_MODE = { open: "свободное", request: "по заявке", invite: "по приглашению" };
+// Администраторы (право clubs.manage) основывают кооперативы без списания $₽.
+const CLUB_FREE = () => !!ME?.permissions?.includes("clubs.manage");
+
+function createClubDialog() {
+  const dlg = document.createElement("div");
+  dlg.className = "modal-backdrop";
+  dlg.innerHTML = `<div class="modal panel">
+    <h2>Основать кооператив</h2>
+    <p class="muted">${CLUB_FREE() ? "Тебе как администратору создание бесплатно." : "Создание стоит 500 $₽."}
+    Название кооператива: впиши имя — «ООО» и кавычки подставятся сами.</p>
+    <label class="kbd-row"><span>Название</span><span class="nc-name-wrap"><b>ООО "</b><input class="input"
+      id="nc-name" maxlength="18" placeholder="Пример"><b>"</b></span></label>
+    <label class="kbd-row"><span>Тег</span><input class="input" id="nc-tag" maxlength="5" placeholder="ЧАЙ"></label>
+    <label class="kbd-row"><span>Герб</span><input class="input" id="nc-emblem" maxlength="4" placeholder="🍄"></label>
+    <label class="kbd-row"><span>Цвета</span><input type="color" id="nc-color" value="#ff5a36"><input type="color" id="nc-color2" value="#ff8a3d"></label>
+    <label class="kbd-row"><span>Вступление</span><select class="input" id="nc-mode"><option value="open">свободное</option><option value="request">по заявке</option><option value="invite">по приглашению</option></select></label>
+    <label class="kbd-row"><span>Мин. уровень</span><input class="input" id="nc-level" type="number" min="1" max="50" value="1"></label>
+    <label class="kbd-row"><span>Описание</span><textarea class="input" id="nc-desc" maxlength="280"></textarea></label>
+    <div class="kbd-row"><button class="btn btn-accent" id="nc-save">${CLUB_FREE() ? "Основать бесплатно" : "Основать (500 $₽)"}</button><button class="btn" id="nc-cancel">Отмена</button></div>
+  </div>`;
+  document.body.appendChild(dlg);
+  $("#nc-cancel").onclick = () => dlg.remove();
+  $("#nc-save").onclick = async () => {
+    try {
+      const r = await api("POST", "/api/clubs", { name: $("#nc-name").value, tag: $("#nc-tag").value,
+        emblem: $("#nc-emblem").value || "🍄", color: $("#nc-color").value, color2: $("#nc-color2").value,
+        join_mode: $("#nc-mode").value, min_level: +$("#nc-level").value || 1, description: $("#nc-desc").value });
+      toast(`🤝 Кооператив ${r.club.name} основан!${r.free ? " (бесплатно)" : ""}`);
+      location.href = `/c/${encodeURIComponent(r.club.tag)}`;
+    } catch (e) { toast(e.message, true); }
+  };
+}
+
+async function pageClub() {
+  const tag = decodeURIComponent(location.pathname.split("/")[2] || "");
+  const invite = new URLSearchParams(location.search).get("invite") || "";
+  const main = $("main");
+  let C;
+  try { C = await api("GET", `/api/clubs/${encodeURIComponent(tag)}`); }
+  catch (e) { main.innerHTML = `<div class="panel"><h1>Кооператив не найден</h1><p class="muted">${esc(e.message)}</p></div>`; return; }
+  const club = { id: C.id, tag: C.tag, name: C.name, emblem: C.emblem, color: C.color, color2: C.color2 };
+  const tab = new URLSearchParams(location.search).get("tab") || "members";
+  const t = C.tank;
+  const joinBtn = C.me.member ? "" : `<button class="btn btn-accent" id="club-join">${C.join_mode === "request" ? "Оставить заявку" : C.join_mode === "invite" && !invite ? "Только по приглашению" : "Вступить"}</button>`;
+  main.innerHTML = `<div class="panel tk-hero" style="--tk-a:${esc(C.color)};--tk-b:${esc(C.color2)}">
+    <div class="tk-hero-head">${clubBadge(club)}<h1>${esc(C.name)}</h1>${joinBtn}
+      <span class="tk-stage">${esc(TANK_MOODS[t.mood] || "")} ${esc(t.stage.title)} · ${t.xp} XP</span></div>
+    <p class="muted">${esc(C.description || "Описание пока не заполнено")} · ${C.members}/${C.capacity} участников · уровень клуба ${C.level}${C.me.member ? ` · ты ${esc(ROLE_RU[C.me.role] || C.me.role)}` : ""}</p>
+    <div class="tk-layout">
+      <div class="tk-visual"><div class="tk-jar">${tankSVG(t, club)}</div>
+        <div class="kb-say">${esc(t.phrase)}</div></div>
+      <div class="tk-info">
+        ${tankHpBar(t)}${tankBars(t, C.id)}
+        <div class="tk-actions">${["sugar", "tea", "clean", "pet"].map((a) => {
+          const cd = (t.cooldowns || {})[a] || 0;
+          return `<button class="btn kb-act" data-tk="${a}"${C.me.member && !cd ? "" : " disabled"}><span class="e">${{ sugar: "🍬", tea: "🫖", clean: "🧽", pet: "🤚" }[a]}</span>
+            <span>${{ sugar: "Сахар", tea: "Заварка", clean: "Помыть", pet: "Погладить" }[a]}${cd ? ` · ${fmtLeft(cd)}` : ""}</span></button>`;
+        }).join("")}</div>
+        <div class="tk-notes">
+          <span class="muted">Норма дня: ${t.norm.done}/${t.norm.target} ${t.norm.ok ? "✅" : "⏳"}</span>
+          <span class="muted">Падение ×${t.party_scale} (${t.party} чел.)</span>
+          <span class="muted">Потолок вклада: ${t.daily_cap}/показатель в сутки</span>
+          ${t.mold ? `<span class="bad">🦠 Плесень! Нужно участников: ${t.cure_need}</span>` : ""}
+          ${t.dies_in != null ? `<span class="bad">⚠️ Закиснет через ${fmtLeft(t.dies_in)}</span>` : ""}
+          ${t.raid?.state === "running" ? `<span class="bad">🦠 Рейд! Босс ${t.raid.hp}/${t.raid.hp_max}</span>` : ""}
+          ${t.war?.state === "picking" ? `<span class="muted">⚔️ Война с [${esc(t.war.enemy?.tag || "?")}]</span>` : ""}
+          ${t.league ? `<span class="muted">🏆 ${esc(t.league.league_title)} · место ${t.league.rank ?? "—"}</span>` : ""}
+        </div>
+        ${C.me.member ? `<button class="btn btn-sm" id="tk-help">🆘 Позвать на помощь</button>
+          <button class="btn btn-sm btn-ghost" id="club-leave">Выйти из клуба</button>` : ""}
+      </div>
+    </div>
+    <div class="tabs scroll tk-tabs">${[["members", "Участники"], ["bank", "Копилка"], ["events", "Ивенты"], ["league", "Лига"], ["museum", "Музей"]].map(([k, v]) =>
+      `<button data-tktab="${k}" class="${tab === k ? "active" : ""}">${v}</button>`).join("")}</div>
+    <div id="tk-panel"></div>
+    <h3>📣 Лента кооператива</h3>
+    <div id="club-feed"><p class="muted">Загружаем…</p></div>
+  </div>`;
+  clubFeed(tag, C);
+  if (!C.me.member) {
+    $("#club-join") && ($("#club-join").onclick = async () => {
+      try {
+        const r = await api("POST", `/api/clubs/${encodeURIComponent(tag)}/join`, { invite });
+        toast(r.state === "requested" ? "Заявка отправлена главе 🙌" : "Добро пожаловать в кооператив! 🎉");
+        setTimeout(() => location.reload(), 600);
+      } catch (e) { toast(e.message, true); }
+    });
+  } else {
+    $$("[data-tk]").forEach((b) => (b.onclick = async () => {
+      try {
+        const r = await api("POST", `/api/clubs/${encodeURIComponent(tag)}/tank/${b.dataset.tk}`, {});
+        toast(`+${r.xp} опыта Танку · ${r.message}`);
+        pageClub();
+      } catch (e) { toast(e.message, true); }
+    }));
+    $("#tk-help").onclick = async () => {
+      try { const r = await api("POST", `/api/clubs/${encodeURIComponent(tag)}/tank/help`, {}); toast(`Позвали всех: ${r.sent} участников 🆘`); }
+      catch (e) { toast(e.message, true); }
+    };
+    $("#club-leave").onclick = async () => {
+      if (!confirm("Выйти из кооператива? Вернуться можно будет через 24 часа.")) return;
+      try { await api("POST", `/api/clubs/${encodeURIComponent(tag)}/leave`, {}); toast("Ты вышел из клуба"); location.href = "/clubs"; }
+      catch (e) { toast(e.message, true); }
+    };
+  }
+  $$("[data-tktab]").forEach((b) => (b.onclick = () => {
+    const url = new URL(location.href); url.searchParams.set("tab", b.dataset.tktab); history.replaceState(null, "", url);
+    $$("[data-tktab]").forEach((x) => x.classList.toggle("active", x === b));
+    clubTab(b.dataset.tktab, tag, C);
+  }));
+  clubTab(tab, tag, C);
+}
+
+const ROLE_RU = { leader: "глава (SEO)", deputy: "зам", member: "грибник" };
+
+const CLUB_REACTS = ["👍", "🔥", "🍄", "😂", "🧪"];
+
+async function clubFeed(tag, C) {
+  const box = $("#club-feed");
+  if (!box) return;
+  try {
+    const f = await api("GET", `/api/clubs/${encodeURIComponent(tag)}/feed`);
+    box.innerHTML = `${C.me.member ? `<div class="kb-row"><input class="input" id="cf-text" maxlength="280"
+        placeholder="Написать в ленту клуба (до 280 символов)"><button class="btn btn-accent" id="cf-send">Отправить</button></div>` : ""}
+      <div class="tk-feed">${f.items.map((p) => `<div class="tk-post${p.kind === "auto" ? " auto" : ""}">
+        <div class="tk-post-head"><span class="e">${esc(p.emoji || (p.kind === "auto" ? "📣" : "🗣"))}</span>
+          <b>${p.username ? `@${esc(p.username)}` : "кооператив"}</b><small class="muted">${esc(fmtDate(p.at))}</small>
+          ${p.user_id && ME && p.user_id !== ME.user.id ? `<button class="btn btn-sm btn-ghost" data-post-rep="${p.id}" title="Пожаловаться админу">🚩</button>` : ""}
+          ${p.can_delete ? `<button class="btn btn-sm btn-ghost" data-post-del="${p.id}">удалить</button>` : ""}</div>
+        <p>${esc(p.body)}</p>
+        <div class="tk-reacts">${CLUB_REACTS.map((e) => `<button class="btn btn-sm${(p.reactions || {})[e] ? " btn-accent" : ""}"
+          data-post-react="${p.id}" data-emoji="${e}">${e}${(p.reactions || {})[e] ? ` ${p.reactions[e]}` : ""}</button>`).join("")}</div>
+      </div>`).join("") || `<p class="muted">Пока тихо. Первое событие появится, как только кто-то что-то сделает.</p>`}</div>`;
+    $("#cf-send") && ($("#cf-send").onclick = async () => {
+      try {
+        await api("POST", `/api/clubs/${encodeURIComponent(tag)}/feed`, { body: $("#cf-text").value });
+        toast("Записал в ленту 📣");
+        clubFeed(tag, C);
+      } catch (e) { toast(e.message, true); }
+    });
+    $$("[data-post-react]").forEach((b) => (b.onclick = async () => {
+      try { await api("POST", `/api/clubs/${encodeURIComponent(tag)}/feed/${b.dataset.postReact}/react`, { emoji: b.dataset.emoji }); clubFeed(tag, C); }
+      catch (e) { toast(e.message, true); }
+    }));
+    $$("[data-post-del]").forEach((b) => (b.onclick = async () => {
+      if (!confirm("Удалить запись из ленты?")) return;
+      try { await api("DELETE", `/api/clubs/${encodeURIComponent(tag)}/feed/${b.dataset.postDel}`); clubFeed(tag, C); }
+      catch (e) { toast(e.message, true); }
+    }));
+    $$("[data-post-rep]").forEach((b) => (b.onclick = async () => {
+      const reason = prompt("Что не так с записью? (увидит админ)") || "";
+      if (!reason) return;
+      try { await api("POST", `/api/clubs/${encodeURIComponent(tag)}/feed/${b.dataset.postRep}/report`, { reason }); toast("Жалоба ушла админу 🚩"); }
+      catch (e) { toast(e.message, true); }
+    }));
+  } catch (e) {
+    box.innerHTML = `<p class="muted">${esc(e.message)}</p>`;
+  }
+}
+
+async function clubTab(tab, tag, C) {
+  const p = $("#tk-panel");
+  p.innerHTML = `<p class="muted">Загружаем…</p>`;
+  const canManage = ["leader", "deputy"].includes(C.me.role);
+  try {
+    if (tab === "members") {
+      const [board, reqs] = await Promise.all([
+        api("GET", `/api/clubs/${encodeURIComponent(tag)}`),
+        canManage ? api("GET", `/api/clubs/${encodeURIComponent(tag)}/requests`).catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
+      ]);
+      p.innerHTML = `<h3>Доска почёта недели</h3>
+        <table class="list"><tr><th>#</th><th>Участник</th><th>Роль</th><th>За неделю</th><th>Всего</th></tr>
+        ${(board.board || []).map((r, i) => `<tr><td>${i + 1}</td><td>@${esc(r.username)}</td><td>${esc(ROLE_RU[r.role] || r.role)}</td><td>${r.week}</td><td>${r.total}</td></tr>`).join("")}</table>
+        ${canManage ? `<h3>Заявки</h3>${reqs.items.length ? reqs.items.map((r) => `<div class="tk-req">@${esc(r.username)}
+          <small class="muted">${esc(r.message || "")}</small>
+          <button class="btn btn-sm btn-good" data-approve="${r.id}">Принять</button>
+          <button class="btn btn-sm" data-reject="${r.id}">Отклонить</button></div>`).join("") : `<p class="muted">Заявок нет.</p>`}` : ""}
+        ${canManage ? `<h3>Приглашение</h3><button class="btn btn-sm" id="club-invite">Создать ссылку</button>
+          <div id="club-invite-out" class="muted small"></div>` : ""}`;
+      $$("[data-approve]").forEach((b) => (b.onclick = () => clubDecide(tag, b.dataset.approve, true)));
+      $$("[data-reject]").forEach((b) => (b.onclick = () => clubDecide(tag, b.dataset.reject, false)));
+      $("#club-invite") && ($("#club-invite").onclick = async () => {
+        const r = await api("POST", `/api/clubs/${encodeURIComponent(tag)}/invites`, { max_uses: 5, hours: 72 });
+        $("#club-invite-out").textContent = `${location.origin}${r.url}`;
+      });
+    } else if (tab === "bank") {
+      const b = await api("GET", `/api/clubs/${encodeURIComponent(tag)}/bank`);
+      p.innerHTML = `<div class="tk-bank-head">💰 Копилка: <b>${b.account} $₽</b>
+        <span class="muted">вывести себе нельзя — только траты клуба</span></div>
+        <div class="kb-row"><input class="input" id="tk-dep" type="number" min="${b.min_deposit}" value="${b.min_deposit}">
+          <button class="btn btn-accent" id="tk-dep-btn">Внести взнос</button></div>
+        <h3>Апгрейды</h3><div class="tk-up">${b.upgrades.map((u) => `<button class="btn btn-sm" data-up="${u.kind}"${u.available ? "" : " disabled"}>${esc(u.title)} · ${u.price} $₽</button>`).join("")}</div>
+        <h3>Движение копилки</h3><table class="list"><tr><th>Когда</th><th>Кто</th><th>Сумма</th><th>Повод</th><th>Остаток</th></tr>
+        ${b.items.map((i) => `<tr><td>${esc(fmtDate(i.at))}</td><td>${i.user ? "@" + esc(i.user) : "—"}</td>
+          <td>${i.delta > 0 ? "+" : ""}${i.delta}</td><td>${esc(i.reason_title)}</td><td>${i.balance_after}</td></tr>`).join("")}</table>`;
+      $("#tk-dep-btn").onclick = async () => {
+        try { const r = await api("POST", `/api/clubs/${encodeURIComponent(tag)}/bank`, { amount: +$("#tk-dep").value });
+          toast(`Копилка: ${r.account} $₽`); clubTab("bank", tag, C); } catch (e) { toast(e.message, true); }
+      };
+      $$("[data-up]").forEach((btn) => (btn.onclick = async () => {
+        try { const r = await api("POST", `/api/clubs/${encodeURIComponent(tag)}/upgrades`, { kind: btn.dataset.up });
+          toast(`Апгрейд готов: ${JSON.stringify(r)}`); clubTab("bank", tag, C); } catch (e) { toast(e.message, true); }
+      }));
+    } else if (tab === "events") {
+      const e = await api("GET", `/api/clubs/${encodeURIComponent(tag)}/events`);
+      p.innerHTML = `<h3>🦠 Рейд «Великая плесень»</h3>
+        ${e.raid ? `<div class="tk-raid"><div class="tk-hp-bar"><span style="width:${Math.round(100 * e.raid.hp / Math.max(1, e.raid.hp_max))}%"></span></div>
+          <p>Босс: ${e.raid.hp}/${e.raid.hp_max} · ${e.raid.state === "running" ? `до ${esc(fmtDate(e.raid.ends_at))}` : e.raid.state === "won" ? "побеждён 🏆" : "поражение 💀"}</p></div>`
+        : `<p class="muted">Рейд идёт раз в месяц. Урон боссу наносят уход за личными грибами и мини-игры.</p>`}
+        ${canManage ? `<button class="btn btn-sm" id="tk-raid">Запустить рейд</button>` : ""}
+        <h3>🌍 Мировые ивенты</h3>
+        <p>${e.world.active.length ? e.world.active.map((c) => `<span class="badge">${esc(WORLD_RU[c] || c)}</span>`).join(" ") : `<span class="muted">Сейчас всё спокойно.</span>`}</p>
+        <h3>⚔️ Бизнес-война</h3>
+        ${e.war ? `<p>Против [${esc(e.war.enemy?.tag || "?")}] · ${e.war.state === "picking" ? "состав выбирает глава" : `итог ${e.war.score_ours}:${e.war.score_theirs}`}</p>`
+        : `<p class="muted">На этой неделе войны нет.</p>`}
+        ${C.me.role === "leader" && e.war?.state === "picking" ? `<div class="kb-row"><input class="input" id="tk-team" placeholder="id грибов через запятую (до 5)">
+          <label><input type="checkbox" id="tk-tank" checked> Танк</label></div>
+          <button class="btn btn-sm" id="tk-team-save">Выбрать состав</button>` : ""}`;
+      $("#tk-raid") && ($("#tk-raid").onclick = async () => {
+        try { const r = await api("POST", `/api/clubs/${encodeURIComponent(tag)}/events/raid/start`, {}); toast(`Рейд начался! HP ${r.hp}`); clubTab("events", tag, C); }
+        catch (e) { toast(e.message, true); }
+      });
+      $("#tk-team-save") && ($("#tk-team-save").onclick = async () => {
+        try { await api("POST", `/api/clubs/${encodeURIComponent(tag)}/war/team`, {
+          mushroom_ids: $("#tk-team").value.split(",").map((x) => +x.trim()).filter(Boolean), include_tank: $("#tk-tank").checked });
+          toast("Состав выбран ⚔️"); } catch (e) { toast(e.message, true); }
+      });
+    } else if (tab === "league") {
+      const l = await api("GET", `/api/clubs/${encodeURIComponent(tag)}/league`);
+      const beauty = await api("GET", `/api/clubs/${encodeURIComponent(tag)}/beauty`);
+      p.innerHTML = `<h3>🏆 ${esc(l.league_title)} · неделя ${esc(l.week)}</h3>
+        <p class="muted">Наше место: ${l.rank ?? "—"} из ${l.size} · очков недели: ${l.score}${l.outcome ? ` · итог: ${{ up: "повышение ⬆️", down: "понижение ⬇️", stayed: "остались" }[l.outcome]}` : ""}</p>
+        <table class="list"><tr><th>#</th><th>Клуб</th><th>Очки</th></tr>${l.top.map((r, i) =>
+          `<tr class="${r.me ? "tk-me" : ""}"><td>${i + 1}</td><td>${esc(r.emblem)} ${esc(r.name)} [${esc(r.tag)}]</td><td>${r.score}</td></tr>`).join("")}</table>
+        <h3>👑 Конкурс красоты</h3>
+        <div class="tk-cards">${beauty.items.map((b) => `<div class="tk-card"><span>${esc(b.emblem)}</span>
+          <b>${esc(b.name)}</b><small class="muted">[${esc(b.tag)}] · ${b.votes} голосов</small>
+          ${C.me.member && b.club_id !== C.id ? `<button class="btn btn-sm" data-vote="${b.club_id}">Голосовать</button>` : ""}</div>`).join("") || `<p class="muted">Голосов пока нет.</p>`}</div>`;
+      $$("[data-vote]").forEach((btn) => (btn.onclick = async () => {
+        try { await api("POST", `/api/clubs/${encodeURIComponent(tag)}/beauty`, { club_id: +btn.dataset.vote }); toast("Голос учтён 👑"); clubTab("league", tag, C); }
+        catch (e) { toast(e.message, true); }
+      }));
+    } else {
+      p.innerHTML = `<h3>🏛 Музей кооперативов</h3>
+        <p class="muted">Шрамы и история Танка остаются здесь навсегда: клуб без активности 30 дней расформировывается.</p>
+        <div class="tk-notes">${(C.tank.scars || []).map((s) => `<span class="muted">🩹 ${esc(s.note || s.code)}</span>`).join("") || `<span class="muted">Шрамов нет — Танк ещё цел.</span>`}</div>
+        <h3>Мутации Танка (${(C.tank.mutations || []).length}/6)</h3>
+        <div class="tk-muts">${(C.tank.mutations || []).map((m) => `<div class="tk-mut-card">
+          <b>${esc(m.emoji)} «${esc(m.title)}»</b><small class="muted">стадия ${m.stage} · урон +${m.dmg}</small>
+          <p class="small">${esc(m.desc)}</p><p class="muted small">Плата: ${esc(m.upkeep || "—")}</p></div>`).join("") || `<p class="muted">Мутации добывают в лаборатории: сдайте грибы с мутациями одной стадии.</p>`}</div>
+        ${C.me.member ? `<h3>🧪 Лаборатория</h3>
+          <p class="muted">Слейте комбучу своего гриба (обнулится худший показатель) — через 12 часов получите препарат на весь клуб на 24 часа.</p>
+          <div class="kb-row"><select class="input" id="lab-kind"><option value="xp_bonus">+10% опыта</option><option value="mut_chance">+1% шанса мутации</option><option value="decay_slow">+5% замедления падения</option></select>
+            <input class="input" id="lab-kid" type="number" placeholder="id гриба"><button class="btn btn-sm" id="lab-run">Слить комбучу</button></div>
+          <div class="kb-row"><input class="input" id="lab-mush" placeholder="три id грибов через запятую"><input class="input" id="lab-stage" type="number" min="1" max="6" placeholder="стадия">
+            <button class="btn btn-sm" id="lab-craft">Собрать мутацию Танка</button></div>` : ""}`;
+      $("#lab-run") && ($("#lab-run").onclick = async () => {
+        try { const r = await api("POST", `/api/clubs/${encodeURIComponent(tag)}/lab/drain`, { kombucha_id: +$("#lab-kid").value, kind: $("#lab-kind").value });
+          toast(`Комбуча настаивается (${esc(r.stat)}). Препарат будет готов через 12 ч.`); } catch (e) { toast(e.message, true); }
+      });
+      $("#lab-craft") && ($("#lab-craft").onclick = async () => {
+        try {
+          const r = await api("POST", `/api/clubs/${encodeURIComponent(tag)}/lab/craft`, {
+            mushroom_ids: $("#lab-mush").value.split(",").map((x) => +x.trim()).filter(Boolean),
+            stage: +$("#lab-stage").value || null });
+          toast("Лаборатория собрала мутацию Танка 🧬"); clubTab("museum", tag, C);
+        } catch (e) { toast(e.message, true); }
+      });
+    }
+  } catch (e) { p.innerHTML = `<p class="muted">Не удалось загрузить: ${esc(e.message)}</p>`; }
+}
+
+async function clubDecide(tag, id, approve) {
+  try { await api("POST", `/api/clubs/${encodeURIComponent(tag)}/requests/${id}`, { approve }); toast(approve ? "Принят ✅" : "Отклонён"); pageClub(); }
+  catch (e) { toast(e.message, true); }
+}
+
+const WORLD_RU = { flies: "Нашествие мушек", sugar_crisis: "Сахарный кризис", tea_night: "Чайная ночь", halloween: "Хэллоуин" };
+
+// Блок «Мой клуб» на странице гриба: Танк, перк, быстрый переход.
+let CLUB_CACHE = null;
+async function fetchMineClub(force = false) {
+  if (!ME) return null;
+  if (CLUB_CACHE && !force) return CLUB_CACHE;
+  try { CLUB_CACHE = await api("GET", "/api/clubs/mine"); } catch (_) { CLUB_CACHE = null; }
+  return CLUB_CACHE;
+}
+
+async function renderClubBlock(k) {
+  const box = $("#kb-club");
+  if (!box) return;
+  const mine = await fetchMineClub();
+  if (!mine || !mine.club) {
+    box.innerHTML = `<a class="kb-club-empty" href="/clubs">🤝 Кооперативы: общий Гриб-Танк, рейды и перки к личному грибу →</a>`;
+    return;
+  }
+  const c = mine.club, t = mine.tank || {};
+  const perks = mine.perks || {};
+  box.innerHTML = `<div class="kb-club-card" style="--tk-a:${esc(c.color)};--tk-b:${esc(c.color2)}">
+    <a class="club-badge" href="/c/${encodeURIComponent(c.tag)}"><b>[${esc(c.tag)}]</b> <span>${esc(c.emblem)}</span></a>
+    <div><b>${esc(c.name)}</b> <small class="muted">${esc(TANK_MOODS[t.mood] || "")} ${esc(t.stage_title || "")} · ❤️ ${t.hp ?? "—"}${t.mold ? " · 🦠 плесень!" : ""}</small></div>
+    <div class="muted small">Перк: +${Math.round((perks.xp_bonus || 0) * 100)}% опыта · +${((perks.mut_chance || 0) * 100).toFixed(1)}% шанса мутации · −${Math.round((perks.decay_slow || 0) * 100)}% падения показателей</div>
+    <a class="btn btn-sm" href="/c/${encodeURIComponent(c.tag)}">К Танку</a></div>`;
+}
+
+// Тег клуба рядом с ником в шапке («[ЧАЙ] у ника везде»).
+async function paintClubTag() {
+  const name = $("#me-name");
+  if (!name || name.dataset.clubTag) return;
+  const mine = await fetchMineClub();
+  if (mine?.club) { name.textContent = `[${mine.club.tag}] ${ME.user.username}`; name.dataset.clubTag = "1"; }
 }
 
 function kombuchaSVG(k, { small = false } = {}) {
@@ -1903,6 +2397,8 @@ function kombuchaSVG(k, { small = false } = {}) {
 let kbTiltScene = null;
 let kbTiltRoll = 0;
 let kbTiltListening = false;
+let kbTiltHandler = null;
+let kbTiltAutoTried = false;
 function clampN(value, min, max) { return Math.min(max, Math.max(min, value)); }
 
 function hasCoarsePointer() {
@@ -1912,6 +2408,51 @@ function hasCoarsePointer() {
 
 function canOfferDeviceTilt() {
   return !REDUCED_MOTION && hasCoarsePointer() && "DeviceOrientationEvent" in window;
+}
+
+function paintTiltButton(button) {
+  if (!button) return;
+  button.textContent = kbTiltListening ? "📱" : "↕️";
+  button.title = kbTiltListening ? "Наклон телефона включён" : "Наклони телефон или проведи пальцем по банке";
+  button.setAttribute("aria-label", kbTiltListening ? "Наклон телефона включён" : "Включить наклон телефона");
+  button.setAttribute("aria-pressed", kbTiltListening ? "true" : "false");
+}
+
+function startDeviceTilt() {
+  if (kbTiltListening) return;
+  if (!kbTiltHandler) {
+    kbTiltHandler = (event) => {
+      if (!Number.isFinite(event.gamma)) return;
+      kbTiltRoll = clampN(event.gamma, -18, 18);
+      applyKbTilt();
+    };
+  }
+  window.addEventListener("deviceorientation", kbTiltHandler, { passive: true });
+  kbTiltListening = true;
+}
+
+function stopDeviceTilt() {
+  if (kbTiltHandler) window.removeEventListener("deviceorientation", kbTiltHandler);
+  kbTiltListening = false;
+  kbTiltRoll = 0;
+}
+
+// На телефоне наклон включается сам. iOS без жеста пользователя разрешение не отдаёт,
+// поэтому там остаётся кнопка; если датчик молчит — тоже возвращаем кнопку.
+function autoEnableDeviceTilt(button) {
+  const DOE = window.DeviceOrientationEvent;
+  if (typeof DOE?.requestPermission === "function") return;
+  let gotEvent = false;
+  const probe = () => { gotEvent = true; };
+  window.addEventListener("deviceorientation", probe, { passive: true });
+  startDeviceTilt();
+  paintTiltButton(button);
+  setTimeout(() => {
+    window.removeEventListener("deviceorientation", probe);
+    if (gotEvent || !kbTiltListening) return;
+    stopDeviceTilt();
+    paintTiltButton(button);
+  }, 1200);
 }
 
 function applyKbTilt() {
@@ -1971,10 +2512,7 @@ function initTiltScene(scene) {
   }
   const button = $("[data-tilt]", scene);
   if (button) {
-    button.textContent = kbTiltListening ? "📱" : "↕️";
-    button.title = kbTiltListening ? "Наклон телефона включён" : "Наклони телефон или проведи пальцем по банке";
-    button.setAttribute("aria-label", kbTiltListening ? "Наклон телефона включён" : "Включить наклон телефона");
-    button.setAttribute("aria-pressed", kbTiltListening ? "true" : "false");
+    paintTiltButton(button);
     button.onclick = async () => {
       try {
         const DOE = window.DeviceOrientationEvent;
@@ -1982,20 +2520,8 @@ function initTiltScene(scene) {
           const permission = await DOE.requestPermission();
           if (permission !== "granted") throw new Error("Разрешение не выдано");
         }
-        if (!kbTiltListening) {
-          const orientationHandler = (event) => {
-            if (Number.isFinite(event.gamma)) {
-              kbTiltRoll = clampN(event.gamma, -18, 18);
-              applyKbTilt();
-            }
-          };
-          window.addEventListener("deviceorientation", orientationHandler, { passive: true });
-          kbTiltListening = true;
-        }
-        button.textContent = "📱";
-        button.title = "Наклон телефона включён";
-        button.setAttribute("aria-label", "Наклон телефона включён");
-        button.setAttribute("aria-pressed", "true");
+        startDeviceTilt();
+        paintTiltButton(button);
       } catch (_) {
         button.textContent = "👆";
         button.title = "Проведи пальцем по банке, чтобы наклонить жидкость";
@@ -2003,8 +2529,47 @@ function initTiltScene(scene) {
         button.setAttribute("aria-pressed", "false");
       }
     };
+    if (canOfferDeviceTilt() && !kbTiltListening && !kbTiltAutoTried) {
+      kbTiltAutoTried = true;
+      autoEnableDeviceTilt(button);
+    }
   }
   applyKbTilt();
+}
+
+// «Идеальный коридор»: пока все показатели в своих зонах — опыт ×1, иначе ×0.5.
+const CORRIDOR_LABELS = {
+  sweet: ["мало сахара", "пересластил"],
+  tea: ["мало заварки", "перезаварил"],
+  clean: ["банка грязная", "слишком стерильно"],
+  happy: ["грустит", "слишком счастлив"],
+};
+
+// Что именно вне коридора и в какую сторону — по ranges/off с сервера.
+function corridorProblems(corridor, stats) {
+  const out = [];
+  const ranges = corridor?.ranges || {};
+  (corridor?.off || []).forEach((key) => {
+    const [low, high] = ranges[key] || [0, 100];
+    const value = stats?.[key];
+    const labels = CORRIDOR_LABELS[key] || [key, key];
+    out.push(value == null ? key : value < low ? labels[0] : value > high ? labels[1] : key);
+  });
+  return out;
+}
+
+function corridorMarkup(corridor, stats) {
+  if (!corridor) return "";
+  if (corridor.ok) {
+    return `<div class="kb-corridor ok">✅ Идеальный коридор — опыт ×1</div>`;
+  }
+  return `<div class="kb-corridor off">⚠️ ${esc(corridorProblems(corridor, stats).join(" / "))} — опыт ×0.5</div>`;
+}
+
+// «+8 опыта» или «+4 опыта (×0.5 — вне коридора)» — один вид текста везде.
+function xpLabel(xp, mult) {
+  if (!xp) return "";
+  return mult != null && mult < 1 ? `+${xp} опыта (×${mult} — вне коридора)` : `+${xp} опыта`;
 }
 
 function fmtLeft(sec) {
@@ -2087,7 +2652,7 @@ async function pageKombucha() {
       <div class="kb-scene">
         <button class="kb-fs-btn" data-fs title="Смотреть гриб во весь экран">⛶</button>
         ${canOfferDeviceTilt() ? `<button class="kb-tilt-btn" data-tilt title="Наклони телефон или проведи пальцем по банке" aria-label="Включить наклон телефона" aria-pressed="false">📱</button>` : ""}
-        ${HALLOWEEN_ACTIVE ? `<button class="kb-music-btn" data-spooky-music aria-pressed="${spookyMusicEnabled ? "true" : "false"}">${spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку"}</button>
+        ${HALLOWEEN_ACTIVE ? `
           ${isHalloweenAdmin() ? `<button class="kb-scare-btn" data-screamer-test title="Проверить скример" aria-label="Проверить скример">👻</button>` : ""}
           <div class="kb-bat-swarm" aria-hidden="true"><span class="kb-bat bat-a">🦇</span><span class="kb-bat bat-b">🦇</span><span class="kb-bat bat-c">🦇</span></div>` : ""}
         <div class="kb-say" id="kb-say">${esc(halloweenGone ? "В банке только комбуча. Я ненадолго исчез." : k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
@@ -2104,7 +2669,12 @@ async function pageKombucha() {
           <div class="kb-mut-slots muted">На каждой стадии — до ${k.mut_per_stage || 3} мутаций этой стадии · ${[1, 2, 3, 4, 5, 6].filter((st) => st <= k.stage.size || k.mut_slots?.[st]).map((st) => { const n = k.mut_slots?.[st] || 0, mx = k.mut_per_stage || 3; return `<span class="${n >= mx ? "full" : ""}">ст.${st}: ${n}/${mx}</span>`; }).join(" · ")}</div></details>` : ""}
         ${k.dies_in != null && k.alive ? `<div class="kb-danger">⚠️ Гриб на грани! Закиснет через ${fmtLeft(k.dies_in)}, если не поднять показатель с нуля.</div>` : ""}
         <div class="kb-stats">${STAT.map(([key, label]) => { const v = k.stats[key];
-          return `<div class="kb-stat"><span>${label}</span><div class="kb-bar ${v < 25 ? "low" : v > 90 && key === "sweet" ? "over" : ""}"><span style="width:${v}%"></span></div><b>${v}</b></div>`; }).join("")}</div>
+          const [lo, hi] = (k.corridor?.ranges?.[key] || [0, 100]).map(Number);
+          const off = (k.corridor?.off || []).includes(key);
+          return `<div class="kb-stat"><span>${label}</span><div class="kb-bar${off ? " off" : v < 25 ? " low" : ""}"><i class="kb-zone" style="left:${lo}%;width:${Math.max(0, hi - lo)}%"></i><span style="width:${v}%"></span></div><b>${v}</b></div>`; }).join("")}</div>
+        ${k.alive && !k.mold ? corridorMarkup(k.corridor, k.stats) : ""}   /* у закисшего/плесневелого опыт всё равно 0 */
+        <div id="kb-club" class="kb-club"></div>
+        ${k.club_bonus > 0 ? `<div class="kb-corridor ok">🤝 Перк кооператива: +${Math.round(k.club_bonus * 100)}% опыта за уход</div>` : ""}
         ${k.frozen ? `<div class="kb-note kb-frozen-note">🧊 Гриб заморожен${k.frozen_at ? ` с ${esc(fmtDate(k.frozen_at))}` : ""}: показатели не падают, банку не занимает, стоит на полке в твоём профиле.
             Продать или обменять можно только замороженный гриб.</div>
           <div class="kb-dead-actions">
@@ -2113,7 +2683,7 @@ async function pageKombucha() {
             <button class="btn btn-ghost" data-trade>🔄 Обменять / подарить</button></div>`
         : k.alive ? `${k.mold ? `<div class="kb-danger kb-mold">🦠 Плесень! Гриб не растёт и не мутирует, чистота и настроение тают быстрее.
             <button class="btn btn-accent btn-sm" data-act="cure"${k.cooldowns.cure ? " disabled" : ""}>🧪 Уксусная ванна${k.cooldowns.cure ? ` · через ${fmtLeft(k.cooldowns.cure)}` : ""}</button></div>` : ""}
-          <div class="kb-next muted">⏬ Показатели упадут через ${fmtLeft(k.next_drop_in)} (раз в 12 часов)${!k.mold && k.stats.clean < 35 ? " · ⚠️ банка грязная — может завестись плесень" : ""}</div>
+          ${!k.mold && k.stats.clean < 35 ? `<div class="kb-next muted">⚠️ банка грязная — может завестись плесень</div>` : ""}
           <div class="kb-actions">${BTN.map(([a, e, t]) => { const cd = k.cooldowns[a];
             return `<button class="btn kb-act" data-act="${a}"${cd ? " disabled" : ""}><span class="e">${e}</span><span>${t}</span>${cd ? `<small>через ${fmtLeft(cd)}</small>` : ""}</button>`; }).join("")}</div>
           <button class="btn kb-talk" data-act="talk"${k.cooldowns.talk ? " disabled" : ""}>💭 Поговорить с грибом${k.cooldowns.talk ? ` · через ${fmtLeft(k.cooldowns.talk)}` : " — о философии"}</button>
@@ -2222,6 +2792,7 @@ async function pageKombucha() {
       if (r.halloween_mutation) toast(`👁️ Постоянная хэллоуинская мутация: ${r.halloween_mutation.emoji} «${r.halloween_mutation.title}»`);
     };
     if (btn("[data-games]")) btn("[data-games]").onclick = () => kbGamesMenu(cur(), afterGame);
+    renderClubBlock(k);
     const fsOpen = $(".kb-fs-art");
     if (fsOpen && cur()) fsOpen.innerHTML = kombuchaSVG({ ...cur(), id: "fs" + cur().id });     // полноэкранный вид обновляется вместе с данными
     if (btn("[data-rename]")) btn("[data-rename]").onclick = async () => {
@@ -2277,6 +2848,7 @@ async function pageKombucha() {
     if (kk.mood === "sticky") say(action === "sugar" ? r.message : kk.phrase);
     else if (action === "pet" || action === "talk") say(r.message);   // гриб говорит сам, от первого лица
     else { say(kk.phrase); if (r.message && action !== "talk") toast(r.message); }
+    if (r.xp_gain > 0) toast(xpLabel(r.xp_gain, r.xp_mult));
     if (r.quote && kk.mood !== "sticky") { const b = $("#kb-say"); if (b) b.title = r.quote.lines.map((l) => l.who).join(", ") + (r.quote.book ? ` — ${r.quote.book}` : ""); }
     if (r.mutation) toast(`🧬 ${r.mutation.rarity_title} мутация: ${r.mutation.emoji} «${r.mutation.title}» #${r.mutation.serial}!${r.mutation.first_time ? " +15 $₽ за новую находку" : ""}`);
     if (r.halloween_mutation) toast(`👁️ Постоянная хэллоуинская мутация: ${r.halloween_mutation.emoji} «${r.halloween_mutation.title}»`);
@@ -2499,11 +3071,15 @@ async function pageEvents() {
   try { raidArchiveData = await api("GET", "/api/events/halloween/archive", undefined, { quiet: true }); } catch (_) {}
   const renderInactive = () => {
     const upcoming = event.enabled && new Date(event.start_at).getTime() > Date.now();
+    const summaryClosed = !!event.raid_summary?.closed;
     status.textContent = upcoming
       ? `Хэллоуин запланирован: ${fmtDate(event.start_at)} — ${fmtDate(event.end_at)}.`
-      : event.raid_summary ? "Последний хэллоуинский рейд завершился — вот его итоги." : "Сейчас нет активных событий.";
+      : event.raid_summary
+        ? (summaryClosed ? "Последний хэллоуинский рейд завершился — вот его итоги." : "Рейд завершился, итоги ещё не закрыты администратором.")
+        : "Сейчас нет активных событий.";
     const inactiveMessage = event.raid_summary
-      ? "Событие завершилось. Вклад каждого участника вошёл в общий итог."
+      ? (summaryClosed ? "Событие завершилось. Вклад каждого участника вошёл в общий итог."
+        : "Черновые итоги: администратор ещё не закрыл событие, медали и архив не выданы.")
       : upcoming ? "Рейд начнётся в указанное время. Следи за банками!"
         : "Загляни во время активного ивента — тогда здесь появится общий босс.";
     const gifts = (event.raid_gifts || []).filter((gift) => gift?.reward_type === "badge").slice().reverse().map((gift) =>
@@ -2511,12 +3087,13 @@ async function pageEvents() {
     const summary = event.raid_summary;
     const resultDates = summary?.start_at && summary?.end_at
       ? `<p class="muted">${fmtDate(summary.start_at)} — ${fmtDate(summary.end_at)}</p>` : "";
-    const results = summary ? `<section class="raid-results"><p class="eyebrow">ИТОГИ ПОСЛЕДНЕГО СОБЫТИЯ</p>
+    const results = summary ? `<section class="raid-results"><p class="eyebrow">${summary.closed ? "ИТОГИ ПОСЛЕДНЕГО СОБЫТИЯ" : "ПРЕДВАРИТЕЛЬНЫЕ ИТОГИ"}</p>
       <h2>${esc(summary.boss || "Общий хэллоуинский рейд")}</h2>${resultDates}
       <div class="raid-result-stats"><div><b>${Number(summary.total_damage || 0).toLocaleString("ru-RU")}</b><small>общий урон</small></div>
         <div><b>${summary.participants || 0}</b><small>участников</small></div>
         <div><b>${summary.completed_stages || 0}/${summary.stage_count || 0}</b><small>стадий пройдено</small></div></div>
       <p class="raid-result-outcome">${summary.boss_defeated ? "🎃 Общими усилиями босса одолели!" : "🌘 Босс продержался до конца события."}</p>
+      ${summary.closed ? "" : `<p class="muted">Это предварительные итоги: администратор закроет событие, и тогда медали попадут в архив.</p>`}
       ${raidLeaderboardMarkup(summary.leaderboard, summary.participants, null, 0, "🏆 Рейтинг участников")}</section>` : "";
     panel.innerHTML = `<h2>🌘 Сейчас тихо</h2><p class="muted">${inactiveMessage}</p>
       ${results}
@@ -2638,7 +3215,7 @@ async function pageEvents() {
         ${!ME ? `<a class="btn btn-ghost btn-sm" href="/login?next=/events">🔐 Войти и бить босса вместе</a>` : ""}
         ${stageGifts ? `<section class="raid-rewards"><h3>🏅 Бейджи этой стадии</h3><ul>${stageGifts}</ul></section>` : ""}
         ${ME && receivedGifts ? `<section class="raid-rewards raid-gift-box"><h3>🏅 Твои бейджи за все рейды</h3><ul>${receivedGifts}</ul></section>` : ""}
-          <div class="haunt-controls">${isHalloweenAdmin() ? `<button class="btn btn-ghost scare-test" data-screamer-test>👻 Проверить скример</button>` : ""}<button class="btn btn-ghost" data-spooky-music aria-pressed="${spookyMusicEnabled ? "true" : "false"}">${spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку"}</button></div>
+          ${isHalloweenAdmin() ? `<div class="haunt-controls"><button class="btn btn-ghost scare-test" data-screamer-test>👻 Проверить скример</button></div>` : ""}
         <p class="muted">«Сладость или гадость» раз в день доступна на живых грибах друзей — открой профиль и постучи по банке.</p></div>
     </div>${raidArchiveMarkup(raidArchiveData)}`;
     $("#halloween-boss", panel).onclick = tap;
@@ -2779,7 +3356,7 @@ async function pageHome() {
 const PAGES = {
   home: pageHome, diary: pageDiary, kombucha: pageKombucha, events: pageEvents, market: pageMarket, wallet: pageWallet,
   profile: pageProfile, login: pageAuth, register: pageAuth, banned: pageBanned, notifications: pageNotifications, admin: pageAdmin,
-  settings: pageSettings, faq: pageFaq,
+  settings: pageSettings, faq: pageFaq, clubs: pageClubs, club: pageClub,
 };
 
 (async function boot() {

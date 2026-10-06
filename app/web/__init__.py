@@ -95,6 +95,16 @@ def kombucha_diary(kid: int):
     return page("diary.html", "diary", kombucha_id=kid)
 
 
+@bp.get("/clubs")
+def clubs_page():
+    return page("clubs.html", "clubs")
+
+
+@bp.get("/c/<tag>")
+def club_page(tag: str):
+    return page("club.html", "club", club_tag=tag)
+
+
 @bp.get("/market")
 def market():
     return page("market.html", "market")

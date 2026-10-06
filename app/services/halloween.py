@@ -37,8 +37,10 @@ DEFAULT_RAID_CONFIG = {
     "gifts": [],
 }
 DEFAULT_CONFIG = {
-    # Default season is visible during October 2026; admins can change the dates or disable it.
-    "enabled": True,
+    # По умолчанию событие выключено: админ включает его в /admin → «Ивенты»
+    # и сам закрывает итоги кнопкой (см. halloween_raid.close_season).
+    "enabled": False,
+    "results_closed": False,
     "start_at": "2026-10-01T00:00:00+00:00",
     "end_at": "2026-11-02T00:00:00+00:00",
     "raid": DEFAULT_RAID_CONFIG,
@@ -187,7 +189,7 @@ def _parse_dt(value: str | None) -> datetime | None:
 
 
 def decay_window(config: dict) -> tuple[datetime, datetime] | None:
-    if not config.get("enabled"):
+    if not config.get("enabled") or config.get("results_closed"):
         return None
     start, end = _parse_dt(config.get("start_at")), _parse_dt(config.get("end_at"))
     return (start, end) if start and end and end > start else None
@@ -195,6 +197,8 @@ def decay_window(config: dict) -> tuple[datetime, datetime] | None:
 
 def active(config: dict, at: datetime | None = None) -> bool:
     at = at or datetime.now(timezone.utc)
+    if config.get("results_closed"):
+        return False
     window = decay_window(config)
     return bool(window and window[0] <= at < window[1])
 
@@ -240,6 +244,7 @@ def public_state(config: dict, user: User | None = None, at: datetime | None = N
     return {
         "active": active(config, at),
         "enabled": bool(config.get("enabled")),
+        "results_closed": bool(config.get("results_closed")),
         "start_at": config.get("start_at"),
         "end_at": config.get("end_at"),
         "hats": hat_catalog(user),

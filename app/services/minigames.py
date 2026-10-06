@@ -14,7 +14,8 @@
             по тапам и знает, когда она закончилась.
 
 Общая защита: нельзя закончить быстрее, чем физически длится игра; одна сессия — одна награда;
-лимит действий; кулдаун 3 минуты на игру для гриба.
+лимит действий; награда за игру — раз в 30 минут (остальные партии — тренировка).
+Опыт умножается на множитель «идеального коридора» гриба (kb.xp_mult).
 
 Награда по точности 0..1: $₽ (общий лимит — 10 игр в день на все четыре игры, до 8 $₽ за игру),
 счастье, профильный показатель гриба (чистота/сахар/заварка), опыт и шанс мутации (с 75%).
@@ -36,7 +37,7 @@ from . import wood
 from .meditation import _roll_mutation, grade
 
 SESSION_TTL = 180
-COOLDOWN = 180
+COOLDOWN = 30 * 60   # награда за игру — раз в 30 минут; остальные партии — тренировка
 MUT_FROM_ACC = 0.75
 
 GAMES = {
@@ -347,29 +348,33 @@ async def reward(s, user, k, game: str, token: str, res: dict) -> dict:
     left = r.ttl(_cd_key(k.id, game))
     if left and left > 0:   # тренировка: результат считаем, награду — нет
         return {**res, "game": game, "grade": grade(acc), "practice": True, "reward_in": int(left),
-                "happy": 0, "stat": GAMES[game][2], "boost": 0, "xp": 0, "wood": 0, "mutation": None, "mut_why": "practice",
-                "cooldown": COOLDOWN}
+                "happy": 0, "stat": GAMES[game][2], "boost": 0, "xp": 0, "xp_mult": kb.xp_mult(k),
+                "wood": 0, "mutation": None, "mut_why": "practice", "cooldown": COOLDOWN}
     if res.get("suspect"):   # бот не сжигает окно награды
         acc = 0.0
     else:
         r.set(_cd_key(k.id, game), 1, ex=COOLDOWN)
         r.set(f"mg:played:{k.id}:{game}", 1, ex=30 * 24 * 60 * 60)
-    kb.tick(k)
+    from . import clubs as clubs_svc
+    club = await clubs_svc.club_bonus_for(s, user.id)
+    kb.tick(k, decay_slow=float(club.get("decay_slow", 0.0)))
     stat = GAMES[game][2]
     happy = round(20 * acc)
     boost = round(15 * acc)
     k.happy = min(100.0, k.happy + happy)
     if stat != "happy":
-        cap = 90.0 if stat == "sweet" else 100.0          # сахарную кому игрой не устроить
+        cap = kb.STICKY_FROM - 1 if stat == "sweet" else 100.0   # сахарную кому игрой не устроить
         setattr(k, stat, min(cap, max(getattr(k, stat), min(cap, getattr(k, stat) + boost))))
-    xp = 0 if k.mold else round(10 * acc)
+    # Показатели гриба уже обновлены выше: опыт считаем с множителем коридора и перком клуба.
+    xp = kb.scaled_xp(0 if k.mold else round(10 * acc), k)
+    xp = kb.apply_club_xp(xp, float(club.get("xp_bonus", 0.0)))
     old_xp = k.xp
     k.xp += xp
     k.best_xp = max(k.best_xp, k.xp)
     if all(getattr(k, st) > 0 for st in kb.STATS):
         k.zero_since = None
     earned = await wood.earn(s, user.id, "minigame", f"{game}:{token}", amount=round(8 * acc))
-    m = _roll_mutation(k, acc)
+    m = _roll_mutation(k, acc, float(club.get("mut_chance", 0.0)))
     mut = await kb.add_mutation(s, k, m, kb.now()) if m else None
     diary.stage_check(s, k, old_xp)
     if acc >= 0.95:
@@ -378,7 +383,7 @@ async def reward(s, user, k, game: str, token: str, res: dict) -> dict:
     why = ("got" if mut else "low" if acc < MUT_FROM_ACC
            else "limit" if kb.stage_mut_counts(k).get(size, 0) >= kb.MAX_MUT_PER_STAGE else "luck")
     return {**res, "game": game, "grade": grade(acc), "happy": happy, "stat": stat, "boost": boost if stat != "happy" else 0,
-            "xp": xp, "wood": earned, "mutation": mut, "mut_why": why, "cooldown": COOLDOWN}
+            "xp": xp, "xp_mult": kb.xp_mult(k), "wood": earned, "mutation": mut, "mut_why": why, "cooldown": COOLDOWN}
 
 
 def catalog() -> list[dict]:

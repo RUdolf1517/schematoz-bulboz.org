@@ -1,18 +1,20 @@
 """«Чайный гриб» — тамагочи в трёхлитровой банке. Режим «хардкор» (с 13-го захода):
-- показатели падают сильнее, закисает после 12 ч на нуле, опыта до стадий нужно в разы больше;
-- плесень: если банка грязная (чистота < 35), на каждой 12-часовой ступеньке может завестись плесень.
+- показатели падают сильнее, закисает после 48 ч на нуле, опыта до стадий нужно в разы больше;
+- плесень: если банка грязная (чистота < 35), на каждой 8-часовой ступеньке может завестись плесень.
   С плесенью гриб не растёт и не мутирует, а чистота и настроение падают быстрее. Лечится «уксусной ванной»;
-- если любой показатель ниже 30, опыт за уход режется вдвое;
+- если любой показатель ниже 15, опыт за уход режется вдвое;
 - отросток — раз в неделю на последней стадии (и после каждого деления снова нужно 7 дней ухода);
 - «Погладить» — гриб отвечает цитатой сомнительной личности, «Поговорить» — диалогом из философской книги.
 
 
 Правила (всё считает сервер, фронт только рисует):
 - 4 показателя 0..100: сахар, заварка, чистота, настроение. Падают ступенькой
-  РАЗ В 12 ЧАСОВ (DROP), отсчёт от рождения гриба — уход не сдвигает таймер.
-- Действия с кулдаунами дают показатель и опыт. Пересластил (сахар > 90) — гриб слипся.
+  РАЗ В 8 ЧАСОВ (DROP), отсчёт от рождения гриба — уход не сдвигает таймер.
+- Действия с кулдаунами дают показатель и опыт. Сахар от 90 — сахарная кома (гриб слипся).
+- «Идеальный коридор» (опыт ×1): сахар 55–70, заварка 65–85, чистота ≥ 80, настроение ≥ 70.
+  Хотя бы один показатель вне зоны — опыт ×0.5 (остальное не меняется).
 - «Бонус дня»: раз в 20 часов опыт за мини-игры и $₽ за уход за сутки.
-- Если любой показатель лежит на нуле 24 часа — гриб закисает. Можно перезавести
+- Если любой показатель лежит на нуле 48 часов — гриб закисает. Можно перезавести
   (поколение +1) или реанимировать за $₽.
 - Имя гриба уникально на весь сайт (без учёта регистра).
 - Несколько банок: первая бесплатно, дополнительные банки покупаются за «Деревянные»;
@@ -41,15 +43,20 @@ MSK = timezone(timedelta(hours=3))
 rng = random.Random()          # в тестах подменяется, чтобы мутации были детерминированы
 
 STATS = ("sweet", "tea", "clean", "happy")
-PERIOD = timedelta(hours=12)
-DROP = {"sweet": 20.0, "tea": 15.0, "clean": 10.0, "happy": 15.0}  # за каждые 12 часов
+PERIOD = timedelta(hours=8)          # ступенька убывания — раз в 8 часов
+DROP = {"sweet": 20.0, "tea": 15.0, "clean": 10.0, "happy": 15.0}  # за каждые 8 часов
 DEATH_AFTER = timedelta(hours=48)   # 2 суток на нуле — время вернуться с выходных
 MOLD_CLEAN_BELOW = 20.0      # ниже этой чистоты может завестись плесень
 MOLD_CHANCE = 0.10          # в грязной банке
 MOLD_CHANCE_CLEAN = 0.03    # и даже в чистой — споры летают везде           # шанс на каждой ступеньке
 MOLD_EXTRA = {"clean": 10.0, "happy": 15.0}
 LOW_STAT = 15.0              # если хоть что-то ниже — опыт за уход /2
-STICKY_ABOVE = 85.0
+STICKY_FROM = 90.0           # сахарная кома: сахар от 90 — перекорм, гриб слипается
+# «Идеальный коридор»: пока ВСЕ показатели в своих зонах, опыт идёт ×1, иначе ×0.5.
+# Только опыт: $₽, счастье и мутации от коридора не зависят.
+CORRIDOR = {"sweet": (55.0, 70.0), "tea": (65.0, 85.0), "clean": (80.0, 100.0), "happy": (70.0, 100.0)}
+XP_IN_CORRIDOR = 1.0
+XP_OUT_CORRIDOR = 0.5
 
 # действие: (показатель, прирост, кулдаун, опыт, фраза)
 ACTIONS = {
@@ -143,6 +150,28 @@ async def next_serial(s, code: str) -> int:
         .returning(MutationCounter.issued))).scalar()
 
 
+async def strip_mutations(s, rows: list[Kombucha], codes: list[str], wounded_days: int = 7) -> int:
+    """Лаборатория кооператива: грибы отдают мутации, а на неделю получают дебаф «Раненый»
+    (показатели падают вдвое быстрее — см. tick())."""
+    want = {c for c in codes if c}
+    taken = 0
+    for k in rows:
+        if k.frozen:
+            continue
+        kept, lost = [], 0
+        for entry in (k.mutations or []):
+            code = entry["code"] if isinstance(entry, dict) else str(entry)
+            if code in want and lost < len(want):
+                lost += 1
+                taken += 1
+            else:
+                kept.append(entry)
+        if lost:
+            k.mutations = kept
+            k.wounded_until = now() + timedelta(days=wounded_days)
+    return taken
+
+
 async def add_mutation(s, k: Kombucha, m: Mutation, at: datetime, inherited: bool = False) -> dict:
     """Повесить мутацию на гриб (с номером экземпляра) и в коллекцию юзера."""
     serial = await next_serial(s, m.code)
@@ -197,12 +226,18 @@ def stage_for(xp: int) -> dict:
 
 
 def tick(k: Kombucha, at: datetime | None = None, halloween_active: bool = False,
-         halloween_window: tuple[datetime, datetime] | None = None) -> None:
+         halloween_window: tuple[datetime, datetime] | None = None, decay_slow: float = 0.0) -> None:
     """Применить ступеньки убывания и проверить, не закис ли гриб.
-    В период Хэллоуина чистота и счастье падают вдвое быстрее."""
+    В период Хэллоуина чистота и счастье падают вдвое быстрее.
+    decay_slow — перк клуба: показатели падают на столько медленнее (0…0.15).
+    «Раненый» (бизнес-войны клубов) — наоборот, ускоряет падение вдвое."""
     at = at or now()
     if not k.alive or k.frozen:
         return
+    slow = 1.0 - max(0.0, min(0.6, decay_slow))
+    wounded = bool(k.wounded_until and at < k.wounded_until)
+    if wounded:
+        slow *= 0.5
     steps = int((at - k.updated_at) / PERIOD) if at > k.updated_at else 0
     for i in range(steps):
         step_at = k.updated_at + PERIOD * (i + 1)
@@ -213,7 +248,7 @@ def tick(k: Kombucha, at: datetime | None = None, halloween_active: bool = False
         event_step = halloween_active or bool(
             halloween_window and halloween_window[0] <= step_at < halloween_window[1])
         for s in STATS:
-            drop = DROP[s] * (2 if event_step and s in ("clean", "happy") else 1)
+            drop = DROP[s] * slow * (2 if event_step and s in ("clean", "happy") else 1)
             setattr(k, s, max(getattr(k, s) - drop - (MOLD_EXTRA.get(s, 0.0) if k.mold else 0.0), 0.0))
         if k.zero_since is None and any(getattr(k, s) <= 0 for s in STATS):
             k.zero_since = step_at
@@ -223,12 +258,46 @@ def tick(k: Kombucha, at: datetime | None = None, halloween_active: bool = False
         k.died_at = k.zero_since + DEATH_AFTER
 
 
+def stat_in_corridor(key: str, value: float) -> bool:
+    low, high = CORRIDOR[key]
+    return low <= value <= high
+
+
+def corridor_state(k: Kombucha) -> dict:
+    """Коридор гриба: {"ok", "ranges", "off"} — off перечисляет показатели вне зоны."""
+    off = [key for key in STATS if not stat_in_corridor(key, getattr(k, key))]
+    return {"ok": not off, "off": off,
+            "ranges": {key: [CORRIDOR[key][0], CORRIDOR[key][1]] for key in STATS}}
+
+
+def in_corridor(k: Kombucha) -> bool:
+    return corridor_state(k)["ok"]
+
+
+def xp_mult(k: Kombucha) -> float:
+    return XP_IN_CORRIDOR if in_corridor(k) else XP_OUT_CORRIDOR
+
+
+def scaled_xp(base_xp: int | float, k: Kombucha) -> int:
+    """Опыт с множителем коридора: округление вниз, минимум 1, если базовый опыт > 0."""
+    if base_xp <= 0:
+        return 0
+    return max(1, int(base_xp * xp_mult(k)))
+
+
+def apply_club_xp(xp: int, club_bonus: float) -> int:
+    """Перк кооператива: +5…25% опыта личному грибу (и только опыта — не $₽ и не счастья)."""
+    if xp <= 0 or club_bonus <= 0:
+        return xp
+    return max(1, int(xp * (1.0 + club_bonus)))
+
+
 def mood(k: Kombucha) -> str:
     if not k.alive:
         return "dead"
     if k.mold:
         return "moldy"
-    if k.sweet > 95:
+    if k.sweet >= STICKY_FROM:
         return "sticky"
     low = min(STATS, key=lambda s: getattr(k, s))
     if getattr(k, low) < 25:
@@ -401,6 +470,8 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
     in_danger = k.zero_since is not None
     danger_since = k.zero_since
     old_xp = k.xp
+    from . import clubs as clubs_svc
+    club_bonus = float((await clubs_svc.club_bonus_for(s, user.id)).get("xp_bonus", 0.0))
     games_24h = med_24h = 0
     daily_wood = 0
     if action == "daily":
@@ -411,11 +482,12 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
         med_24h = await meditations_last_day(s, user.id)
         care_24h = await _tx_last_day(s, user.id, ("kombucha_care",))
         n = min(games_24h, 6)
-        gain = 5 + 5 * n
-        if k.mold:
-            gain = 0
-        k.xp += gain
         k.happy = min(k.happy + 10, 100.0)
+        # Коридор проверяем после применения действия (счастье уже поднято).
+        gain = scaled_xp(0 if k.mold else 5 + 5 * n, k)
+        gain = apply_club_xp(gain, club_bonus)
+        xp = gain
+        k.xp += gain
         daily_wood = await wood.earn(s, user.id, "daily_bonus", f"{k.id}:{at.date().isoformat()}", amount=5 + min(care_24h, 15))
         msg = (f"+{gain} опыта и +{daily_wood} $₽: за сутки {n} игр(ы), гриб гордится 🏆" if n
                else f"+{gain} опыта и +{daily_wood} $₽. Сыграй в игры гриба — завтра бонус будет больше 😉")
@@ -428,7 +500,7 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
         left = _cd_left(k, action, cd, at)
         if left:
             raise ApiError("Рано, гриб ещё не соскучился", 429, "cooldown", retry_after=left)
-        if action == "sugar" and k.sweet > STICKY_ABOVE:
+        if action == "sugar" and k.sweet >= STICKY_FROM:
             k.happy = max(k.happy - 10, 0.0)
             msg, xp = "Перебор! Гриб слипся 🥴 (−настроение)", 0
         setattr(k, stat, min(getattr(k, stat) + add, 100.0))
@@ -452,7 +524,9 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
         if k.mold:
             xp = 0
         elif min(getattr(k, x) for x in STATS) < LOW_STAT:
-            xp //= 2
+            xp //= 2                      # штраф за запущенность — раньше коридора
+        xp = scaled_xp(xp, k)             # и только потом множитель коридора
+        xp = apply_club_xp(xp, club_bonus)  # и перк кооператива (+5…25% опыта личному грибу)
         k.xp += xp
     else:
         raise ApiError("Неизвестное действие", 400, "validation_error")
@@ -473,6 +547,7 @@ async def act(s, user: User, k: Kombucha, action: str) -> dict:
     await on_care(s, user.id)
 
     res: dict = {"message": msg, "mutation": None, "sprout": None, "wood": earned,
+                 "xp_gain": xp, "xp_mult": xp_mult(k), "club_bonus": club_bonus,
                  "quote": quote if action in ACTIONS else None}
     msk = at.astimezone(MSK)
     m = None if k.mold else roll_mutation(Ctx(action=action, k=k, hour=msk.hour, weekday=msk.weekday(), games_24h=games_24h,
@@ -568,7 +643,7 @@ def out(k: Kombucha) -> dict:
     st = stage_for(k.xp)
     return {
         "id": k.id, "name": k.name, "xp": k.xp, "best_xp": k.best_xp, "generation": k.generation, "alive": k.alive,
-        "stats": {s: round(getattr(k, s)) for s in STATS}, "mood": m,
+        "stats": {s: round(getattr(k, s)) for s in STATS}, "mood": m, "corridor": corridor_state(k),
         "phrase": phrase(k),
         "stage": st, "cooldowns": cds, "dies_in": danger, "next_drop_in": next_drop_in(k, at) if k.alive else None,
         "age_days": (at - k.born_at).days, "born_at": k.born_at.isoformat(),
