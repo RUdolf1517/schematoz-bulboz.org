@@ -18,11 +18,11 @@ async function loginJar() {
   return { jar, status: r.status };
 }
 
-async function openMobile({ requestPermission = null, jar } = {}) {
+async function openMobile({ requestPermission = null, jar, page = "/" } = {}) {
   const vc = new VirtualConsole();
   const errors = [];
   vc.on("jsdomError", (e) => { if (!/navigation/i.test(e.message)) errors.push(e.message); });
-  const dom = await JSDOM.fromURL(BASE + "/", {
+  const dom = await JSDOM.fromURL(BASE + page, {
     runScripts: "dangerously", resources: "usable", pretendToBeVisual: true, cookieJar: jar,
     virtualConsole: vc,
     beforeParse(win) {
@@ -35,6 +35,8 @@ async function openMobile({ requestPermission = null, jar } = {}) {
       if (requestPermission) DOE.requestPermission = requestPermission;
       win.DeviceOrientationEvent = DOE;
       win.confirm = () => true;
+      win.alert = () => {};
+      win.HTMLElement.prototype.scrollIntoView = function () {};
       win.fetch = async (url, opts = {}) => {
         const abs = new URL(url, BASE).href;
         const headers = { ...(opts.headers || {}), cookie: jar?.getCookieStringSync(abs) || "" };
@@ -189,6 +191,36 @@ const fireOrientation = (win, gamma) => {
     check("меню: битая картинка → буква, без «сломанной» иконки", fallback,
       win2.document.querySelector("#me-avatar")?.innerHTML);
     second.dom.window.close();
+  }
+
+  // --- 7. Настройки профиля: сменил аватар → шапка обновилась без перезагрузки ---
+  {
+    const { dom } = await openMobile({ jar, page: "/settings" });
+    const win = dom.window;
+    await sleep(2000);   // страница настроек подгружает профиль и превью
+    const input = win.document.querySelector("#av-file");
+    check("настройки: поле загрузки аватара есть", !!input);
+
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII=",
+      "base64");
+    const file = new win.File([png], "new-avatar.png", { type: "image/png" });
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    input.dispatchEvent(new win.Event("change", { bubbles: true }));
+    await sleep(1500);
+    check("настройки: после выбора файла превью показывает картинку",
+      !!win.document.querySelector("#av-prev img"));
+
+    const form = win.document.querySelector("#settings-form");
+    form.dispatchEvent(new win.Event("submit", { bubbles: true, cancelable: true }));
+    await sleep(1500);
+    const head = win.document.querySelector("#me-avatar img");
+    check("настройки: шапка показывает новый аватар сразу, без перезагрузки", !!head,
+      win.document.querySelector("#me-avatar")?.innerHTML);
+    check("настройки: тот же файл, что в превью",
+      head?.getAttribute("src") === win.document.querySelector("#av-prev img")?.getAttribute("src"),
+      `${head?.getAttribute("src")} vs ${win.document.querySelector("#av-prev img")?.getAttribute("src")}`);
+    dom.window.close();
   }
 
   const failed = results.filter(([, ok]) => !ok);
