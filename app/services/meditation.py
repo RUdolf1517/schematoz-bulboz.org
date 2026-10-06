@@ -158,19 +158,19 @@ async def finish(s, user, k, token: str, taps, meta=None) -> dict:
     left = r.ttl(f"med:cd:{k.id}")
     if left and left > 0:
         return {**res, "practice": True, "reward_in": int(left), "mut_why": "practice", "happy": 0, "xp": 0,
-                "wood": 0, "mutation": None, "cooldown": COOLDOWN, "grade": grade(acc)}
+                "xp_mult": kb.xp_mult(k), "wood": 0, "mutation": None, "cooldown": COOLDOWN, "grade": grade(acc)}
     if not reason:
         r.set(f"med:cd:{k.id}", 1, ex=COOLDOWN)
         r.set(f"med:played:{k.id}", 1, ex=30 * 24 * 60 * 60)
 
     kb.tick(k)
     happy = round(25 * acc)
-    xp = round(12 * acc)
     k.happy = min(100.0, k.happy + happy)
+    # Счастье поднято — считаем опыт с множителем «идеального коридора».
+    xp = kb.scaled_xp(0 if k.mold else round(12 * acc), k)
     old_xp = k.xp
-    if not k.mold:
-        k.xp += xp
-        k.best_xp = max(k.best_xp, k.xp)
+    k.xp += xp
+    k.best_xp = max(k.best_xp, k.xp)
     earned = await wood.earn(s, user.id, "meditation", token, amount=round(10 * acc))
     m = _roll_mutation(k, acc)
     mut = await kb.add_mutation(s, k, m, kb.now()) if m else None
@@ -189,7 +189,7 @@ async def finish(s, user, k, token: str, taps, meta=None) -> dict:
         why = "limit"
     else:
         why = "luck"
-    return {**res, "mut_why": why, "happy": happy, "xp": xp if not k.mold else 0, "wood": earned, "mutation": mut,
+    return {**res, "mut_why": why, "happy": happy, "xp": xp, "xp_mult": kb.xp_mult(k), "wood": earned, "mutation": mut,
             "cooldown": COOLDOWN, "grade": grade(acc)}
 
 

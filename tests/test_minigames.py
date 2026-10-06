@@ -113,9 +113,22 @@ def test_games_api_guards(make_user, monkeypatch):
     res = c.post(f"/api/kombucha/{kid}/game/sugar/finish", json={"token": g["token"], "taps": sugar}).get_json()
     R = res["result"]
     assert R["accuracy"] == 1.0 and R["wood"] == 8 and R["boost"] == 15 and R["stat"] == "sweet"
+    assert R["xp"] == 5 and R["xp_mult"] == 0.5                                 # игра догнала сахар до 85 — уже вне коридора
     assert res["kombucha"]["stats"]["sweet"] <= 90                              # игрой в сахарную кому не загнать
     assert c.post(f"/api/kombucha/{kid}/game/sugar/finish", json={"token": g["token"], "taps": sugar}).status_code == 400
     assert c.post(f"/api/kombucha/{kid}/game/nope/start", json={}).status_code == 404
+
+
+def test_game_xp_halved_outside_corridor(make_user, edit_kombucha, monkeypatch):
+    c, _ = make_user()
+    kid = c.get("/api/kombucha").get_json()["items"][0]["id"]
+    assert c.get("/api/kombucha").get_json()["items"][0]["corridor"]["ok"]
+    edit_kombucha(kid, clean=10.0)                       # грязная банка — вне коридора
+    g = c.post(f"/api/kombucha/{kid}/game/sugar/start", json={}).get_json()
+    taps = [{"id": it["id"], "t": it["t"] + 260 + (it["id"] * 37) % 120} for it in g["items"] if it["kind"] == "sugar"]
+    _ff(monkeypatch, g["length"] + 100)
+    R = c.post(f"/api/kombucha/{kid}/game/sugar/finish", json={"token": g["token"], "taps": taps}).get_json()["result"]
+    assert R["accuracy"] == 1.0 and R["xp"] == 5 and R["xp_mult"] == 0.5         # 10 XP × 0.5
 
 
 def test_autoclicker_gets_no_reward(app, make_user, monkeypatch):

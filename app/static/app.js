@@ -921,7 +921,8 @@ async function kbDebugPanel(panel, login = "", selId = null) {
       <div class="kbd">
         <div class="kbd-left">
           <div class="kbd-prev">${kombuchaSVG(k)}</div>
-          <p class="muted" style="text-align:center">«${esc(k.name)}» · ${esc(k.stage.title)} · xp ${k.xp} · настроение: ${esc(KB_MOOD[k.mood]?.[1] || k.mood)} · мутаций: ${on.size}</p>
+          <p class="muted" style="text-align:center">«${esc(k.name)}» · ${esc(k.stage.title)} · xp ${k.xp} · настроение: ${esc(KB_MOOD[k.mood]?.[1] || k.mood)} · мутаций: ${on.size}<br>
+            ${k.corridor?.ok ? "✅ в идеальном коридоре (опыт ×1)" : `⚠️ вне коридора: ${esc(corridorProblems(k.corridor, k.stats).join(" / "))} (опыт ×0.5)`}</p>
           <div class="kbd-row"><b>Стадия:</b> ${D.stages.map((st) => `<button class="btn btn-sm ${st.size === k.stage.size ? "btn-accent" : ""}" data-stage="${st.size}" title="${esc(st.title)} (от ${st.xp} xp)">${st.size}</button>`).join("")}</div>
           ${["sweet", "tea", "clean", "happy"].map((st) => `<label class="kbd-row"><span>${{ sweet: "🍬 сахар", tea: "🫖 заварка", clean: "🧽 чистота", happy: "💛 счастье" }[st]}</span>
             <input type="range" min="0" max="100" value="${k.stats[st]}" data-stat="${st}"><b>${k.stats[st]}</b></label>`).join("")}
@@ -1413,7 +1414,7 @@ function kbGameShell(title, help) {
         flies: `отогнано мушек: ${R.swatted}` }[game] || "";
       sh.area.innerHTML = `<div class="kb-med-result"><h2>${esc(R.grade)}</h2><p class="kb-med-acc">Точность: <b>${Math.round(R.accuracy * 100)}%</b></p>${kbBotNote(R)}
         <p class="muted">${esc(extra)}</p>
-        ${R.practice ? `<p class="kb-practice">🏋️ Тренировка — играй сколько хочешь. Следующая награда через ${fmtLeft(R.reward_in)}.</p>` : `<p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за игры сегодня уже собраны · </span>`}💛 +${R.happy}${R.boost ? ` · ${ST[R.stat]} +${R.boost}` : ""}${R.xp ? ` · +${R.xp} опыта` : ""}</p>`}
+        ${R.practice ? `<p class="kb-practice">🏋️ Тренировка — играй сколько хочешь. Следующая награда через ${fmtLeft(R.reward_in)}.</p>` : `<p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за игры сегодня уже собраны · </span>`}💛 +${R.happy}${R.boost ? ` · ${ST[R.stat]} +${R.boost}` : ""}${R.xp ? ` · ${xpLabel(R.xp, R.xp_mult)}` : ""}</p>`}
         ${R.mutation ? `<p class="kb-med-mut">🧬 ${esc(R.mutation.rarity_title)} мутация: ${esc(R.mutation.emoji)} «${esc(R.mutation.title)}» #${R.mutation.serial}</p>`
           : `<p class="muted">${{ limit: "На этой стадии у гриба уже 3 мутации.", luck: "Мутация не пришла — чем точнее, тем выше шанс.", low: "С 75% точности появляется шанс мутации." }[R.mut_why] || ""}</p>`}
         <button class="btn btn-accent" data-close>Готово</button></div>`;
@@ -1681,7 +1682,7 @@ async function kbMeditate(k, onDone) {
       <h2>${esc(R.grade)}</h2>
       <p class="kb-med-acc">Точность: <b>${Math.round(R.accuracy * 100)}%</b></p>${kbBotNote(R)}
       <p class="muted">✨ идеально ${R.perfect} · 👍 хорошо ${R.good} · мимо ${R.miss}${R.extra ? ` · лишних тапов ${R.extra}` : ""}</p>
-      ${R.practice ? `<p class="kb-practice">🏋️ Тренировка — играй сколько хочешь. Следующая награда через ${fmtLeft(R.reward_in)}.</p>` : `<p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за сегодня уже собраны · </span>`}💛 +${R.happy} счастья${R.xp ? ` · +${R.xp} опыта` : ""}</p>`}
+      ${R.practice ? `<p class="kb-practice">🏋️ Тренировка — играй сколько хочешь. Следующая награда через ${fmtLeft(R.reward_in)}.</p>` : `<p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за сегодня уже собраны · </span>`}💛 +${R.happy} счастья${R.xp ? ` · ${xpLabel(R.xp, R.xp_mult)}` : ""}</p>`}
       ${R.mutation ? `<p class="kb-med-mut">🧬 ${esc(R.mutation.rarity_title)} мутация: ${esc(R.mutation.emoji)} «${esc(R.mutation.title)}» #${R.mutation.serial}</p>` : `<p class="muted">${{ limit: "На этой стадии у гриба уже 3 мутации — новые откроются на следующей стадии.", luck: "Мутация в этот раз не пришла — чем точнее, тем выше шанс (до 15%).", low: "С 75% точности появляется шанс мутации." }[R.mut_why] || ""}</p>`}
       <button class="btn btn-accent" data-close>Готово</button></div>`);
     el.querySelectorAll(".kb-med-help, .kb-med-combo, .kb-med-judge, .kb-med-bar").forEach((x) => x.remove());
@@ -1998,6 +1999,41 @@ function initTiltScene(scene) {
   applyKbTilt();
 }
 
+// «Идеальный коридор»: пока все показатели в своих зонах — опыт ×1, иначе ×0.5.
+const CORRIDOR_LABELS = {
+  sweet: ["мало сахара", "пересластил"],
+  tea: ["мало заварки", "перезаварил"],
+  clean: ["банка грязная", "слишком стерильно"],
+  happy: ["грустит", "слишком счастлив"],
+};
+
+// Что именно вне коридора и в какую сторону — по ranges/off с сервера.
+function corridorProblems(corridor, stats) {
+  const out = [];
+  const ranges = corridor?.ranges || {};
+  (corridor?.off || []).forEach((key) => {
+    const [low, high] = ranges[key] || [0, 100];
+    const value = stats?.[key];
+    const labels = CORRIDOR_LABELS[key] || [key, key];
+    out.push(value == null ? key : value < low ? labels[0] : value > high ? labels[1] : key);
+  });
+  return out;
+}
+
+function corridorMarkup(corridor, stats) {
+  if (!corridor) return "";
+  if (corridor.ok) {
+    return `<div class="kb-corridor ok">✅ Идеальный коридор — опыт ×1</div>`;
+  }
+  return `<div class="kb-corridor off">⚠️ ${esc(corridorProblems(corridor, stats).join(" / "))} — опыт ×0.5</div>`;
+}
+
+// «+8 опыта» или «+4 опыта (×0.5 — вне коридора)» — один вид текста везде.
+function xpLabel(xp, mult) {
+  if (!xp) return "";
+  return mult != null && mult < 1 ? `+${xp} опыта (×${mult} — вне коридора)` : `+${xp} опыта`;
+}
+
 function fmtLeft(sec) {
   if (sec >= 3600) return `${Math.floor(sec / 3600)} ч ${Math.floor((sec % 3600) / 60)} мин`;
   if (sec >= 60) return `${Math.ceil(sec / 60)} мин`;
@@ -2095,7 +2131,10 @@ async function pageKombucha() {
           <div class="kb-mut-slots muted">На каждой стадии — до ${k.mut_per_stage || 3} мутаций этой стадии · ${[1, 2, 3, 4, 5, 6].filter((st) => st <= k.stage.size || k.mut_slots?.[st]).map((st) => { const n = k.mut_slots?.[st] || 0, mx = k.mut_per_stage || 3; return `<span class="${n >= mx ? "full" : ""}">ст.${st}: ${n}/${mx}</span>`; }).join(" · ")}</div></details>` : ""}
         ${k.dies_in != null && k.alive ? `<div class="kb-danger">⚠️ Гриб на грани! Закиснет через ${fmtLeft(k.dies_in)}, если не поднять показатель с нуля.</div>` : ""}
         <div class="kb-stats">${STAT.map(([key, label]) => { const v = k.stats[key];
-          return `<div class="kb-stat"><span>${label}</span><div class="kb-bar ${v < 25 ? "low" : v > 90 && key === "sweet" ? "over" : ""}"><span style="width:${v}%"></span></div><b>${v}</b></div>`; }).join("")}</div>
+          const [lo, hi] = (k.corridor?.ranges?.[key] || [0, 100]).map(Number);
+          const off = (k.corridor?.off || []).includes(key);
+          return `<div class="kb-stat"><span>${label}</span><div class="kb-bar${off ? " off" : v < 25 ? " low" : ""}"><i class="kb-zone" style="left:${lo}%;width:${Math.max(0, hi - lo)}%"></i><span style="width:${v}%"></span></div><b>${v}</b></div>`; }).join("")}</div>
+        ${k.alive && !k.mold ? corridorMarkup(k.corridor, k.stats) : ""}   /* у закисшего/плесневелого опыт всё равно 0 */
         ${k.frozen ? `<div class="kb-note kb-frozen-note">🧊 Гриб заморожен${k.frozen_at ? ` с ${esc(fmtDate(k.frozen_at))}` : ""}: показатели не падают, банку не занимает, стоит на полке в твоём профиле.
             Продать или обменять можно только замороженный гриб.</div>
           <div class="kb-dead-actions">
@@ -2104,7 +2143,7 @@ async function pageKombucha() {
             <button class="btn btn-ghost" data-trade>🔄 Обменять / подарить</button></div>`
         : k.alive ? `${k.mold ? `<div class="kb-danger kb-mold">🦠 Плесень! Гриб не растёт и не мутирует, чистота и настроение тают быстрее.
             <button class="btn btn-accent btn-sm" data-act="cure"${k.cooldowns.cure ? " disabled" : ""}>🧪 Уксусная ванна${k.cooldowns.cure ? ` · через ${fmtLeft(k.cooldowns.cure)}` : ""}</button></div>` : ""}
-          <div class="kb-next muted">⏬ Показатели упадут через ${fmtLeft(k.next_drop_in)} (раз в 12 часов)${!k.mold && k.stats.clean < 35 ? " · ⚠️ банка грязная — может завестись плесень" : ""}</div>
+          ${!k.mold && k.stats.clean < 35 ? `<div class="kb-next muted">⚠️ банка грязная — может завестись плесень</div>` : ""}
           <div class="kb-actions">${BTN.map(([a, e, t]) => { const cd = k.cooldowns[a];
             return `<button class="btn kb-act" data-act="${a}"${cd ? " disabled" : ""}><span class="e">${e}</span><span>${t}</span>${cd ? `<small>через ${fmtLeft(cd)}</small>` : ""}</button>`; }).join("")}</div>
           <button class="btn kb-talk" data-act="talk"${k.cooldowns.talk ? " disabled" : ""}>💭 Поговорить с грибом${k.cooldowns.talk ? ` · через ${fmtLeft(k.cooldowns.talk)}` : " — о философии"}</button>
@@ -2268,6 +2307,7 @@ async function pageKombucha() {
     if (kk.mood === "sticky") say(action === "sugar" ? r.message : kk.phrase);
     else if (action === "pet" || action === "talk") say(r.message);   // гриб говорит сам, от первого лица
     else { say(kk.phrase); if (r.message && action !== "talk") toast(r.message); }
+    if (r.xp_gain > 0) toast(xpLabel(r.xp_gain, r.xp_mult));
     if (r.quote && kk.mood !== "sticky") { const b = $("#kb-say"); if (b) b.title = r.quote.lines.map((l) => l.who).join(", ") + (r.quote.book ? ` — ${r.quote.book}` : ""); }
     if (r.mutation) toast(`🧬 ${r.mutation.rarity_title} мутация: ${r.mutation.emoji} «${r.mutation.title}» #${r.mutation.serial}!${r.mutation.first_time ? " +15 $₽ за новую находку" : ""}`);
     if (r.halloween_mutation) toast(`👁️ Постоянная хэллоуинская мутация: ${r.halloween_mutation.emoji} «${r.halloween_mutation.title}»`);

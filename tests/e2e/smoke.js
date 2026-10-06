@@ -185,7 +185,7 @@ function check(name, cond, extra = "") { console.log((cond ? "✅" : "❌") + " 
   if (desktopOrientation) d.window.DeviceOrientationEvent = desktopOrientation;
   else delete d.window.DeviceOrientationEvent;
   check("гриб: заварка долита, кнопка на кулдауне", d.window.document.querySelector('[data-act="tea"]')?.disabled === true);
-  check("гриб: банки, коллекция из 240 мутаций по стадиям, таймер 12 ч", !!d.window.document.querySelector(".kb-jar-tab.active") && d.window.document.querySelectorAll(".kb-cx").length === 240 && d.window.document.querySelectorAll(".kb-cx-stage").length === 6 && txt(d, ".kb-next").includes("12 часов"));
+  check("гриб: банки, коллекция из 240 мутаций по стадиям, зоны коридора", !!d.window.document.querySelector(".kb-jar-tab.active") && d.window.document.querySelectorAll(".kb-cx").length === 240 && d.window.document.querySelectorAll(".kb-cx-stage").length === 6 && d.window.document.querySelectorAll(".kb-bar .kb-zone").length === 4 && !!d.window.document.querySelector(".kb-corridor"));
   check("гриб: в шапке баланс $₽", !d.window.document.querySelector("#wood-chip").hidden && Number(txt(d, "#wood-balance")) > 0);
   d.window.document.querySelector("[data-freeze]").click(); await sleep(1200);
   check("гриб: заморожен, есть кнопки продать и обменять", !!d.window.document.querySelector(".kb-svg.frozen") && !!d.window.document.querySelector("[data-list]") && !!d.window.document.querySelector("[data-trade]"));

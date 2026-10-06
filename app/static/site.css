@@ -541,6 +541,14 @@ main.main-wide { max-width: 1180px; }
 .kb-bar span { background: var(--good); }
 .kb-bar.low span { background: var(--bad); }
 .kb-bar.over span { background: #ff8fd1; }
+/* зелёная подложка — «идеальный коридор» показателя; вне зоны полоска оранжевая */
+.kb-bar { position: relative; }
+.kb-bar > span { position: relative; z-index: 1; }   /* заливка поверх зелёной подложки */
+.kb-bar .kb-zone { position: absolute; top: 0; bottom: 0; background: #3ddc8433; border-left: 1px solid #3ddc8455; border-right: 1px solid #3ddc8455; pointer-events: none; }
+.kb-bar.off span { background: #ff9f45; }
+.kb-corridor { border-radius: 12px; padding: 8px 12px; font-size: 13px; margin-top: -6px; }
+.kb-corridor.ok { background: #3ddc8418; color: var(--good); }
+.kb-corridor.off { background: #ff9f4522; color: #ffb26b; }
 .kb-danger { background: #ff4d6d22; color: var(--bad); border-radius: 12px; padding: 10px 12px; font-size: 14px; margin-top: 12px; }
 .kb-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
 .kb-act { flex-direction: column; gap: 2px; padding: 10px 6px; white-space: normal; text-align: center; font-size: 13px; min-height: 76px; }

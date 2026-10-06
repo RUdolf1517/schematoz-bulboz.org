@@ -15,6 +15,7 @@
 
 Общая защита: нельзя закончить быстрее, чем физически длится игра; одна сессия — одна награда;
 лимит действий; награда за игру — раз в 30 минут (остальные партии — тренировка).
+Опыт умножается на множитель «идеального коридора» гриба (kb.xp_mult).
 
 Награда по точности 0..1: $₽ (общий лимит — 10 игр в день на все четыре игры, до 8 $₽ за игру),
 счастье, профильный показатель гриба (чистота/сахар/заварка), опыт и шанс мутации (с 75%).
@@ -347,8 +348,8 @@ async def reward(s, user, k, game: str, token: str, res: dict) -> dict:
     left = r.ttl(_cd_key(k.id, game))
     if left and left > 0:   # тренировка: результат считаем, награду — нет
         return {**res, "game": game, "grade": grade(acc), "practice": True, "reward_in": int(left),
-                "happy": 0, "stat": GAMES[game][2], "boost": 0, "xp": 0, "wood": 0, "mutation": None, "mut_why": "practice",
-                "cooldown": COOLDOWN}
+                "happy": 0, "stat": GAMES[game][2], "boost": 0, "xp": 0, "xp_mult": kb.xp_mult(k),
+                "wood": 0, "mutation": None, "mut_why": "practice", "cooldown": COOLDOWN}
     if res.get("suspect"):   # бот не сжигает окно награды
         acc = 0.0
     else:
@@ -360,9 +361,10 @@ async def reward(s, user, k, game: str, token: str, res: dict) -> dict:
     boost = round(15 * acc)
     k.happy = min(100.0, k.happy + happy)
     if stat != "happy":
-        cap = 90.0 if stat == "sweet" else 100.0          # сахарную кому игрой не устроить
+        cap = kb.STICKY_FROM - 1 if stat == "sweet" else 100.0   # сахарную кому игрой не устроить
         setattr(k, stat, min(cap, max(getattr(k, stat), min(cap, getattr(k, stat) + boost))))
-    xp = 0 if k.mold else round(10 * acc)
+    # Показатели гриба уже обновлены выше: опыт считаем с множителем коридора.
+    xp = kb.scaled_xp(0 if k.mold else round(10 * acc), k)
     old_xp = k.xp
     k.xp += xp
     k.best_xp = max(k.best_xp, k.xp)
@@ -378,7 +380,7 @@ async def reward(s, user, k, game: str, token: str, res: dict) -> dict:
     why = ("got" if mut else "low" if acc < MUT_FROM_ACC
            else "limit" if kb.stage_mut_counts(k).get(size, 0) >= kb.MAX_MUT_PER_STAGE else "luck")
     return {**res, "game": game, "grade": grade(acc), "happy": happy, "stat": stat, "boost": boost if stat != "happy" else 0,
-            "xp": xp, "wood": earned, "mutation": mut, "mut_why": why, "cooldown": COOLDOWN}
+            "xp": xp, "xp_mult": kb.xp_mult(k), "wood": earned, "mutation": mut, "mut_why": why, "cooldown": COOLDOWN}
 
 
 def catalog() -> list[dict]:
