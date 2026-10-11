@@ -26,7 +26,9 @@ async def halloween_settings():
     from ..services import halloween
     async with session_scope() as s:
         value = await halloween.get_config(s)
-    return {**value, "active": halloween.active(value)}
+        raid = await s.get(HalloweenRaid, 1)
+        total_damage = int(raid.total_damage or 0) if raid else 0
+    return {**value, "active": halloween.active(value), "raid_total_damage": total_damage}
 
 
 @bp.put("/events/halloween")
@@ -52,8 +54,14 @@ async def update_halloween_settings():
     async with session_scope() as s:
         current = await halloween.get_config(s, lock=True)
         raid_config = halloween.validate_raid_config(data.get("raid", current["raid"]))
-        value = {"enabled": enabled, "start_at": start.astimezone(timezone.utc).isoformat(),
+        value = {"enabled": enabled,
+                 "start_at": start.astimezone(timezone.utc).isoformat(),
                  "end_at": end.astimezone(timezone.utc).isoformat(), "raid": raid_config}
+        same_season = halloween_raid.event_key(value) == halloween_raid.event_key(current)
+        value["results_closed"] = bool(current.get("results_closed")) and same_season
+        if enabled and current.get("results_closed") and same_season:
+            raise ApiError("Итоги этого сезона закрыты. Чтобы начать новый рейд, укажи новую дату начала.",
+                           400, "results_closed")
         row = await s.get(Setting, "halloween", with_for_update=True)
         old = row.value if row else None
         await halloween_raid.apply_config_change(s, current, value, datetime.now(timezone.utc))
@@ -75,6 +83,34 @@ async def update_halloween_settings():
         await s.flush()
         await quotes.refresh_custom(s)
     return {**value, "active": halloween.active(value)}
+
+
+@bp.post("/events/halloween/results/close")
+@require_perm("role.assign")
+async def close_halloween_results():
+    """Закрыть итоги рейда: снимок в архив, бейджи-медали, сброс общего прогресса.
+
+    Идемпотентно: повторный вызов просто возвращает уже закрытые итоги.
+    """
+    from ..services import halloween, halloween_raid
+    async with session_scope() as s:
+        current = await halloween.get_config(s, lock=True)
+        row = await s.get(Setting, "halloween", with_for_update=True)
+        old = row.value if row else None
+        if current.get("results_closed"):
+            results = await halloween_raid.inactive_summary(s, current, datetime.now(timezone.utc))
+            return {**current, "active": False, "results": results, "already_closed": True}
+        value = {"enabled": False, "results_closed": True,
+                 "start_at": current.get("start_at"), "end_at": current.get("end_at"),
+                 "raid": current.get("raid")}
+        results = await halloween_raid.close_season(s, current, datetime.now(timezone.utc))
+        if row is None:
+            s.add(Setting(key="halloween", value=value, updated_by=g.user.id))
+        else:
+            row.value, row.updated_by = value, g.user.id
+        log_action(s, g.user.id, "settings.update", "setting", None, key="halloween", old=old, new=value)
+        await s.flush()
+    return {**value, "active": False, "results": results}
 
 
 @bp.put("/users/<int:uid>/roles")

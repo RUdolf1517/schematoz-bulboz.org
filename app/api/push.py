@@ -42,9 +42,9 @@ async def push_settings():
         pref = await s.get(PushPreference, g.user.id)
         subscribed = bool(await s.scalar(select(PushSubscription.id).where(
             PushSubscription.user_id == g.user.id).limit(1)))
+    configured, _reason = push_service.vapid_status(current_app.config)
     return push_service.prefs_out(
-        pref, subscribed, current_app.config.get("VAPID_PUBLIC_KEY") or None,
-        bool(current_app.config.get("VAPID_PUBLIC_KEY") and current_app.config.get("VAPID_PRIVATE_KEY")),
+        pref, subscribed, current_app.config.get("VAPID_PUBLIC_KEY") or None, configured,
     )
 
 
@@ -67,17 +67,18 @@ async def update_push_settings():
         await s.flush()
         subscribed = bool(await s.scalar(select(PushSubscription.id).where(
             PushSubscription.user_id == g.user.id).limit(1)))
+    configured, _reason = push_service.vapid_status(current_app.config)
     return push_service.prefs_out(
-        pref, subscribed, current_app.config.get("VAPID_PUBLIC_KEY") or None,
-        bool(current_app.config.get("VAPID_PUBLIC_KEY") and current_app.config.get("VAPID_PRIVATE_KEY")),
+        pref, subscribed, current_app.config.get("VAPID_PUBLIC_KEY") or None, configured,
     )
 
 
 @bp.post("/push/subscriptions")
 @login_required
 async def push_subscribe():
-    if not current_app.config.get("VAPID_PUBLIC_KEY") or not current_app.config.get("VAPID_PRIVATE_KEY"):
-        raise ApiError("Web Push не настроен на сервере", 503, "push_not_configured")
+    configured, reason = push_service.vapid_status(current_app.config)
+    if not configured:
+        raise ApiError(f"Web Push не настроен на сервере: {reason}", 503, "push_not_configured")
     data = json_body()
     endpoint = _public_endpoint(data.get("endpoint"))
     keys = data.get("keys")

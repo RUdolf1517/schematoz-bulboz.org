@@ -72,7 +72,7 @@ class HalloweenTreat(Base):
 
 
 class HalloweenRaid(Base):
-    """Shared Halloween raid boss (the app currently has no club/group model)."""
+    """Shared Halloween raid boss."""
     __tablename__ = "halloween_raid"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     hp: Mapped[int] = mapped_column(Integer, default=10000, server_default="10000")

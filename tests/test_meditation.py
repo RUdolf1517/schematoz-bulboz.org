@@ -42,6 +42,7 @@ def test_meditation_flow(make_user, monkeypatch):
     r = c.post(f"/api/kombucha/{kid}/meditate/finish", json={"token": t["token"], "taps": human}).get_json()
     res = r["result"]
     assert res["accuracy"] == 1.0 and res["wood"] == 10 and res["happy"] == 25 and res["mutation"] and res["mut_why"] == "got"
+    assert res["xp"] == 12 and res["xp_mult"] == 1.0                             # счастье 95 — гриб в коридоре
     assert r["kombucha"]["stats"]["happy"] >= min(100, happy0)
     assert r["wood_balance"] >= wood0 + 10
     # повтор той же сессии — нельзя
@@ -50,6 +51,19 @@ def test_meditation_flow(make_user, monkeypatch):
     # кулдауна на игру нет — только на награду
     t2 = c.post(f"/api/kombucha/{kid}/meditate/start", json={})
     assert t2.status_code == 200
+
+
+def test_meditation_xp_halved_outside_corridor(make_user, edit_kombucha, monkeypatch):
+    c, _ = make_user()
+    kid = c.get("/api/kombucha").get_json()["items"][0]["id"]
+    edit_kombucha(kid, tea=10.0)                         # мало заварки — вне коридора
+    t = c.post(f"/api/kombucha/{kid}/meditate/start", json={}).get_json()
+    _fast_forward(monkeypatch, t["length"] + 100)
+    monkeypatch.setattr(med.rng, "random", lambda: 0.999)  # без мутаций
+    human = [b + ((i * 29) % 50) - 25 for i, b in enumerate(t["beats"])]   # живой разброс ±25 мс
+    res = c.post(f"/api/kombucha/{kid}/meditate/finish",
+                 json={"token": t["token"], "taps": human}).get_json()["result"]
+    assert res["accuracy"] == 1.0 and res["xp"] == 6 and res["xp_mult"] == 0.5   # 12 XP × 0.5
 
 
 def test_meditation_foreign_and_limits(make_user, monkeypatch):

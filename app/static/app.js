@@ -73,8 +73,6 @@ async function applyEventTheme() {
   document.body.classList.toggle("halloween", HALLOWEEN_ACTIVE);
   document.body.dataset.halloween = HALLOWEEN_ACTIVE ? "1" : "0";
   startHauntedButtons();
-  if (HALLOWEEN_ACTIVE) startSpookyMusic();
-  else stopSpookyMusic();
   const mark = $(".logo-mark");
   if (mark) mark.textContent = HALLOWEEN_ACTIVE ? "🎃" : "🍄";
   const nav = $("#events-nav");
@@ -172,84 +170,6 @@ function maybeHalloweenScreamer(force = false, ignoreCooldown = false) {
   return true;
 }
 
-let spookyMusic = null;
-let spookyMusicEnabled = localStorage.getItem("halloween-music-enabled") !== "0";
-function refreshSpookyMusicButtons() {
-  $$('[data-spooky-music]').forEach((button) => {
-    button.textContent = spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку";
-    button.setAttribute("aria-pressed", spookyMusicEnabled ? "true" : "false");
-  });
-}
-function stopSpookyMusic() {
-  if (!spookyMusic) return;
-  const sound = spookyMusic; spookyMusic = null;
-  clearInterval(sound.bellTimer);
-  if (sound.resumeHandler) {
-    document.removeEventListener("pointerdown", sound.resumeHandler);
-    document.removeEventListener("keydown", sound.resumeHandler);
-  }
-  try { sound.master.gain.setTargetAtTime(0.0001, sound.ctx.currentTime, 0.18); } catch (_) {}
-  setTimeout(() => sound.ctx.close().catch(() => {}), 700);
-  refreshSpookyMusicButtons();
-}
-function startSpookyMusic() {
-  if (!HALLOWEEN_ACTIVE || !spookyMusicEnabled || spookyMusic) return;
-  const Audio = window.AudioContext || window.webkitAudioContext;
-  if (!Audio) return;
-  let ctx = null;
-  try {
-    ctx = new Audio();
-    const master = ctx.createGain(), filter = ctx.createBiquadFilter();
-    filter.type = "lowpass"; filter.frequency.value = 380; filter.Q.value = 1.3;
-    master.gain.value = 0.055; filter.connect(master).connect(ctx.destination);
-    [[55, "sine", 0.38], [82.41, "triangle", 0.16], [110, "sine", 0.08], [41.2, "sine", 0.12]].forEach(([hz, type, vol]) => {
-      const osc = ctx.createOscillator(), gain = ctx.createGain();
-      osc.type = type; osc.frequency.value = hz; gain.gain.value = vol;
-      osc.connect(gain).connect(filter); osc.start();
-    });
-    const lfo = ctx.createOscillator(), lfoGain = ctx.createGain();
-    lfo.frequency.value = 0.075; lfoGain.gain.value = 115; lfo.connect(lfoGain).connect(filter.frequency); lfo.start();
-    const state = { ctx, master, filter, bellTimer: null, resumeHandler: null };
-    const resume = () => {
-      if (spookyMusic !== state || ctx.state === "closed") return;
-      ctx.resume().then(() => {
-        if (ctx.state === "running") {
-          document.removeEventListener("pointerdown", resume);
-          document.removeEventListener("keydown", resume);
-          state.resumeHandler = null;
-        }
-      }).catch(() => {});
-    };
-    state.resumeHandler = resume;
-    spookyMusic = state;
-    const bell = () => {
-      if (spookyMusic !== state || ctx.state !== "running") return;
-      const osc = ctx.createOscillator(), gain = ctx.createGain(), t = ctx.currentTime;
-      osc.type = "sine"; osc.frequency.value = [164.81, 196, 246.94, 293.66][Math.floor(Math.random() * 4)];
-      gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.11, t + 0.06);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 2.6); osc.connect(gain).connect(filter);
-      osc.start(t); osc.stop(t + 2.7);
-    };
-    state.bellTimer = setInterval(bell, 6500 + Math.random() * 5000);
-    document.addEventListener("pointerdown", resume, { passive: true });
-    document.addEventListener("keydown", resume);
-    resume();
-    refreshSpookyMusicButtons();
-  } catch (_) {
-    ctx?.close().catch(() => {});
-    spookyMusic = null;
-    refreshSpookyMusicButtons();
-  }
-}
-function toggleSpookyMusic() {
-  if (!HALLOWEEN_ACTIVE) return;
-  spookyMusicEnabled = !spookyMusicEnabled;
-  localStorage.setItem("halloween-music-enabled", spookyMusicEnabled ? "1" : "0");
-  if (spookyMusicEnabled) startSpookyMusic();
-  else stopSpookyMusic();
-  refreshSpookyMusicButtons();
-}
-
 let hauntedButtonTimer = null, hauntedPointerBound = false;
 function hauntButton(button) {
   if (!HALLOWEEN_ACTIVE || REDUCED_MOTION || !button?.isConnected) return;
@@ -283,7 +203,6 @@ function startHauntedButtons() {
 }
 
 document.addEventListener("click", (event) => {
-  if (event.target.closest("[data-spooky-music]")) toggleSpookyMusic();
   if (event.target.closest("[data-screamer-test]") && isHalloweenAdmin()) {
     if (REDUCED_MOTION) toast("Скример отключён системной настройкой reduced motion");
     else maybeHalloweenScreamer(true, true);
@@ -312,7 +231,7 @@ async function loadMe() {
     return null;
   }
   $("#me-name").textContent = ME.user.username;
-  $("#me-avatar").textContent = ME.user.username[0].toUpperCase();
+  paintAvatar($("#me-avatar"), ME.user);
   $("#me-profile").href = `/u/${encodeURIComponent(ME.user.username)}`;
   $("#me-admin").hidden = !ME.permissions.includes("analytics.read");
   setBell(ME.unread_notifications || 0);
@@ -382,10 +301,29 @@ function newBadgesToast(codes) {
 }
 
 // ---------------------------------------------------------------- profile
+function avatarInner(u) {
+  return u?.avatar_url ? `<img src="${esc(u.avatar_url)}" alt="">` : initial(u?.username);
+}
+
 function avatarHTML(u, size = "") {
-  const inner = u.avatar_url ? `<img src="${esc(u.avatar_url)}" alt="">` : initial(u.username);
-  const frame = u.avatar_frame && u.avatar_frame !== "none" ? ` frame-${esc(u.avatar_frame)}` : "";
-  return `<span class="avatar ${size}${frame}">${inner}</span>`;
+  const frame = u?.avatar_frame && u.avatar_frame !== "none" ? ` frame-${esc(u.avatar_frame)}` : "";
+  return `<span class="avatar ${size}${frame}">${avatarInner(u)}</span>`;
+}
+
+// Обновляет уже отрисованный аватар (шапка/меню): картинка, буква и рамка.
+function paintAvatar(el, u, size = "") {
+  if (!el) return;
+  [...el.classList].forEach((cls) => {
+    if (cls.startsWith("frame-") || cls === "lg" || cls === "sm") el.classList.remove(cls);
+  });
+  if (size) el.classList.add(size);
+  if (u?.avatar_frame && u.avatar_frame !== "none" && /^[a-z0-9_-]+$/i.test(u.avatar_frame)) {
+    el.classList.add(`frame-${u.avatar_frame}`);
+  }
+  el.innerHTML = avatarInner(u);
+  const img = el.querySelector("img");
+  // Картинка могла не догрузиться (файл удалён, битый URL) — тогда буква, а не «сломанная» иконка.
+  if (img) img.onerror = () => { el.innerHTML = initial(u?.username); };
 }
 
 // классы/переменные темы профиля — только из белых списков (сервер валидирует тоже)
@@ -599,6 +537,8 @@ async function pageSettings() {
     try {
       const r = await api("PATCH", "/api/me/profile", collect());
       base.user = { ...base.user, ...r.user }; base.custom = { ...base.custom, ...r.settings };
+      if (ME) ME.user = { ...ME.user, ...r.user };
+      paintAvatar($("#me-avatar"), r.user);   // шапка обновляется сразу, без перезагрузки
       toast("Профиль сохранён ✨"); preview(); $("#st-dirty").hidden = true;
     } catch (_) {}
   };
@@ -981,7 +921,8 @@ async function kbDebugPanel(panel, login = "", selId = null) {
       <div class="kbd">
         <div class="kbd-left">
           <div class="kbd-prev">${kombuchaSVG(k)}</div>
-          <p class="muted" style="text-align:center">«${esc(k.name)}» · ${esc(k.stage.title)} · xp ${k.xp} · настроение: ${esc(KB_MOOD[k.mood]?.[1] || k.mood)} · мутаций: ${on.size}</p>
+          <p class="muted" style="text-align:center">«${esc(k.name)}» · ${esc(k.stage.title)} · xp ${k.xp} · настроение: ${esc(KB_MOOD[k.mood]?.[1] || k.mood)} · мутаций: ${on.size}<br>
+            ${k.corridor?.ok ? "✅ в идеальном коридоре (опыт ×1)" : `⚠️ вне коридора: ${esc(corridorProblems(k.corridor, k.stats).join(" / "))} (опыт ×0.5)`}</p>
           <div class="kbd-row"><b>Стадия:</b> ${D.stages.map((st) => `<button class="btn btn-sm ${st.size === k.stage.size ? "btn-accent" : ""}" data-stage="${st.size}" title="${esc(st.title)} (от ${st.xp} xp)">${st.size}</button>`).join("")}</div>
           ${["sweet", "tea", "clean", "happy"].map((st) => `<label class="kbd-row"><span>${{ sweet: "🍬 сахар", tea: "🫖 заварка", clean: "🧽 чистота", happy: "💛 счастье" }[st]}</span>
             <input type="range" min="0" max="100" value="${k.stats[st]}" data-stat="${st}"><b>${k.stats[st]}</b></label>`).join("")}
@@ -1084,7 +1025,12 @@ async function adminHalloween(panel) {
     <label class="check"><input type="checkbox" name="enabled" ${data.enabled ? "checked" : ""}> Разрешить событие</label>
     <label>Начало<input class="input" type="datetime-local" name="start_at" required value="${esc(localInput(data.start_at))}"></label>
     <label>Конец<input class="input" type="datetime-local" name="end_at" required value="${esc(localInput(data.end_at))}"></label>
-    <p class="event-admin-status">Сейчас: <b>${data.active ? "🟢 активно" : data.enabled ? "🕒 включено, но вне дат" : "⚫ выключено"}</b></p>
+    <p class="event-admin-status">Сейчас: <b>${data.active ? "🟢 активно" : data.enabled ? "🕒 включено, но вне дат" : "⚫ выключено"}</b>${data.results_closed ? " · итоги закрыты 🏁" : ""}</p>
+    <hr>
+    <h3>Итоги рейда</h3>
+    <p class="muted">Итоги попадают в архив и медали выдаются только когда админ закрывает их кнопкой. Даты и галочка «Разрешить событие» сами итоги не закрывают.</p>
+    <p class="muted">Прогресс текущего сезона: ${Number(data.raid_total_damage || 0).toLocaleString("ru-RU")} урона${data.results_closed ? " · итоги закрыты" : ""}</p>
+    <button class="btn btn-accent" type="button" id="raid-close-results" ${data.results_closed ? "disabled" : ""}>🏁 Закрыть итоги</button>
     <hr>
     <h3>Общий босс</h3>
     <label>Имя босса<input class="input" name="boss_name" maxlength="80" required value="${esc(raid.boss_name)}"></label>
@@ -1097,7 +1043,7 @@ async function adminHalloween(panel) {
     <button class="btn btn-ghost btn-sm" id="raid-add-gift" type="button">＋ Создать бейдж</button>
     <hr><button class="btn btn-accent">Сохранить настройки</button>
   </form>
-  <div class="panel"><h3>Эффекты события</h3><p class="muted">Скример срабатывает примерно на каждом третьем действии, не чаще одного раза за 15 секунд. Музыка включена по умолчанию. Чистота и счастье грибов во время ивента убывают вдвое быстрее; в рейде каждый выставленный гриб наносит 1 урон, получает +1 чистоты и счастья, но теряет по 1 сахару и заварки.</p>
+  <div class="panel"><h3>Эффекты события</h3><p class="muted">Скример срабатывает примерно на каждом третьем действии, не чаще одного раза за 15 секунд. Чистота и счастье грибов во время ивента убывают вдвое быстрее; в рейде каждый выставленный гриб наносит 1 урон, получает +1 чистоты и счастья, но теряет по 1 сахару и заварки.</p>
   <p class="muted">Также доступны хэллоуинские цитаты, постоянные мутации, «Сладость или гадость» и исчезновения грибов.</p></div>
   ${raidArchiveMarkup(archive)}`;
   const stagesBox = $("#raid-admin-stages", panel), giftsBox = $("#raid-admin-gifts", panel);
@@ -1108,6 +1054,16 @@ async function adminHalloween(panel) {
   $("#raid-add-gift", panel).onclick = () => {
     if (giftsBox.querySelectorAll("[data-gift-row]").length >= 100) return toast("Максимум 100 бейджей", true);
     giftsBox.insertAdjacentHTML("beforeend", giftRow());
+  };
+  const closeResults = $("#raid-close-results", panel);
+  if (closeResults) closeResults.onclick = async () => {
+    if (!confirm("Закрыть итоги рейда? Итоги попадут в архив, медали будут выданы, общий прогресс сбросится.")) return;
+    closeResults.disabled = true;
+    try {
+      await api("POST", "/admin/events/halloween/results/close");
+      toast("Итоги закрыты: архив и медали обновлены");
+      await adminHalloween(panel);
+    } catch (_) { closeResults.disabled = false; }
   };
   stagesBox.addEventListener("click", (event) => {
     if (!event.target.closest("[data-remove-stage]")) return;
@@ -1458,7 +1414,7 @@ function kbGameShell(title, help) {
         flies: `отогнано мушек: ${R.swatted}` }[game] || "";
       sh.area.innerHTML = `<div class="kb-med-result"><h2>${esc(R.grade)}</h2><p class="kb-med-acc">Точность: <b>${Math.round(R.accuracy * 100)}%</b></p>${kbBotNote(R)}
         <p class="muted">${esc(extra)}</p>
-        ${R.practice ? `<p class="kb-practice">🏋️ Тренировка — играй сколько хочешь. Следующая награда через ${fmtLeft(R.reward_in)}.</p>` : `<p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за игры сегодня уже собраны · </span>`}💛 +${R.happy}${R.boost ? ` · ${ST[R.stat]} +${R.boost}` : ""}${R.xp ? ` · +${R.xp} опыта` : ""}</p>`}
+        ${R.practice ? `<p class="kb-practice">🏋️ Тренировка — играй сколько хочешь. Следующая награда через ${fmtLeft(R.reward_in)}.</p>` : `<p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за игры сегодня уже собраны · </span>`}💛 +${R.happy}${R.boost ? ` · ${ST[R.stat]} +${R.boost}` : ""}${R.xp ? ` · ${xpLabel(R.xp, R.xp_mult)}` : ""}</p>`}
         ${R.mutation ? `<p class="kb-med-mut">🧬 ${esc(R.mutation.rarity_title)} мутация: ${esc(R.mutation.emoji)} «${esc(R.mutation.title)}» #${R.mutation.serial}</p>`
           : `<p class="muted">${{ limit: "На этой стадии у гриба уже 3 мутации.", luck: "Мутация не пришла — чем точнее, тем выше шанс.", low: "С 75% точности появляется шанс мутации." }[R.mut_why] || ""}</p>`}
         <button class="btn btn-accent" data-close>Готово</button></div>`;
@@ -1726,7 +1682,7 @@ async function kbMeditate(k, onDone) {
       <h2>${esc(R.grade)}</h2>
       <p class="kb-med-acc">Точность: <b>${Math.round(R.accuracy * 100)}%</b></p>${kbBotNote(R)}
       <p class="muted">✨ идеально ${R.perfect} · 👍 хорошо ${R.good} · мимо ${R.miss}${R.extra ? ` · лишних тапов ${R.extra}` : ""}</p>
-      ${R.practice ? `<p class="kb-practice">🏋️ Тренировка — играй сколько хочешь. Следующая награда через ${fmtLeft(R.reward_in)}.</p>` : `<p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за сегодня уже собраны · </span>`}💛 +${R.happy} счастья${R.xp ? ` · +${R.xp} опыта` : ""}</p>`}
+      ${R.practice ? `<p class="kb-practice">🏋️ Тренировка — играй сколько хочешь. Следующая награда через ${fmtLeft(R.reward_in)}.</p>` : `<p>${R.wood ? `+${R.wood} $₽ · ` : `<span class="muted">$₽ за сегодня уже собраны · </span>`}💛 +${R.happy} счастья${R.xp ? ` · ${xpLabel(R.xp, R.xp_mult)}` : ""}</p>`}
       ${R.mutation ? `<p class="kb-med-mut">🧬 ${esc(R.mutation.rarity_title)} мутация: ${esc(R.mutation.emoji)} «${esc(R.mutation.title)}» #${R.mutation.serial}</p>` : `<p class="muted">${{ limit: "На этой стадии у гриба уже 3 мутации — новые откроются на следующей стадии.", luck: "Мутация в этот раз не пришла — чем точнее, тем выше шанс (до 15%).", low: "С 75% точности появляется шанс мутации." }[R.mut_why] || ""}</p>`}
       <button class="btn btn-accent" data-close>Готово</button></div>`);
     el.querySelectorAll(".kb-med-help, .kb-med-combo, .kb-med-judge, .kb-med-bar").forEach((x) => x.remove());
@@ -1903,6 +1859,8 @@ function kombuchaSVG(k, { small = false } = {}) {
 let kbTiltScene = null;
 let kbTiltRoll = 0;
 let kbTiltListening = false;
+let kbTiltHandler = null;
+let kbTiltAutoTried = false;
 function clampN(value, min, max) { return Math.min(max, Math.max(min, value)); }
 
 function hasCoarsePointer() {
@@ -1912,6 +1870,51 @@ function hasCoarsePointer() {
 
 function canOfferDeviceTilt() {
   return !REDUCED_MOTION && hasCoarsePointer() && "DeviceOrientationEvent" in window;
+}
+
+function paintTiltButton(button) {
+  if (!button) return;
+  button.textContent = kbTiltListening ? "📱" : "↕️";
+  button.title = kbTiltListening ? "Наклон телефона включён" : "Наклони телефон или проведи пальцем по банке";
+  button.setAttribute("aria-label", kbTiltListening ? "Наклон телефона включён" : "Включить наклон телефона");
+  button.setAttribute("aria-pressed", kbTiltListening ? "true" : "false");
+}
+
+function startDeviceTilt() {
+  if (kbTiltListening) return;
+  if (!kbTiltHandler) {
+    kbTiltHandler = (event) => {
+      if (!Number.isFinite(event.gamma)) return;
+      kbTiltRoll = clampN(event.gamma, -18, 18);
+      applyKbTilt();
+    };
+  }
+  window.addEventListener("deviceorientation", kbTiltHandler, { passive: true });
+  kbTiltListening = true;
+}
+
+function stopDeviceTilt() {
+  if (kbTiltHandler) window.removeEventListener("deviceorientation", kbTiltHandler);
+  kbTiltListening = false;
+  kbTiltRoll = 0;
+}
+
+// На телефоне наклон включается сам. iOS без жеста пользователя разрешение не отдаёт,
+// поэтому там остаётся кнопка; если датчик молчит — тоже возвращаем кнопку.
+function autoEnableDeviceTilt(button) {
+  const DOE = window.DeviceOrientationEvent;
+  if (typeof DOE?.requestPermission === "function") return;
+  let gotEvent = false;
+  const probe = () => { gotEvent = true; };
+  window.addEventListener("deviceorientation", probe, { passive: true });
+  startDeviceTilt();
+  paintTiltButton(button);
+  setTimeout(() => {
+    window.removeEventListener("deviceorientation", probe);
+    if (gotEvent || !kbTiltListening) return;
+    stopDeviceTilt();
+    paintTiltButton(button);
+  }, 1200);
 }
 
 function applyKbTilt() {
@@ -1971,10 +1974,7 @@ function initTiltScene(scene) {
   }
   const button = $("[data-tilt]", scene);
   if (button) {
-    button.textContent = kbTiltListening ? "📱" : "↕️";
-    button.title = kbTiltListening ? "Наклон телефона включён" : "Наклони телефон или проведи пальцем по банке";
-    button.setAttribute("aria-label", kbTiltListening ? "Наклон телефона включён" : "Включить наклон телефона");
-    button.setAttribute("aria-pressed", kbTiltListening ? "true" : "false");
+    paintTiltButton(button);
     button.onclick = async () => {
       try {
         const DOE = window.DeviceOrientationEvent;
@@ -1982,20 +1982,8 @@ function initTiltScene(scene) {
           const permission = await DOE.requestPermission();
           if (permission !== "granted") throw new Error("Разрешение не выдано");
         }
-        if (!kbTiltListening) {
-          const orientationHandler = (event) => {
-            if (Number.isFinite(event.gamma)) {
-              kbTiltRoll = clampN(event.gamma, -18, 18);
-              applyKbTilt();
-            }
-          };
-          window.addEventListener("deviceorientation", orientationHandler, { passive: true });
-          kbTiltListening = true;
-        }
-        button.textContent = "📱";
-        button.title = "Наклон телефона включён";
-        button.setAttribute("aria-label", "Наклон телефона включён");
-        button.setAttribute("aria-pressed", "true");
+        startDeviceTilt();
+        paintTiltButton(button);
       } catch (_) {
         button.textContent = "👆";
         button.title = "Проведи пальцем по банке, чтобы наклонить жидкость";
@@ -2003,8 +1991,47 @@ function initTiltScene(scene) {
         button.setAttribute("aria-pressed", "false");
       }
     };
+    if (canOfferDeviceTilt() && !kbTiltListening && !kbTiltAutoTried) {
+      kbTiltAutoTried = true;
+      autoEnableDeviceTilt(button);
+    }
   }
   applyKbTilt();
+}
+
+// «Идеальный коридор»: пока все показатели в своих зонах — опыт ×1, иначе ×0.5.
+const CORRIDOR_LABELS = {
+  sweet: ["мало сахара", "пересластил"],
+  tea: ["мало заварки", "перезаварил"],
+  clean: ["банка грязная", "слишком стерильно"],
+  happy: ["грустит", "слишком счастлив"],
+};
+
+// Что именно вне коридора и в какую сторону — по ranges/off с сервера.
+function corridorProblems(corridor, stats) {
+  const out = [];
+  const ranges = corridor?.ranges || {};
+  (corridor?.off || []).forEach((key) => {
+    const [low, high] = ranges[key] || [0, 100];
+    const value = stats?.[key];
+    const labels = CORRIDOR_LABELS[key] || [key, key];
+    out.push(value == null ? key : value < low ? labels[0] : value > high ? labels[1] : key);
+  });
+  return out;
+}
+
+function corridorMarkup(corridor, stats) {
+  if (!corridor) return "";
+  if (corridor.ok) {
+    return `<div class="kb-corridor ok">✅ Идеальный коридор — опыт ×1</div>`;
+  }
+  return `<div class="kb-corridor off">⚠️ ${esc(corridorProblems(corridor, stats).join(" / "))} — опыт ×0.5</div>`;
+}
+
+// «+8 опыта» или «+4 опыта (×0.5 — вне коридора)» — один вид текста везде.
+function xpLabel(xp, mult) {
+  if (!xp) return "";
+  return mult != null && mult < 1 ? `+${xp} опыта (×${mult} — вне коридора)` : `+${xp} опыта`;
 }
 
 function fmtLeft(sec) {
@@ -2087,7 +2114,7 @@ async function pageKombucha() {
       <div class="kb-scene">
         <button class="kb-fs-btn" data-fs title="Смотреть гриб во весь экран">⛶</button>
         ${canOfferDeviceTilt() ? `<button class="kb-tilt-btn" data-tilt title="Наклони телефон или проведи пальцем по банке" aria-label="Включить наклон телефона" aria-pressed="false">📱</button>` : ""}
-        ${HALLOWEEN_ACTIVE ? `<button class="kb-music-btn" data-spooky-music aria-pressed="${spookyMusicEnabled ? "true" : "false"}">${spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку"}</button>
+        ${HALLOWEEN_ACTIVE ? `
           ${isHalloweenAdmin() ? `<button class="kb-scare-btn" data-screamer-test title="Проверить скример" aria-label="Проверить скример">👻</button>` : ""}
           <div class="kb-bat-swarm" aria-hidden="true"><span class="kb-bat bat-a">🦇</span><span class="kb-bat bat-b">🦇</span><span class="kb-bat bat-c">🦇</span></div>` : ""}
         <div class="kb-say" id="kb-say">${esc(halloweenGone ? "В банке только комбуча. Я ненадолго исчез." : k.alive ? k.phrase : "Гриб закис… 🪦")}</div>
@@ -2104,7 +2131,10 @@ async function pageKombucha() {
           <div class="kb-mut-slots muted">На каждой стадии — до ${k.mut_per_stage || 3} мутаций этой стадии · ${[1, 2, 3, 4, 5, 6].filter((st) => st <= k.stage.size || k.mut_slots?.[st]).map((st) => { const n = k.mut_slots?.[st] || 0, mx = k.mut_per_stage || 3; return `<span class="${n >= mx ? "full" : ""}">ст.${st}: ${n}/${mx}</span>`; }).join(" · ")}</div></details>` : ""}
         ${k.dies_in != null && k.alive ? `<div class="kb-danger">⚠️ Гриб на грани! Закиснет через ${fmtLeft(k.dies_in)}, если не поднять показатель с нуля.</div>` : ""}
         <div class="kb-stats">${STAT.map(([key, label]) => { const v = k.stats[key];
-          return `<div class="kb-stat"><span>${label}</span><div class="kb-bar ${v < 25 ? "low" : v > 90 && key === "sweet" ? "over" : ""}"><span style="width:${v}%"></span></div><b>${v}</b></div>`; }).join("")}</div>
+          const [lo, hi] = (k.corridor?.ranges?.[key] || [0, 100]).map(Number);
+          const off = (k.corridor?.off || []).includes(key);
+          return `<div class="kb-stat"><span>${label}</span><div class="kb-bar${off ? " off" : v < 25 ? " low" : ""}"><i class="kb-zone" style="left:${lo}%;width:${Math.max(0, hi - lo)}%"></i><span style="width:${v}%"></span></div><b>${v}</b></div>`; }).join("")}</div>
+        ${k.alive && !k.mold ? corridorMarkup(k.corridor, k.stats) : ""}   /* у закисшего/плесневелого опыт всё равно 0 */
         ${k.frozen ? `<div class="kb-note kb-frozen-note">🧊 Гриб заморожен${k.frozen_at ? ` с ${esc(fmtDate(k.frozen_at))}` : ""}: показатели не падают, банку не занимает, стоит на полке в твоём профиле.
             Продать или обменять можно только замороженный гриб.</div>
           <div class="kb-dead-actions">
@@ -2113,7 +2143,7 @@ async function pageKombucha() {
             <button class="btn btn-ghost" data-trade>🔄 Обменять / подарить</button></div>`
         : k.alive ? `${k.mold ? `<div class="kb-danger kb-mold">🦠 Плесень! Гриб не растёт и не мутирует, чистота и настроение тают быстрее.
             <button class="btn btn-accent btn-sm" data-act="cure"${k.cooldowns.cure ? " disabled" : ""}>🧪 Уксусная ванна${k.cooldowns.cure ? ` · через ${fmtLeft(k.cooldowns.cure)}` : ""}</button></div>` : ""}
-          <div class="kb-next muted">⏬ Показатели упадут через ${fmtLeft(k.next_drop_in)} (раз в 12 часов)${!k.mold && k.stats.clean < 35 ? " · ⚠️ банка грязная — может завестись плесень" : ""}</div>
+          ${!k.mold && k.stats.clean < 35 ? `<div class="kb-next muted">⚠️ банка грязная — может завестись плесень</div>` : ""}
           <div class="kb-actions">${BTN.map(([a, e, t]) => { const cd = k.cooldowns[a];
             return `<button class="btn kb-act" data-act="${a}"${cd ? " disabled" : ""}><span class="e">${e}</span><span>${t}</span>${cd ? `<small>через ${fmtLeft(cd)}</small>` : ""}</button>`; }).join("")}</div>
           <button class="btn kb-talk" data-act="talk"${k.cooldowns.talk ? " disabled" : ""}>💭 Поговорить с грибом${k.cooldowns.talk ? ` · через ${fmtLeft(k.cooldowns.talk)}` : " — о философии"}</button>
@@ -2277,6 +2307,7 @@ async function pageKombucha() {
     if (kk.mood === "sticky") say(action === "sugar" ? r.message : kk.phrase);
     else if (action === "pet" || action === "talk") say(r.message);   // гриб говорит сам, от первого лица
     else { say(kk.phrase); if (r.message && action !== "talk") toast(r.message); }
+    if (r.xp_gain > 0) toast(xpLabel(r.xp_gain, r.xp_mult));
     if (r.quote && kk.mood !== "sticky") { const b = $("#kb-say"); if (b) b.title = r.quote.lines.map((l) => l.who).join(", ") + (r.quote.book ? ` — ${r.quote.book}` : ""); }
     if (r.mutation) toast(`🧬 ${r.mutation.rarity_title} мутация: ${r.mutation.emoji} «${r.mutation.title}» #${r.mutation.serial}!${r.mutation.first_time ? " +15 $₽ за новую находку" : ""}`);
     if (r.halloween_mutation) toast(`👁️ Постоянная хэллоуинская мутация: ${r.halloween_mutation.emoji} «${r.halloween_mutation.title}»`);
@@ -2499,11 +2530,15 @@ async function pageEvents() {
   try { raidArchiveData = await api("GET", "/api/events/halloween/archive", undefined, { quiet: true }); } catch (_) {}
   const renderInactive = () => {
     const upcoming = event.enabled && new Date(event.start_at).getTime() > Date.now();
+    const summaryClosed = !!event.raid_summary?.closed;
     status.textContent = upcoming
       ? `Хэллоуин запланирован: ${fmtDate(event.start_at)} — ${fmtDate(event.end_at)}.`
-      : event.raid_summary ? "Последний хэллоуинский рейд завершился — вот его итоги." : "Сейчас нет активных событий.";
+      : event.raid_summary
+        ? (summaryClosed ? "Последний хэллоуинский рейд завершился — вот его итоги." : "Рейд завершился, итоги ещё не закрыты администратором.")
+        : "Сейчас нет активных событий.";
     const inactiveMessage = event.raid_summary
-      ? "Событие завершилось. Вклад каждого участника вошёл в общий итог."
+      ? (summaryClosed ? "Событие завершилось. Вклад каждого участника вошёл в общий итог."
+        : "Черновые итоги: администратор ещё не закрыл событие, медали и архив не выданы.")
       : upcoming ? "Рейд начнётся в указанное время. Следи за банками!"
         : "Загляни во время активного ивента — тогда здесь появится общий босс.";
     const gifts = (event.raid_gifts || []).filter((gift) => gift?.reward_type === "badge").slice().reverse().map((gift) =>
@@ -2511,12 +2546,13 @@ async function pageEvents() {
     const summary = event.raid_summary;
     const resultDates = summary?.start_at && summary?.end_at
       ? `<p class="muted">${fmtDate(summary.start_at)} — ${fmtDate(summary.end_at)}</p>` : "";
-    const results = summary ? `<section class="raid-results"><p class="eyebrow">ИТОГИ ПОСЛЕДНЕГО СОБЫТИЯ</p>
+    const results = summary ? `<section class="raid-results"><p class="eyebrow">${summary.closed ? "ИТОГИ ПОСЛЕДНЕГО СОБЫТИЯ" : "ПРЕДВАРИТЕЛЬНЫЕ ИТОГИ"}</p>
       <h2>${esc(summary.boss || "Общий хэллоуинский рейд")}</h2>${resultDates}
       <div class="raid-result-stats"><div><b>${Number(summary.total_damage || 0).toLocaleString("ru-RU")}</b><small>общий урон</small></div>
         <div><b>${summary.participants || 0}</b><small>участников</small></div>
         <div><b>${summary.completed_stages || 0}/${summary.stage_count || 0}</b><small>стадий пройдено</small></div></div>
       <p class="raid-result-outcome">${summary.boss_defeated ? "🎃 Общими усилиями босса одолели!" : "🌘 Босс продержался до конца события."}</p>
+      ${summary.closed ? "" : `<p class="muted">Это предварительные итоги: администратор закроет событие, и тогда медали попадут в архив.</p>`}
       ${raidLeaderboardMarkup(summary.leaderboard, summary.participants, null, 0, "🏆 Рейтинг участников")}</section>` : "";
     panel.innerHTML = `<h2>🌘 Сейчас тихо</h2><p class="muted">${inactiveMessage}</p>
       ${results}
@@ -2638,7 +2674,7 @@ async function pageEvents() {
         ${!ME ? `<a class="btn btn-ghost btn-sm" href="/login?next=/events">🔐 Войти и бить босса вместе</a>` : ""}
         ${stageGifts ? `<section class="raid-rewards"><h3>🏅 Бейджи этой стадии</h3><ul>${stageGifts}</ul></section>` : ""}
         ${ME && receivedGifts ? `<section class="raid-rewards raid-gift-box"><h3>🏅 Твои бейджи за все рейды</h3><ul>${receivedGifts}</ul></section>` : ""}
-          <div class="haunt-controls">${isHalloweenAdmin() ? `<button class="btn btn-ghost scare-test" data-screamer-test>👻 Проверить скример</button>` : ""}<button class="btn btn-ghost" data-spooky-music aria-pressed="${spookyMusicEnabled ? "true" : "false"}">${spookyMusicEnabled ? "🔇 Выключить музыку" : "🕯️ Включить музыку"}</button></div>
+          ${isHalloweenAdmin() ? `<div class="haunt-controls"><button class="btn btn-ghost scare-test" data-screamer-test>👻 Проверить скример</button></div>` : ""}
         <p class="muted">«Сладость или гадость» раз в день доступна на живых грибах друзей — открой профиль и постучи по банке.</p></div>
     </div>${raidArchiveMarkup(raidArchiveData)}`;
     $("#halloween-boss", panel).onclick = tap;

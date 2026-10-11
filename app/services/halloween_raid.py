@@ -22,6 +22,7 @@ def _meta_value(config: dict, last_summary: dict | None) -> dict:
     return {
         "event_key": event_key(config),
         "enabled": bool(config.get("enabled")),
+        "results_closed": bool(config.get("results_closed")),
         "start_at": config.get("start_at"),
         "end_at": config.get("end_at"),
         "raid": halloween.normalize_raid_config(config.get("raid")),
@@ -32,6 +33,7 @@ def _meta_value(config: dict, last_summary: dict | None) -> dict:
 def _config_from_meta(value: dict, fallback: dict) -> dict:
     return {
         "enabled": value.get("enabled", fallback.get("enabled", False)),
+        "results_closed": value.get("results_closed", fallback.get("results_closed", False)),
         "start_at": value.get("start_at", fallback.get("start_at")),
         "end_at": value.get("end_at", fallback.get("end_at")),
         "raid": value.get("raid", fallback.get("raid")),
@@ -89,6 +91,7 @@ async def make_summary(s, raid: HalloweenRaid | None, config: dict, key: str | N
     public_board = [{key: value for key, value in entry.items() if key not in {"user_id", "is_me"}}
                     for entry in standings["leaderboard"]]
     return {
+        "closed": bool(config.get("results_closed")),
         "event_key": key or event_key(config),
         "start_at": config.get("start_at"),
         "end_at": config.get("end_at"),
@@ -142,10 +145,7 @@ def _record_candidate(summary: dict, metric: str) -> tuple[int, dict] | None:
 async def archive_index(s, limit: int = 100) -> dict:
     """Recent completed raids plus all-time records computed from immutable snapshots."""
     limit = max(1, min(int(limit), 100))
-    current_config = await halloween.get_config(s)
-    now = datetime.now(timezone.utc)
-    if _event_has_ended(current_config, now):
-        await inactive_summary(s, current_config, now)
+    # Итоги попадают в архив только когда админ закрыл их кнопкой (close_season).
     meta = await s.get(Setting, RAID_META_KEY)
     legacy = (meta.value or {}).get("last_summary") if meta else None
     if isinstance(legacy, dict) and legacy.get("event_key"):
@@ -234,8 +234,8 @@ async def apply_config_change(s, old_config: dict, new_config: dict,
 
     if current_key != new_key:
         previous_config = old_config if old_key == current_key else _config_from_meta(saved, old_config)
-        has_contributions = raid is not None and await _has_contributions(s, raid)
-        if has_contributions or _event_has_ended(previous_config, at):
+        # Пустой сезон не архивируем: в историю попадают только рейды со вкладом.
+        if raid is not None and await _has_contributions(s, raid):
             summary = await make_summary(s, raid, previous_config, current_key)
             last_summary = await archive_summary(s, summary)
         await _reset_raid(s, raid, new_config, at, current_key)
@@ -274,7 +274,11 @@ def _event_has_ended(config: dict, at: datetime) -> bool:
 
 
 async def inactive_summary(s, config: dict, at: datetime | None = None) -> dict | None:
-    """Return the finished current season, or the most recently archived one."""
+    """Итоги: закрытые админом — из архива, незакрытые — предварительные (без наград).
+
+    Автоматически по дате ничего не архивируется: медали и запись в архив появляются
+    только после кнопки «Закрыть итоги» в админке (close_season).
+    """
     at = at or datetime.now(timezone.utc)
     if _event_has_ended(config, at):
         # Wait for in-flight taps (which lock this same setting row) before freezing final scores.
@@ -288,14 +292,37 @@ async def inactive_summary(s, config: dict, at: datetime | None = None) -> dict 
         return last_summary
 
     raid = await s.get(HalloweenRaid, 1)
-    ended = _event_has_ended(config, at)
-    if raid is None:
-        if not ended:
-            return last_summary
-        return await archive_summary(s, await make_summary(s, None, config, key))
-    has_contributions = await _has_contributions(s, raid)
-    if not has_contributions and not ended:
+    has_contributions = raid is not None and await _has_contributions(s, raid)
+    if not has_contributions:
+        # Нет вклада — показывать нечего, кроме ранее закрытых итогов.
         return last_summary
 
     summary = await make_summary(s, raid, config, key)
-    return await archive_summary(s, summary) if ended else summary
+    if config.get("results_closed"):
+        return await archive_summary(s, summary)
+    return summary
+
+
+async def close_season(s, config: dict, at: datetime | None = None) -> dict | None:
+    """Закрыть итоги сезона (кнопка в админке): снимок, награды, сброс общего прогресса.
+
+    После закрытия событие выключено (results_closed), а прогресс рейда обнулён.
+    Новый сезон начинается сменой даты начала в админке.
+    """
+    at = at or datetime.now(timezone.utc)
+    closed_config = {**config, "enabled": False, "results_closed": True}
+    key = event_key(config)
+    raid = await s.scalar(select(HalloweenRaid).where(HalloweenRaid.id == 1).with_for_update())
+    archived = None
+    if raid is not None and await _has_contributions(s, raid):
+        archived = await archive_summary(s, await make_summary(s, raid, closed_config, key))
+    if raid is not None:
+        await _reset_raid(s, raid, closed_config, at, key)
+    meta = await s.get(Setting, RAID_META_KEY, with_for_update=True)
+    saved = dict(meta.value or {}) if meta else {}
+    value = _meta_value(closed_config, archived if archived is not None else saved.get("last_summary"))
+    if meta is None:
+        s.add(Setting(key=RAID_META_KEY, value=value))
+    else:
+        meta.value = value
+    return archived

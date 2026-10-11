@@ -86,21 +86,21 @@ def test_unique_names(make_user):
     assert c1.patch(f"/api/kombucha/{k1['id']}", json={"name": "<script>"}).status_code == 400
 
 
-def test_decay_is_every_12_hours(app, make_user, no_mutations):
+def test_decay_is_every_8_hours(app, make_user, no_mutations):
     c, _ = make_user()
     k = _first(c)
-    _edit(app, k["id"], hours=11)
+    _edit(app, k["id"], hours=7)
     k2 = _first(c)
-    assert k2["stats"] == k["stats"]                           # 11 ч — ещё ничего не упало
+    assert k2["stats"] == k["stats"]                           # 7 ч — ещё ничего не упало
     assert 0 < k2["next_drop_in"] <= 3600
     _edit(app, k["id"], hours=1)
     k3 = _first(c)
-    assert k3["stats"]["sweet"] == k["stats"]["sweet"] - 20   # 12 ч — одна ступенька
+    assert k3["stats"]["sweet"] == k["stats"]["sweet"] - 20   # 8 ч — одна ступенька
     assert k3["stats"]["tea"] == k["stats"]["tea"] - 15
-    assert k3["next_drop_in"] > 11 * 3600
+    assert k3["next_drop_in"] > 7 * 3600
     # уход не сдвигает таймер ступенек
     c.post(f"/api/kombucha/{k['id']}/pet", json={})
-    assert _first(c)["next_drop_in"] > 11 * 3600
+    assert _first(c)["next_drop_in"] > 7 * 3600
 
 
 def test_oversugar_makes_it_sticky(app, make_user, no_mutations):
@@ -138,7 +138,7 @@ def test_death_restart_revive_discard(app, make_user, no_mutations):
 def test_danger_timer(app, make_user, no_mutations):
     c, _ = make_user()
     kid = _first(c)["id"]
-    _edit(app, kid, hours=12, sweet=10.0)
+    _edit(app, kid, hours=8, sweet=10.0)                       # ровно одна ступенька периода
     k = _first(c)
     assert k["alive"] and k["stats"]["sweet"] == 0 and 47 * 3600 < k["dies_in"] <= 48 * 3600   # закиснет через 48 ч
 
@@ -150,9 +150,56 @@ def test_daily_bonus_counts_care(make_user, no_mutations):
     c.post(f"/api/kombucha/{kid}/clean", json={})
     r = c.post(f"/api/kombucha/{kid}/daily", json={}).get_json()
     assert r["kombucha"]["xp"] == 2 + 12 + 5           # игр не было — только база 5 XP
+    assert r["xp_gain"] == 5 and r["xp_mult"] == 1.0 and r["kombucha"]["corridor"]["ok"]   # база 5 XP
     wtx = [t for t in c.get("/api/wallet").get_json()["items"] if t["reason"] == "daily_bonus"]
     assert wtx[0]["delta"] == 5 + 2                     # 5 + по 1 $₽ за каждый уход за сутки
     assert c.post(f"/api/kombucha/{kid}/daily", json={}).status_code == 429
+
+
+# ---------------------------------------------------------------- коридор показателей
+def _fake(**stats):
+    from types import SimpleNamespace
+    return SimpleNamespace(**{"sweet": 70.0, "tea": 70.0, "clean": 90.0, "happy": 70.0, **stats})
+
+
+def test_corridor_thresholds_and_xp_multiplier():
+    assert kb.in_corridor(_fake()) and kb.xp_mult(_fake()) == 1.0
+    # границы зоны включаются
+    assert kb.in_corridor(_fake(sweet=55.0, tea=65.0, clean=80.0, happy=70.0))
+    assert kb.in_corridor(_fake(sweet=70.0, tea=85.0, clean=100.0, happy=100.0))
+    for stats in ({"sweet": 54.9}, {"sweet": 70.1}, {"tea": 64.9}, {"tea": 85.1}, {"clean": 79.9}, {"happy": 69.9}):
+        k = _fake(**stats)
+        assert not kb.in_corridor(k) and kb.xp_mult(k) == 0.5, stats
+    assert kb.scaled_xp(0, _fake()) == 0 and kb.scaled_xp(0, _fake(sweet=0.0)) == 0
+    assert kb.scaled_xp(12, _fake()) == 12
+    assert kb.scaled_xp(12, _fake(clean=10.0)) == 6            # ×0.5, округление вниз
+    assert kb.scaled_xp(5, _fake(clean=10.0)) == 2
+    assert kb.scaled_xp(1, _fake(clean=10.0)) == 1             # минимум 1, если базовый опыт > 0
+
+
+def test_corridor_in_api_and_multiplier_after_action(app, make_user, no_mutations):
+    c, _ = make_user()
+    kid = _first(c)["id"]
+    k = _first(c)
+    assert k["corridor"] == {"ok": True, "off": [],
+                             "ranges": {"sweet": [55.0, 70.0], "tea": [65.0, 85.0],
+                                        "clean": [80.0, 100.0], "happy": [70.0, 100.0]}}
+    # показатели проверяются ПОСЛЕ действия: сахар 45 -> 70 — гриб вошёл в коридор, опыт полный
+    _edit(app, kid, sweet=45.0)
+    r = c.post(f"/api/kombucha/{kid}/sugar", json={}).get_json()
+    assert r["xp_mult"] == 1.0 and r["xp_gain"] == 8 and r["kombucha"]["corridor"]["ok"]
+    # вне коридора ×0.5; урезание за запущенность остаётся и применяется раньше: (2 // 2) * 0.5 -> минимум 1
+    _edit(app, kid, sweet=45.0, clean=10.0)
+    r = c.post(f"/api/kombucha/{kid}/pet", json={}).get_json()
+    assert r["xp_mult"] == 0.5 and r["xp_gain"] == 1
+    assert set(r["kombucha"]["corridor"]["off"]) == {"sweet", "clean"}
+    # плесень важнее коридора: опыта нет
+    _edit(app, kid, mold=True, clean=90.0, sweet=70.0)
+    assert c.post(f"/api/kombucha/{kid}/pet", json={}).get_json()["xp_gain"] == 0
+    # дневной бонус тоже множится
+    _edit(app, kid, mold=False, sweet=10.0)
+    r = c.post(f"/api/kombucha/{kid}/daily", json={}).get_json()
+    assert r["xp_mult"] == 0.5 and r["xp_gain"] == 2           # база 5 XP вне коридора
 
 
 # ---------------------------------------------------------------- мутации

@@ -63,6 +63,24 @@ _n = count(1)
 
 
 @pytest.fixture()
+def edit_kombucha(app):
+    """edit_kombucha(kid, sweet=..., clean=...) — правка полей гриба прямо в БД."""
+    import asyncio
+    from app.db import session_scope
+    from app.models import Kombucha
+
+    def _edit(kid, **fields):
+        async def fn():
+            async with session_scope() as s:
+                k = await s.get(Kombucha, kid)
+                for key, value in fields.items():
+                    setattr(k, key, value)
+        with app.app_context():
+            asyncio.run(fn())
+    return _edit
+
+
+@pytest.fixture()
 def make_user(app):
     """make_user(role='user'|'admin') -> (client, user_json)"""
     def _make(role: str = "user", username: str | None = None):
